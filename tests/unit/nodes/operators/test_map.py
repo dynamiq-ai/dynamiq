@@ -135,22 +135,22 @@ def test_the_items_of_a_parallel_map_ask_one_at_a_time_and_each_reads_its_own_re
     assert all(f"answer to item {i}?" in output for i, output in enumerate(outputs))
 
 
-def test_a_map_runs_its_items_one_at_a_time_when_a_node_timeout_covers_a_request():
+def test_an_item_whose_timeout_passes_while_it_waits_for_its_turn_never_asks():
     queue = Queue()
-    client = ReplyByAskingId({"ask": queue}, hold=0.5)
-    config = RunnableConfig(callbacks=[client], nodes_override={"ask": input_override(queue, timeout=1)})
+    client = ReplyByAskingId({"ask": queue}, hold=1.5)
+    config = RunnableConfig(callbacks=[client], nodes_override={"ask": input_override(queue, timeout=0.9)})
     ask = HumanFeedbackTool(
-        id="ask", input_method=FeedbackMethod.STREAM, error_handling=ErrorHandling(timeout_seconds=1.2)
+        id="ask", input_method=FeedbackMethod.STREAM, error_handling=ErrorHandling(timeout_seconds=1)
     )
 
-    result = Workflow(flow=Flow(nodes=[Map(id="map", node=ask, max_workers=3)])).run(
+    Workflow(flow=Flow(nodes=[Map(id="map", node=ask, max_workers=3)])).run(
         input_data={"input": [{"input": f"item {i}?"} for i in range(3)]}, config=config
     )
+    time.sleep(1)
 
-    # Each reply takes 0.5 s. In parallel, the third item would wait 1 s for its turn under its own 1.2 s
-    # timeout and fail although every reply came in time; one at a time, each timeout starts with its item.
-    outputs = [str(output) for output in result.output["map"]["output"]["output"]]
-    assert all(f"answer to item {i}?" in output for i, output in enumerate(outputs))
+    # The first request holds the turn past every item's 1 s timeout. The other items time out waiting for it,
+    # and their threads, which outlive the timeout, give up instead of asking for items already failed.
+    assert client.asked_ids == ["ask"]
 
 
 def test_the_items_of_a_map_that_never_ask_run_in_parallel():
@@ -166,7 +166,11 @@ def test_the_items_of_a_map_that_never_ask_run_in_parallel():
             all_started.wait()
             return {"done": input_data["item"]}
 
-    worker = Worker(tool=HumanFeedbackTool(id="ask", input_method=FeedbackMethod.STREAM))
+    # An Agent has a 3600 s timeout by default, so the worker has one too.
+    worker = Worker(
+        tool=HumanFeedbackTool(id="ask", input_method=FeedbackMethod.STREAM),
+        error_handling=ErrorHandling(timeout_seconds=3600),
+    )
     result = Workflow(flow=Flow(nodes=[Map(id="map", node=worker, max_workers=3)])).run(
         input_data={"input": [{"item": i} for i in range(3)]}
     )

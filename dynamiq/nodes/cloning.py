@@ -246,17 +246,6 @@ def reply_waiting_nodes(obj: Any) -> list["Node"]:
     ]
 
 
-def has_timed_reply_wait(obj: Any) -> bool:
-    """Whether a node in ``obj`` with an execution timeout is, or holds, a node that waits for a human reply."""
-    # Imported here: the node module imports this one.
-    from dynamiq.nodes.node import Node
-
-    return any(
-        isinstance(model, Node) and model.error_handling.timeout_seconds is not None and reply_waiting_nodes(model)
-        for model in _models(obj)
-    )
-
-
 def carry_mock_exclusions(config: "RunnableConfig", id_map: dict[str, set[str]]) -> "RunnableConfig":
     """Extend ``config.mock.exclude_ids`` to cover the clones of every excluded node.
 

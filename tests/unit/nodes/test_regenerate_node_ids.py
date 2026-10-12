@@ -1,6 +1,6 @@
 from dynamiq.flows import Flow
-from dynamiq.nodes import ErrorHandling, InputTransformer, OutputTransformer
-from dynamiq.nodes.cloning import has_timed_reply_wait, regenerate_node_ids, reply_waiting_nodes
+from dynamiq.nodes import InputTransformer, OutputTransformer
+from dynamiq.nodes.cloning import regenerate_node_ids, reply_waiting_nodes
 from dynamiq.nodes.node import NodeDependency, NodeOutputReference
 from dynamiq.nodes.operators import Choice, ChoiceOption, DecisionTable, Expression, Pass, Rules, SubWorkflow
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackAction, HumanFeedbackTool
@@ -461,11 +461,3 @@ def test_the_nodes_waiting_for_a_reply_are_the_feedback_tools_and_the_approval_g
     node = SubWorkflow(id="sub", name="sub", flow=Flow(id="flow", nodes=[ask, notify, gate, plain]))
 
     assert {waiting.id for waiting in reply_waiting_nodes(node)} == {"ask", "gate"}
-
-
-def test_a_reply_wait_is_timed_when_a_node_with_a_timeout_holds_it():
-    timeout = ErrorHandling(timeout_seconds=60)
-
-    assert has_timed_reply_wait(SubWorkflow(flow=Flow(nodes=[HumanFeedbackTool()]), error_handling=timeout))
-    assert not has_timed_reply_wait(SubWorkflow(flow=Flow(nodes=[HumanFeedbackTool()])))
-    assert not has_timed_reply_wait(SubWorkflow(flow=Flow(nodes=[HumanFeedbackTool(), Pass(error_handling=timeout)])))

@@ -136,6 +136,27 @@ def is_retryable_error(exc: BaseException) -> bool:
     )
 
 
+# The time.monotonic() by which the innermost node with a timeout that is running this code must finish.
+_execution_deadline: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "dynamiq_execution_deadline", default=None
+)
+
+
+@contextmanager
+def _deadline_after(timeout: float | None) -> Iterator[None]:
+    """Give code started in the block a deadline ``timeout`` seconds away, unless an earlier one applies."""
+    if timeout is None:
+        yield
+        return
+    deadline = time.monotonic() + timeout
+    current = _execution_deadline.get()
+    token = _execution_deadline.set(deadline if current is None else min(current, deadline))
+    try:
+        yield
+    finally:
+        _execution_deadline.reset(token)
+
+
 class _SharedInputQueue:
     """The state of an input queue while ``maps`` running Maps share it; ``missed`` is set once a request times out."""
 
@@ -157,7 +178,8 @@ def share_input_queues(nodes: Iterable["Node"], config: RunnableConfig) -> Itera
     A Map's copies of a node keep its id, and a reply names only the node it answers, so it cannot tell their
     requests apart. A request on one of these queues waits until the one before it has its reply, and once a
     request times out, later ones raise InputStreamingTimeoutError without asking: the reply to the missed request
-    may still come, and would be taken for theirs.
+    may still come, and would be taken for theirs. The wait counts toward the timeout of the node making the
+    request, which gives up without asking once that timeout has passed.
     """
     keys = set()
     for node in nodes:
@@ -1771,7 +1793,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             TimeoutError: If execution exceeds the timeout.
             Exception: If execution fails.
         """
-        future = executor.submit(self.execute, input_data, config=config, **kwargs)
+        with _deadline_after(timeout):
+            future = executor.submit(self.execute, input_data, config=config, **kwargs)
 
         try:
             return future.result(timeout=timeout)
@@ -1826,10 +1849,11 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
             try:
                 if timeout is not None:
-                    output = await asyncio.wait_for(
-                        self.execute_async(input_data=input_data, config=config, **merged_kwargs),
-                        timeout=timeout,
-                    )
+                    with _deadline_after(timeout):
+                        output = await asyncio.wait_for(
+                            self.execute_async(input_data=input_data, config=config, **merged_kwargs),
+                            timeout=timeout,
+                        )
                 else:
                     output = await self.execute_async(input_data=input_data, config=config, **merged_kwargs)
 
@@ -1873,10 +1897,18 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         if shared is None:
             yield
             return
+        deadline = _execution_deadline.get()
+
+        def check_still_wanted() -> None:
+            check_cancellation(config)
+            # The node has timed out, so its thread only lingers: a request sent now would be for nobody.
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutError("Timed out waiting for a turn on the input queue.")
+
         while not shared.lock.acquire(timeout=0.5):
-            check_cancellation(config)
+            check_still_wanted()
         try:
-            check_cancellation(config)
+            check_still_wanted()
             if shared.missed:
                 logger.warning(
                     self._node_run_log("not asking: the reply to an earlier request on its input queue never came.")
