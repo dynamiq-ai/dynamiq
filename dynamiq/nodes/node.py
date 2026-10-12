@@ -993,7 +993,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             logger.info(self._node_run_log("using stored approval response from checkpoint."))
             approval_result = self._pending_approval_response
         else:
-            message = Template(approval_config.msg_template).render(self.to_dict(), input_data=input_data)
+            # The tracing form masks connection credentials, which a user-written template could otherwise render.
+            message = Template(approval_config.msg_template).render(
+                self.to_dict(for_tracing=True), input_data=input_data
+            )
 
             check_cancellation(config)
             match approval_config.feedback_method:

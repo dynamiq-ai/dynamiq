@@ -41,14 +41,17 @@ class ConnectionManager:
         connection_clients: A dictionary storing initialized connection clients.
     """
 
-    def __init__(self, serializer: Any | None = None):
+    def __init__(self, serializer: Any | None = None, max_connection_clients: int = 512):
         """
         Initializes the ConnectionManager.
 
         Args:
             serializer: An optional serializer object. If not provided, JsonPickleSerializer is used.
+            max_connection_clients: How many clients to keep cached. Beyond it the least recently used client is
+                dropped, so credentials that rotate under the same connection cannot grow the cache without bound.
         """
         self.serializer = serializer or JsonPickleSerializer()
+        self.max_connection_clients = max_connection_clients
         self.connection_clients: dict[str, Any] = {}
         self._connection_locks_guard = threading.Lock()
         self._connection_locks: dict[str, threading.Lock] = {}
@@ -81,6 +84,27 @@ class ConnectionManager:
             if conn_id not in self._connection_locks:
                 self._connection_locks[conn_id] = threading.Lock()
             return self._connection_locks[conn_id]
+
+    def _get_cached_client(self, conn_id: str) -> Any | None:
+        """Return the cached client and mark it as the most recently used."""
+        with self._connection_locks_guard:
+            conn_client = self.connection_clients.pop(conn_id, None)
+            if conn_client is not None:
+                self.connection_clients[conn_id] = conn_client
+            return conn_client
+
+    def _cache_client(self, conn_id: str, conn_client: Any) -> None:
+        """Cache the client, dropping the least recently used one beyond max_connection_clients.
+
+        A dropped client is not closed, because a running node may still hold it.
+        """
+        with self._connection_locks_guard:
+            self.connection_clients.pop(conn_id, None)
+            self.connection_clients[conn_id] = conn_client
+            if len(self.connection_clients) > self.max_connection_clients:
+                evicted_conn_id = next(iter(self.connection_clients))
+                del self.connection_clients[evicted_conn_id]
+                self._connection_locks.pop(evicted_conn_id, None)
 
     def _is_client_alive(self, conn_client: Any) -> bool:
         """Check if an existing connection client is still usable.
@@ -146,7 +170,7 @@ class ConnectionManager:
         )
         conn_id = self.get_connection_id(connection, init_type)
 
-        if conn_client := self.connection_clients.get(conn_id):
+        if conn_client := self._get_cached_client(conn_id):
             if self._is_client_alive(conn_client):
                 return conn_client
 
@@ -154,7 +178,7 @@ class ConnectionManager:
         with conn_lock:
             logger.info(f"Acquired lock for '{conn_id}' connection for initialization")
             # Double-check after acquiring lock (another thread may have created it)
-            if conn_client := self.connection_clients.get(conn_id):
+            if conn_client := self._get_cached_client(conn_id):
                 if self._is_client_alive(conn_client):
                     return conn_client
 
@@ -169,7 +193,7 @@ class ConnectionManager:
                 )
 
             conn_client = conn_method()
-            self.connection_clients[conn_id] = conn_client
+            self._cache_client(conn_id, conn_client)
 
             return conn_client
 
@@ -190,7 +214,7 @@ class ConnectionManager:
         loop = asyncio.get_running_loop()
         conn_id = self._get_async_connection_id(connection, id(loop))
 
-        cached = self.connection_clients.get(conn_id)
+        cached = self._get_cached_client(conn_id)
         if cached is not None and self._is_async_client_for_loop(cached, loop):
             return cached
 
@@ -202,7 +226,7 @@ class ConnectionManager:
 
         conn_client = await conn_method()
         conn_client._dynamiq_loop_ref = weakref.ref(loop)
-        self.connection_clients[conn_id] = conn_client
+        self._cache_client(conn_id, conn_client)
         return conn_client
 
     def get_connection_id(
@@ -236,16 +260,21 @@ class ConnectionManager:
         closed; callers using async clients should use ``await manager.aclose()`` instead.
         """
         logger.debug("Close connection clients")
-        for conn_client in self.connection_clients.values():
+        # Closed from a snapshot: a cache hit while closing reorders the cache, which breaks iterating it.
+        with self._connection_locks_guard:
+            conn_clients, self.connection_clients = list(self.connection_clients.values()), {}
+        for conn_client in conn_clients:
             close_method = getattr(conn_client, "close", None)
             if callable(close_method) and not asyncio.iscoroutinefunction(close_method):
                 close_method()
-        self.connection_clients = {}
 
     async def aclose(self):
         """Close every cached connection client, awaiting async clients."""
         logger.debug("Async-close connection clients")
-        for conn_client in self.connection_clients.values():
+        # Closed from a snapshot: a cache hit while closing reorders the cache, which breaks iterating it.
+        with self._connection_locks_guard:
+            conn_clients, self.connection_clients = list(self.connection_clients.values()), {}
+        for conn_client in conn_clients:
             aclose = getattr(conn_client, "aclose", None)
             if callable(aclose):
                 try:
@@ -256,7 +285,6 @@ class ConnectionManager:
             close_method = getattr(conn_client, "close", None)
             if callable(close_method) and not asyncio.iscoroutinefunction(close_method):
                 close_method()
-        self.connection_clients = {}
 
     @staticmethod
     def hash(data: str) -> str:

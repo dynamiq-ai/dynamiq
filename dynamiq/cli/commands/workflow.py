@@ -24,6 +24,14 @@ def read_json_arg(value: str):
         raise click.ClickException(f"invalid JSON in {value[:60]}: {e}")
 
 
+def fetch_data(api: ApiClient, path: str) -> dict:
+    """GET a single resource and return its `data`, raising the HTTP error as a ClickException."""
+    response = api.get(path)
+    if not ok(response):
+        raise click.ClickException(f"HTTP {response.status_code}: {response.text.strip()[:2000]}")
+    return response.json().get("data") or {}
+
+
 def echo_response(response, success_message: str | None = None) -> None:
     """Print the JSON body; non-200 exits with the body as the error."""
     body = response.text.strip()
