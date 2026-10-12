@@ -1116,7 +1116,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 action_input = action_input.replace("\\'", "'")
                 action_input = json.loads(action_input, strict=False)
         except json.JSONDecodeError as e:
-            raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
+            # Names the fix: the bare decoder error alone gets the same plain-text input sent back.
+            raise ActionParsingException(
+                f"Error parsing action_input string. {e}. For a tool action, 'action_input' must be a JSON "
+                "object encoded as a string that maps the tool's argument names to values, for example "
+                '"{\\"query\\": \\"latest sales\\"}" - never plain text or a bare value.',
+                recoverable=True,
+            )
 
         self.log_reasoning(thought, action, action_input, loop_num)
         return thought, action, action_input
