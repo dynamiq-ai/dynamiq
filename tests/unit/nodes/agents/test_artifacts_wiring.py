@@ -156,8 +156,9 @@ def test_the_prompt_block_says_when_to_use_an_artifact(llm, store):
     assert "## Artifacts" in ops
     assert "`artifact` tool" in ops
     assert "Use output files instead" in ops
-    assert "'get' the artifact (it is saved into your workspace)" in ops
-    assert "then 'update' with that file and the artifact's 'artifact_id'" in ops
+    assert "'get' an artifact (it is saved into your workspace) only when you do not have its file" in ops
+    assert "earlier in this conversation is still in your workspace" in ops, "no reload in a later turn"
+    assert "'update' with that file and the artifact's 'artifact_id'" in ops
     assert "Never 'create' a changed copy" in ops
     assert "read it with 'get' before answering" in ops, "a reader agent must know published documents live here"
     assert "You cannot make a public link" in ops, "the agent points the user at sharing instead of improvising"

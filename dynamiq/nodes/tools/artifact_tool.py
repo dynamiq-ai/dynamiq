@@ -1,3 +1,4 @@
+import json
 import posixpath
 from enum import Enum
 from typing import Any, ClassVar, Literal
@@ -32,6 +33,8 @@ _MAX_BYTES_BY_KIND = {ArtifactKind.HTML: 16 * 1024 * 1024, ArtifactKind.BUNDLE: 
 MAX_INLINE_CHARS = 20_000
 # Where 'get' saves copies: artifacts/<id>/v<n>/<file name>.
 WORKSPACE_DIR = "artifacts"
+# What the tool loaded and published in this workspace, so the next run continues from it.
+STATE_PATH = posixpath.join(WORKSPACE_DIR, ".state.json")
 
 DESCRIPTION = """Publish deliverables the user opens, reviews and shares, and read documents already \
 published, by you or by others. Each artifact gets a link and a version history, and outlives this \
@@ -44,13 +47,14 @@ Actions:
 'description' and 'kind'. A site of several files is a zip with kind 'bundle'; 'entry_path' names its \
 page (default 'index.html').
 - update: publish a file from your workspace as an artifact's next version. Requires 'path' and \
-'artifact_id'; load the artifact with 'get' (or create it) in this conversation first. Optional \
-'description' (what changed).
+'artifact_id'. Works on an artifact you created, updated or loaded in this conversation, in an \
+earlier turn too; load any other with 'get' first. Optional 'description' (what changed).
 - get: load an artifact into your workspace. Requires 'artifact_id'; optional 'version' (default \
 latest). Says where the file was saved and, for text, shows its content.
 - list: the most recently updated artifacts. Optional 'kind'.
 
-To change an artifact: 'get' it, edit the saved file, then 'update' with that file and the 'artifact_id'.
+To change an artifact: edit its file, then 'update' with that file and the 'artifact_id'. 'get' it \
+first only when you do not have its file, or when 'update' says it changed.
 
 Usage examples:
 - {"action": "create", "path": "q3-report.html", "name": "Q3 pipeline report"}
@@ -117,7 +121,8 @@ class ArtifactTool(Node):
     an update can only build on the latest version the agent loaded or created.
 
     Output carries a small reference under ``artifact`` and never bytes, so tool results, streamed
-    events and checkpoints stay small. An agent rebuilds this tool per run.
+    events and checkpoints stay small. An agent rebuilds this tool per run; what it loaded and
+    published is kept in the workspace, so a later run on the same workspace continues from it.
 
     There is no share action: a link anyone can open is a person's decision, made in the platform or
     with ``ArtifactBackend.share``, never one a prompt can steer the agent into.
@@ -146,8 +151,10 @@ class ArtifactTool(Node):
     # Artifact each loaded or published file belongs to, keyed by normalized path. Only to stop a file
     # being published again as a duplicate artifact; which artifact to change is always explicit.
     _files: dict[str, str] = PrivateAttr(default_factory=dict)
-    # Latest version id loaded or published per artifact in this run: the base of a new version.
+    # Latest version id loaded or published per artifact: the base of a new version.
     _seen_versions: dict[str, str] = PrivateAttr(default_factory=dict)
+    # Both maps start from the workspace's state file, read once on first use.
+    _state_loaded: bool = PrivateAttr(default=False)
 
     @property
     def to_dict_exclude_params(self):
@@ -169,6 +176,7 @@ class ArtifactTool(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         action = input_data.action
+        self._load_state()
         try:
             if action == ArtifactAction.CREATE:
                 return self._create(input_data)
@@ -283,6 +291,7 @@ class ArtifactTool(Node):
         # Only the latest version is a base to build on; an old one is loaded to read or restore.
         if is_latest and artifact.latest_version:
             self._seen_versions[artifact.id] = artifact.latest_version.id
+        self._save_state()
 
         latest = "" if is_latest else f", latest is v{artifact.version}"
         text = f"Saved v{version} of '{artifact.name}' ({artifact.kind.value}{latest}, id {artifact.id}) to {path}."
@@ -317,10 +326,42 @@ class ArtifactTool(Node):
         self._files[key] = artifact.id
         if artifact.latest_version:
             self._seen_versions[artifact.id] = artifact.latest_version.id
+        self._save_state()
         ref = artifact.to_ref()
         link = f": {ref['url']}" if ref["url"] else ""
         text = f"Artifact '{artifact.name}' v{artifact.version} {verb} (id {artifact.id}) from {key}{link}"
         return {"content": text, "artifact": ref}
+
+    def _load_state(self) -> None:
+        """Continue from what earlier runs on this workspace loaded and published; this run's records win."""
+        if self._state_loaded or self.workspace is None:
+            return
+        self._state_loaded = True
+        files, seen_versions = self._read_state()
+        self._files = files | self._files
+        self._seen_versions = seen_versions | self._seen_versions
+
+    def _save_state(self) -> None:
+        """Merge this run's records into the state file. A failed save only costs a later run a 'get'."""
+        try:
+            files, seen_versions = self._read_state()
+            state = {"files": files | self._files, "seen_versions": seen_versions | self._seen_versions}
+            self.workspace.store(
+                STATE_PATH, json.dumps(state).encode("utf-8"), content_type="application/json", overwrite=True
+            )
+        except Exception as e:
+            logger.warning(f"Tool {self.name} - {self.id}: could not save artifact state. Error: {e}")
+
+    def _read_state(self) -> tuple[dict[str, str], dict[str, str]]:
+        """The state file's maps, or empty ones when it is missing or unreadable."""
+        try:
+            if not self.workspace.exists(STATE_PATH):
+                return {}, {}
+            state = json.loads(self.workspace.retrieve(STATE_PATH))
+            return _str_map(state.get("files")), _str_map(state.get("seen_versions"))
+        except Exception as e:
+            logger.warning(f"Tool {self.name} - {self.id}: ignoring unreadable artifact state. Error: {e}")
+            return {}, {}
 
     def _require_workspace(self) -> FileStore | Sandbox:
         if self.workspace is None:
@@ -351,6 +392,13 @@ class ArtifactTool(Node):
         except Exception as e:
             raise ToolExecutionException(f"Could not read '{path}': {e}", recoverable=True) from e
         return data if isinstance(data, bytes) else str(data).encode("utf-8")
+
+
+def _str_map(value: Any) -> dict[str, str]:
+    """The string-to-string entries of a decoded JSON value; anything else is dropped."""
+    if not isinstance(value, dict):
+        return {}
+    return {k: v for k, v in value.items() if isinstance(k, str) and isinstance(v, str)}
 
 
 def _kind_fits(artifact_kind: ArtifactKind, file_kind: ArtifactKind) -> bool:
