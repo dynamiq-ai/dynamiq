@@ -12,6 +12,7 @@ from dynamiq.clients import BaseTracingClient
 from dynamiq.utils import is_called_from_async_context
 from dynamiq.utils.env import get_env_var
 from dynamiq.utils.logger import logger
+from dynamiq.utils.user_agent import USER_AGENT
 from dynamiq.utils.utils import orjson_encode
 
 if TYPE_CHECKING:
@@ -59,6 +60,7 @@ class DynamiqTracingClient(BaseTracingClient):
                 headers={
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {self.access_key}",
+                    "User-Agent": USER_AGENT,
                 },
                 timeout=self.timeout,
             )
@@ -100,6 +102,7 @@ class DynamiqTracingClient(BaseTracingClient):
                 headers={
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {self.access_key}",
+                    "User-Agent": USER_AGENT,
                 },
             )
         except Exception as e:

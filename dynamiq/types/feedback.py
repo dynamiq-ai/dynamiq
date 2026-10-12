@@ -26,6 +26,13 @@ class ApprovalOutputEventData(BaseModel):
             "This field is used to secure data that shouldn't be modified."
         ),
     )
+    request_id: str | None = Field(
+        default=None,
+        description=(
+            "Set for the approvals of an agent hook: the answer must echo it in `request_id`, and an answer with "
+            "another id is ignored, so a late answer never approves the next call."
+        ),
+    )
 
 
 class ApprovalStreamingOutputEventMessage(StreamingEventMessage):
@@ -36,6 +43,7 @@ class ApprovalInputData(BaseModel):
     feedback: str = None
     data: dict[str, Any] = {}
     is_approved: bool | None = None
+    request_id: str | None = None
 
     @model_validator(mode="after")
     def validate_feedback(self):

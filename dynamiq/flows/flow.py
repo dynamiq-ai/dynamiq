@@ -95,7 +95,6 @@ class Flow(CheckpointFlowMixin, BaseFlow):
     connection_manager: ConnectionManager = Field(default_factory=ConnectionManager)
 
     _original_input: Any = PrivateAttr(default=None)
-    # Nodes held back because a node they depend on waits: neither run nor skipped until the run resumes.
     _deferred_node_ids: set[str] = PrivateAttr(default_factory=set)
 
     def __init__(self, **kwargs):
@@ -349,7 +348,6 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         """Restore flow execution state from a persisted checkpoint."""
         self._results = {}
         self._deferred_node_ids = set()
-        # A node this checkpoint has no state for starts fresh, not with what another run restored into it.
         self._reset_resumed_flags()
 
         for node_id, node_state in checkpoint.node_states.items():
@@ -715,8 +713,6 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 )
 
             if waiting_node_ids:
-                # One strict save holds everything the resumed run needs: the finished nodes' results, so
-                # nothing runs twice, and the waiting nodes' state.
                 self._update_checkpoint(
                     self._completed_results(self._results), CheckpointStatus.PENDING_INPUT, strict=True
                 )
@@ -958,8 +954,6 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 )
 
             if waiting_node_ids:
-                # One strict save holds everything the resumed run needs: the finished nodes' results, so
-                # nothing runs twice, and the waiting nodes' state.
                 await self._update_checkpoint_async(
                     self._completed_results(self._results), CheckpointStatus.PENDING_INPUT, strict=True
                 )

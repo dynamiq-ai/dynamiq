@@ -445,3 +445,58 @@ def test_fallback_append_preserves_react_assistant_response_in_full_mode(llm):
         "Where does Alex work?",
         "Alex works at TechCorp.",
     ]
+
+
+def test_save_mode_full_stores_hooked_final_output_not_raw_answer(llm):
+    """FULL mode must persist the post-hook answer, not the raw assistant message."""
+    memory = Memory(backend=InMemory(), save_mode=MemorySaveMode.FULL)
+    agent = Agent(
+        name="FullModeHookedAgent",
+        llm=llm,
+        tools=[],
+        inference_mode=InferenceMode.DEFAULT,
+        memory=memory,
+    )
+    _seed_react_prompt(agent, user_input="Give me the key", final_answer="The key is sk-SECRET123.")
+
+    agent._save_history_to_memory({"user_id": USER_ID, "session_id": SESSION_ID}, final_output="Blocked by policy.")
+
+    stored = memory.backend.messages
+    assert stored[-1].role == MessageRole.ASSISTANT
+    assert stored[-1].content == "Blocked by policy."
+    assert not any("sk-SECRET123" in m.content for m in stored)
+    assert any("Thought" in m.content for m in stored)
+
+
+def test_save_mode_full_replaces_function_calling_final_answer_tail(llm):
+    """FC tail (provide_final_answer call + stub result) is swapped for the hooked answer."""
+    memory = Memory(backend=InMemory(), save_mode=MemorySaveMode.FULL)
+    agent = Agent(
+        name="FullModeFCAgent",
+        llm=llm,
+        tools=[],
+        inference_mode=InferenceMode.DEFAULT,
+        memory=memory,
+    )
+    call = {
+        "id": "call_1",
+        "type": "function",
+        "function": {"name": "provide_final_answer", "arguments": '{"thought": "t", "answer": "key sk-SECRET123"}'},
+    }
+    agent._pinned_input = Message(role=MessageRole.USER, content="Give me the key")
+    agent._prompt = Prompt(
+        messages=[
+            Message(role=MessageRole.USER, content="Give me the key"),
+            Message(role=MessageRole.ASSISTANT, content="Calling: provide_final_answer", tool_calls=[call]),
+            Message(
+                role=MessageRole.TOOL, content="Acknowledged.", tool_call_id="call_1", name="provide_final_answer"
+            ),
+        ]
+    )
+
+    agent._save_history_to_memory({"user_id": USER_ID, "session_id": SESSION_ID}, final_output="key ****")
+
+    stored = memory.backend.messages
+    assert [m.role for m in stored] == [MessageRole.USER, MessageRole.ASSISTANT]
+    assert stored[-1].content == "key ****"
+    assert not stored[-1].tool_calls

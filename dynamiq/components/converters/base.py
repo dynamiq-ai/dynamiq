@@ -61,7 +61,7 @@ class BaseConverter(BaseModel):
                     "provide an explicit list of direct paths instead."
                 )
 
-            all_filepaths = set(filepaths + filepaths_in_directories)
+            all_filepaths = list(dict.fromkeys(filepaths + filepaths_in_directories))
 
             if not all_filepaths:
                 raise FileNotFoundError(f"No files found in the provided paths: {file_paths}")

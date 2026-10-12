@@ -1,6 +1,5 @@
 """Artifact backend served by the Dynamiq platform API."""
 
-import importlib.metadata
 import json as jsonlib
 from datetime import datetime, timezone
 from typing import Any
@@ -24,14 +23,6 @@ from dynamiq.artifacts.types import (
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections import HTTPMethod
 from dynamiq.utils.logger import logger
-
-try:
-    _VERSION = importlib.metadata.version("dynamiq")
-except importlib.metadata.PackageNotFoundError:
-    _VERSION = "unknown"
-
-# The platform records the client that wrote each version from the User-Agent.
-USER_AGENT = f"dynamiq-python/{_VERSION}"
 
 # The platform keeps an artifact's latest 50 versions, so one page holds every version it has.
 _MAX_VERSIONS = 50
@@ -287,7 +278,8 @@ class Dynamiq(ArtifactBackend):
             raise ArtifactError("Dynamiq API base URL is not configured.", operation=operation, artifact_id=artifact_id)
 
         url = f"{base_url}/v1/artifacts{path}"
-        request_headers = {"User-Agent": USER_AGENT}
+        # The connection's headers carry the User-Agent the platform records as each version's client.
+        request_headers = {}
         if not files:
             request_headers["Content-Type"] = "application/json"
         conn_headers = conn_params.get("headers")

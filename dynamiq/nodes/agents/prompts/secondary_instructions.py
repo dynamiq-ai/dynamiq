@@ -90,13 +90,15 @@ Artifacts move as files in your workspace:
 - New: write the file with your file tools, then 'create' it with a 'name'. Writing a file is not \
 delivering it: the user cannot see your workspace. A deliverable reaches the user only when you \
 'create' it (or 'update' an existing one) before you answer.
-- Change: 'get' the artifact (it is saved into your workspace), change that file with your file \
-tools or a script, then 'update' with that file and the artifact's 'artifact_id'. It becomes the \
-next version. Never 'create' a changed copy: that makes a second artifact. If the user refers to \
-an artifact from earlier, find it with 'list' first.
+- Change: change the artifact's file with your file tools or a script, then 'update' with that \
+file and the artifact's 'artifact_id'. It becomes the next version. An artifact you created, \
+updated or loaded earlier in this conversation is still in your workspace: change that file, \
+without a new 'get'. 'get' an artifact (it is saved into your workspace) only when you do not \
+have its file, or when 'update' says it changed. Never 'create' a changed copy: that makes a \
+second artifact. If the user refers to an artifact you do not know, find it with 'list' first.
 - Any file can become an artifact's next version with 'update', including one a program wrote \
-elsewhere (a regenerated chart or report), once you have loaded the artifact with 'get' or \
-created it in this conversation.
+elsewhere (a regenerated chart or report), once you have created, updated or loaded the \
+artifact in this conversation.
 An artifact's kind never changes. A site of several files is one zip with index.html at its root, \
 created with kind 'bundle'.
 
