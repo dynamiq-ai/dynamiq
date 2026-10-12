@@ -1101,7 +1101,8 @@ class BaseLLM(ConnectionNode):
         with the sampling params stripped. That one only fires when the error both names a present
         sampling param and looks like an unsupported-param error, so genuine validation
         errors (e.g. out-of-range temperature) still surface. ``stop`` gets the same treatment
-        under the same two conditions.
+        under the same two conditions, and a forced ``tool_choice`` falls back to ``"auto"`` when
+        the error says that is the only value accepted.
         """
         msg = provider_error_text(exc).lower()
         if not common_params.get("stream") and any(ind in msg for ind in _STREAMING_REQUIRED_INDICATORS):
@@ -1138,6 +1139,15 @@ class BaseLLM(ConnectionNode):
             recovered = dict(common_params)
             recovered.pop("stop", None)
             return recovered
+
+        # Some endpoints accept only tool_choice="auto" and say so; a forced or named choice gets a 400.
+        if common_params.get("tool_choice") not in (None, "auto") and "tool_choice" in msg and "auto" in msg:
+            logger.warning(
+                "LLM '%s': model '%s' accepts only tool_choice='auto'; retrying with it.",
+                self.name,
+                self.model,
+            )
+            return common_params | {"tool_choice": "auto"}
         return None
 
     def _persist_completion_recovery(self, common_params: dict, recovered: dict) -> None:
@@ -1152,6 +1162,8 @@ class BaseLLM(ConnectionNode):
             self._force_stream = True
         if common_params.get("stop") and "stop" not in recovered:
             self.stop = None
+        if recovered.get("tool_choice") == "auto" and common_params.get("tool_choice") != "auto":
+            self.tool_choice = "auto"
         for param in SAMPLING_PARAMS:
             if param in common_params and param not in recovered:
                 if param in type(self).model_fields:
