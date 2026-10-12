@@ -405,6 +405,7 @@ class RegexHook(TextGuardHook):
         return any(pattern.search(text, timeout=REGEX_TIMEOUT_SECONDS) for pattern in self._compiled)
 
     def _mask(self, ctx: HookContext, text: str, origin: str) -> str:
+        text = _ZERO_WIDTH.sub("", text)  # same cleanup as _violates, so mask cannot be bypassed by invisible chars
         for pattern in self._compiled:
             text = pattern.sub(self.replacement, text, timeout=REGEX_TIMEOUT_SECONDS)
         return text
@@ -568,7 +569,7 @@ class PIIHook(TextGuardHook):
         return any(
             _is_valid_match(entity, match.group(0))
             for _, entity, pattern in self._detectors
-            for match in pattern.finditer(text, timeout=REGEX_TIMEOUT_SECONDS)
+            for match in pattern.finditer(text, overlapped=True, timeout=REGEX_TIMEOUT_SECONDS)
         )
 
     def _mask(self, ctx: HookContext, text: str, origin: str) -> str:
