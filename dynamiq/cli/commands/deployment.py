@@ -9,7 +9,14 @@ import click
 
 from dynamiq.cli.client import ApiClient
 from dynamiq.cli.commands.context import with_api_and_settings
-from dynamiq.cli.commands.workflow import echo_list, echo_response, pagination_options, read_json_arg, require_project
+from dynamiq.cli.commands.workflow import (
+    echo_list,
+    echo_response,
+    fetch_data,
+    pagination_options,
+    read_json_arg,
+    require_project,
+)
 from dynamiq.cli.config import Settings
 
 # Generation and training calls run far past the default 30s.
@@ -183,13 +190,48 @@ def get_inference(*, api: ApiClient, settings: Settings, inference_id: str):
     echo_response(api.get(f"/v1/inferences/{inference_id}"))
 
 
+# The update endpoint replaces the whole record and requires every one of these, so the CLI
+# fetches the deployment and sends them all.
+INFERENCE_UPDATE_FIELDS = {
+    "name",
+    "description",
+    "model_id",
+    "resource_profile_id",
+    "inference_runtime_id",
+    "engine",
+    "autoscaling",
+    "parameters",
+}
+
+
 @inference.command("update")
 @click.argument("inference_id")
 @click.argument("payload")
 @with_api_and_settings
 def update_inference(*, api: ApiClient, settings: Settings, inference_id: str, payload: str):
-    """Update a deployment - typically autoscaling or parameters."""
-    echo_response(api.put(f"/v1/inferences/{inference_id}", json=read_json_arg(payload)))
+    """Update a deployment - typically autoscaling or parameters.
+
+    Send only what changes; the deployment is fetched first and your fields are laid over it.
+    `autoscaling` and `parameters` merge key by key, so `{"autoscaling": {"max_replicas": 4}}`
+    keeps the current `min_replicas`.
+
+    Accepted fields: `name`, `description`, `model_id`, `resource_profile_id`,
+    `inference_runtime_id`, `engine`, `autoscaling`, `parameters`. `task` cannot be changed.
+    """
+    changes = read_json_arg(payload)
+    unknown = sorted(set(changes) - INFERENCE_UPDATE_FIELDS)
+    if unknown:
+        raise click.ClickException(
+            f"cannot update {', '.join(unknown)}; accepted fields: {', '.join(sorted(INFERENCE_UPDATE_FIELDS))}"
+        )
+    current = fetch_data(api, f"/v1/inferences/{inference_id}")
+    body = {field: current.get(field) for field in INFERENCE_UPDATE_FIELDS}
+    for field, value in changes.items():
+        if isinstance(value, dict) and isinstance(body.get(field), dict):
+            body[field] = body[field] | value
+        else:
+            body[field] = value
+    echo_response(api.put(f"/v1/inferences/{inference_id}", json=body))
 
 
 @inference.command("pods")
