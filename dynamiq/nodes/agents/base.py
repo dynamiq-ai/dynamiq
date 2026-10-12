@@ -1948,8 +1948,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             return
         self._hook_tools_checked = True
         tools = [
-            (name, getattr(getattr(tool, "_owner_server", None), "name", None))
-            for name, tool in self.tool_by_names.items()
+            (self.sanitize_tool_name(tool.name), getattr(getattr(tool, "_owner_server", None), "name", None))
+            for tool in self._all_runtime_tools
         ]
         for hook in self.hooks:
             for entry in hook.tools:
@@ -3125,7 +3125,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
     @property
     def _runtime_tools(self) -> list[Node]:
-        """Instance tools plus any per-call overlays.
+        """The tools offered to the model: ``_all_runtime_tools`` minus those a hook always refuses."""
+        return self._offered_tools(self._all_runtime_tools)
+
+    @property
+    def _all_runtime_tools(self) -> list[Node]:
+        """Instance tools plus any per-call overlays, before hooks hide any.
 
         Overlays: long-term-memory tools bound to user_id (``_run_extra_tools``) and shared-sandbox
         tools bound to a per-agent view (``_shared_sandbox_tools``). When a shared-sandbox overlay is
@@ -3144,7 +3149,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             result += ltm_overlay
         if sandbox_overlay:
             result += sandbox_overlay
-        return self._offered_tools(result)
+        return result
 
     def _offered_tools(self, tools: list[Node]) -> list[Node]:
         """The tools minus those a hook always refuses (``tool_policy`` ``deny``): the model is not told about them,
