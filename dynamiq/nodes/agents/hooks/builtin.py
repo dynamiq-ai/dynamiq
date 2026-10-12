@@ -638,8 +638,8 @@ class PIIHook(TextGuardHook):
     def _restore_args(self, tool_name: str) -> list[str] | None:
         """The arguments of ``tool_name`` that get real values: ``None`` for none, an empty list for all of them."""
         if isinstance(self.restore_in_tools, dict):
-            wanted = {sanitize_tool_name(name): args for name, args in self.restore_in_tools.items()}
-            return wanted.get(sanitize_tool_name(tool_name), wanted.get("*"))
+            wanted = {sanitize_tool_name(name): args for name, args in self.restore_in_tools.items() if name != "*"}
+            return wanted.get(sanitize_tool_name(tool_name), self.restore_in_tools.get("*"))
         names = {sanitize_tool_name(name) for name in self.restore_in_tools}
         return [] if "*" in self.restore_in_tools or sanitize_tool_name(tool_name) in names else None
 

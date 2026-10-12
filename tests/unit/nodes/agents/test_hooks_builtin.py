@@ -64,6 +64,12 @@ def test_pii_restores_in_listed_tools_only_and_leaves_other_tools_with_placehold
     assert other.__class__.__name__ == "Allow"
 
 
+def test_pii_restore_mapping_form_honours_wildcard_and_specific_entries():
+    hook = PIIHook(restore_in_tools={"*": ["EMAIL"], "send-email": []})
+    assert hook._restore_args("anything") == ["EMAIL"]
+    assert hook._restore_args("send-email") == []
+
+
 def test_pii_masks_tool_results_content_extra_output_and_errors_with_the_same_mapping():
     hook = PIIHook()
     ctx = HookContext(hook_key=CTX_KEY)
