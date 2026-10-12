@@ -216,6 +216,42 @@ class TestReactiveBackstop:
         assert "temperature" not in recovered
 
 
+class TestStopBackstop:
+    @pytest.fixture
+    def custom(self):
+        return CustomLLM(name="c", model="openai/some-model", connection=HttpApiKey(url="https://x", api_key="k"))
+
+    def test_recovers_when_the_endpoint_rejects_stop(self, custom):
+        custom.stop = ["Observation:"]
+        common = {"model": custom.model, "stop": ["Observation:"], "temperature": 0.1, "max_tokens": 100}
+        exc = Exception("litellm.BadRequestError: OpenAIException - `stop` is not supported")
+        recovered = custom._recover_completion_params(exc, common)
+        assert recovered is not None
+        assert "stop" not in recovered
+        # Only the rejected param goes; the rest of the request is kept.
+        assert recovered["temperature"] == 0.1
+        assert recovered["max_tokens"] == 100
+        # Pure until the retry succeeds, then persisted so later calls skip the failing attempt.
+        assert custom.stop == ["Observation:"]
+        custom._persist_completion_recovery(common, recovered)
+        assert custom.stop is None
+
+    def test_no_recovery_when_stop_is_only_part_of_another_word(self, custom):
+        common = {"model": custom.model, "stop": ["Observation:"], "max_tokens": 100}
+        exc = Exception("litellm.BadRequestError: nonstop mode is not supported for this model")
+        assert custom._recover_completion_params(exc, common) is None
+
+    def test_no_recovery_on_stop_validation_error(self, custom):
+        common = {"model": custom.model, "stop": ["a", "b", "c", "d", "e"], "max_tokens": 100}
+        exc = Exception("litellm.BadRequestError: stop: array too long, expected at most 4 items")
+        assert custom._recover_completion_params(exc, common) is None
+
+    def test_no_recovery_when_no_stop_was_sent(self, custom):
+        common = {"model": custom.model, "max_tokens": 100}
+        exc = Exception("litellm.BadRequestError: OpenAIException - `stop` is not supported")
+        assert custom._recover_completion_params(exc, common) is None
+
+
 class TestBedrockBackstop:
     @pytest.fixture
     def bedrock(self):

@@ -201,6 +201,9 @@ _SAMPLING_UNSUPPORTED_INDICATORS: tuple[str, ...] = (
     "deprecated",
 )
 
+# `stop` named as a parameter (also `stop_sequences` / `stopSequences`), not as part of another word.
+_STOP_PARAM_RE = re.compile(r"(?<![a-z_])stop(?:[_ ]?sequences?)?(?![a-z])")
+
 
 def provider_error_text(exc: BaseException) -> str:
     """The error's text with the backslash escapes a bytes repr adds removed.
@@ -1097,7 +1100,8 @@ class BaseLLM(ConnectionNode):
         but are not matched by ``_model_rejects_sampling_params``: returns the params
         with the sampling params stripped. That one only fires when the error both names a present
         sampling param and looks like an unsupported-param error, so genuine validation
-        errors (e.g. out-of-range temperature) still surface.
+        errors (e.g. out-of-range temperature) still surface. ``stop`` gets the same treatment
+        under the same two conditions.
         """
         msg = provider_error_text(exc).lower()
         if not common_params.get("stream") and any(ind in msg for ind in _STREAMING_REQUIRED_INDICATORS):
@@ -1123,6 +1127,17 @@ class BaseLLM(ConnectionNode):
             for param in SAMPLING_PARAMS:
                 recovered.pop(param, None)
             return recovered
+
+        # Same backstop for `stop`: some OpenAI-compatible endpoints reject it outright.
+        if common_params.get("stop") and looks_unsupported and _STOP_PARAM_RE.search(msg):
+            logger.warning(
+                "LLM '%s': model '%s' rejected `stop`; retrying without stop sequences.",
+                self.name,
+                self.model,
+            )
+            recovered = dict(common_params)
+            recovered.pop("stop", None)
+            return recovered
         return None
 
     def _persist_completion_recovery(self, common_params: dict, recovered: dict) -> None:
@@ -1135,6 +1150,8 @@ class BaseLLM(ConnectionNode):
         """
         if recovered.get("stream") and not common_params.get("stream"):
             self._force_stream = True
+        if common_params.get("stop") and "stop" not in recovered:
+            self.stop = None
         for param in SAMPLING_PARAMS:
             if param in common_params and param not in recovered:
                 if param in type(self).model_fields:
