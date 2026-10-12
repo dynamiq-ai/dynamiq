@@ -42,6 +42,9 @@ def run(input_data):
 """
     return Python(
         name="word-generator",
+        # Without it the agent sees the generic "runs Python code" description, submits its own
+        # word list, and then spends loops on why the fixed word was not in it.
+        description="Returns one random word. Takes no input; call it with an empty JSON object.",
         code=code,
     )
 

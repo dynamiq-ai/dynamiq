@@ -15,6 +15,7 @@ from pydantic_core.core_schema import ValidationInfo
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.env import get_env_var
 from dynamiq.utils.logger import logger
+from dynamiq.utils.user_agent import USER_AGENT
 
 if TYPE_CHECKING:
     from chromadb import ClientAPI as ChromaClient
@@ -90,6 +91,13 @@ class BaseConnection(BaseModel, ABC):
         if for_tracing:
             return {"id": self.id, "type": self.type}
         return self.model_dump(**kwargs)
+
+    def __repr_args__(self):
+        """Limit ``repr()`` and ``str()`` to the id and type, as ``to_dict(for_tracing=True)`` does.
+
+        Every other field may hold a credential, and a repr ends up in logs, tracebacks and test output.
+        """
+        return [("id", self.id), ("type", self.type)]
 
     @abstractmethod
     def connect(self):
@@ -205,9 +213,10 @@ class Dynamiq(HttpApiKey):
 
     @model_validator(mode="after")
     def setup_headers(self):
-        """Ensure bearer token is included in default headers."""
+        """Ensure bearer token and the SDK's User-Agent are included in default headers."""
         if self.api_key:
             self.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        self.headers.setdefault("User-Agent", USER_AGENT)
         return self
 
     @property

@@ -35,6 +35,7 @@ def patch_discovery(*tool_names):
 
     class FakeToolList:
         tools = [FakeMCPTool(name) for name in tool_names]
+        nextCursor = None
 
     class FakeSession:
         async def __aenter__(self):

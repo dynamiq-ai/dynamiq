@@ -86,7 +86,15 @@ def test_human_feedback_tool_receives_nonempty_input(llm_instance, agent_role, i
 
     wf = Workflow(flow=Flow(nodes=[agent]))
     result = wf.run(
-        input_data={"input": "I'd like a recommendation for a good book to read."},
+        # Spelled out as steps: asked only to "confirm first", the model often writes its question
+        # as the final answer and never calls the tool, so there is no prompt to check.
+        input_data={
+            "input": (
+                "Step 1: call the message-sender tool with action 'ask' and a question asking which book "
+                "genre I prefer. Step 2: after my reply comes back as the tool's observation, give a final "
+                "answer recommending one book in that genre."
+            )
+        },
         config=RunnableConfig(request_timeout=120),
     )
 
