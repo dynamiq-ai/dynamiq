@@ -15,7 +15,7 @@ import json
 import re
 import threading
 from collections import OrderedDict
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any, Literal
 from uuid import uuid4
@@ -370,6 +370,19 @@ REGEX_PRESETS: dict[str, list[str]] = {
 _ZERO_WIDTH = regex.compile("[\u200b-\u200f\u2060\ufeff\u00ad]")
 
 
+def _strip_zero_width(text: str) -> tuple[str, Sequence[int]]:
+    """Text without invisible characters, plus the index in ``text`` of each character that was kept."""
+    if not _ZERO_WIDTH.search(text):
+        return text, range(len(text))
+    origins: list[int] = []
+    pos = 0
+    for match in _ZERO_WIDTH.finditer(text):
+        origins.extend(range(pos, match.start()))
+        pos = match.end()
+    origins.extend(range(pos, len(text)))
+    return _ZERO_WIDTH.sub("", text), origins
+
+
 @register_hook("regex")
 class RegexHook(TextGuardHook):
     """Block or mask text that matches a pattern.
@@ -405,10 +418,26 @@ class RegexHook(TextGuardHook):
         return any(pattern.search(text, timeout=REGEX_TIMEOUT_SECONDS) for pattern in self._compiled)
 
     def _mask(self, ctx: HookContext, text: str, origin: str) -> str:
-        text = _ZERO_WIDTH.sub("", text)  # same cleanup as _violates, so mask cannot be bypassed by invisible chars
-        for pattern in self._compiled:
-            text = pattern.sub(self.replacement, text, timeout=REGEX_TIMEOUT_SECONDS)
-        return text
+        # Match on the text without invisible characters (like _violates), but replace only the matched spans of the
+        # original, so text that matches nothing comes back untouched.
+        cleaned, origins = _strip_zero_width(text)
+        spans = sorted(
+            (match.start(), match.end())
+            for pattern in self._compiled
+            for match in pattern.finditer(cleaned, timeout=REGEX_TIMEOUT_SECONDS)
+            if match.end() > match.start()
+        )
+        parts: list[str] = []
+        pos = 0
+        for start, end in spans:
+            start, end = origins[start], origins[end - 1] + 1
+            if start < pos:  # overlaps a span already replaced
+                pos = max(pos, end)
+                continue
+            parts += [text[pos:start], self.replacement]
+            pos = end
+        parts.append(text[pos:])
+        return "".join(parts)
 
 
 PIIEntity = Literal["email", "phone", "credit_card", "ssn", "ip_address"]
