@@ -1315,8 +1315,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     )
         return history
 
-    @staticmethod
+    @classmethod
     def _with_final_output(
+        cls,
         metadata: dict,
         snapshot_messages: list[Message],
         final_output: Any | None,
@@ -1328,7 +1329,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         ``provide_final_answer`` call plus its stub results). Swap that tail for a plain
         assistant message so blocked or masked content never reaches memory.
         """
-        text = str(final_output) if final_output is not None else ""
+        text = cls._answer_as_text(final_output) if final_output is not None else ""
         if not text:
             return snapshot_messages
 
