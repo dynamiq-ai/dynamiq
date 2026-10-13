@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from dynamiq.utils.json_parser import clean_json_string, parse_llm_json_output
+from dynamiq.utils.json_parser import _remove_comments_outside_strings, clean_json_string, parse_llm_json_output
 
 
 def test_basic_single_quoted_keys_and_strings():
@@ -315,3 +315,32 @@ def test_json_cleanup_preserves_repeated_escaped_quotes(n):
     response = "{" + ('\\"' + "\n") * n + "}"
 
     assert clean_json_string(response) == response
+
+
+@pytest.mark.parametrize("trailing_backslashes", [1, 2])
+@pytest.mark.parametrize("note", ["/* keep me */", "// keep me"])
+def test_escaped_backslash_at_string_end_preserves_following_string(trailing_backslashes, note):
+    expected = {"path": "C:\\dir" + "\\" * trailing_backslashes, "note": note, "x": 1}
+    # A trailing comma forces the public parser through comment cleanup.
+    source = json.dumps(expected)[:-1] + ",}"
+
+    assert json.loads(clean_json_string(source)) == expected
+    assert parse_llm_json_output(source) == expected
+
+
+@pytest.mark.parametrize("quote", ["'", '"'])
+@pytest.mark.parametrize("escaped_backslashes", [2, 4])
+def test_comment_cleanup_closes_strings_after_escaped_backslashes(quote, escaped_backslashes):
+    path = quote + "C:\\\\dir" + "\\" * escaped_backslashes + quote
+    source = f"{{{quote}path{quote}: {path}, /* remove me */ " f"{quote}note{quote}: {quote}/* keep me */{quote}}}"
+
+    assert _remove_comments_outside_strings(source) == source.replace("/* remove me */", "")
+
+
+@pytest.mark.parametrize("backslashes_before_quote", [0, 1])
+def test_comment_cleanup_keeps_escaped_quotes_inside_strings(backslashes_before_quote):
+    expected = {"note": "prefix " + "\\" * backslashes_before_quote + '" /* keep me */ // keep me', "x": 1}
+    source = json.dumps(expected)[:-1] + ", /* remove me */}"
+
+    assert json.loads(clean_json_string(source)) == expected
+    assert parse_llm_json_output(source) == expected

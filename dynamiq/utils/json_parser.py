@@ -125,6 +125,7 @@ def _remove_comments_outside_strings(source: str) -> str:
     n = len(source)
     in_str = False
     str_delim: str | None = None
+    escape = False
 
     while i < n:
         c = source[i]
@@ -157,23 +158,16 @@ def _remove_comments_outside_strings(source: str) -> str:
                 result.append(c)
                 i += 1
         else:
-            # Currently inside a string
-            if c == str_delim:
-                # Check if this quote is escaped
-                if i > 0 and source[i - 1] == "\\":
-                    # It's an escaped quote
-                    result.append(c)
-                    i += 1
-                else:
-                    # Closing the string
-                    in_str = False
-                    str_delim = None
-                    result.append(c)
-                    i += 1
-            else:
-                # Normal character inside the string
-                result.append(c)
-                i += 1
+            # Track escapes so an escaped backslash does not escape the closing quote.
+            if escape:
+                escape = False
+            elif c == "\\":
+                escape = True
+            elif c == str_delim:
+                in_str = False
+                str_delim = None
+            result.append(c)
+            i += 1
 
     return "".join(result)
 
