@@ -92,6 +92,13 @@ class BaseConnection(BaseModel, ABC):
             return {"id": self.id, "type": self.type}
         return self.model_dump(**kwargs)
 
+    def __repr_args__(self):
+        """Limit ``repr()`` and ``str()`` to the id and type, as ``to_dict(for_tracing=True)`` does.
+
+        Every other field may hold a credential, and a repr ends up in logs, tracebacks and test output.
+        """
+        return [("id", self.id), ("type", self.type)]
+
     @abstractmethod
     def connect(self):
         """Connects to the service.

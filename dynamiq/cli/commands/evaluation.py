@@ -173,6 +173,9 @@ def list_app_evaluations(*, api: ApiClient, settings: Settings, app_id: str):
     echo_response(api.get(f"/v1/apps/{app_id}/evaluations"))
 
 
+DEFAULT_APP_EVALUATION_SAMPLE_RATE = 0.1
+
+
 @evaluation.command("app-attach")
 @click.argument("app_id")
 @click.argument("payload")
@@ -182,13 +185,18 @@ def attach_app_evaluation(*, api: ApiClient, settings: Settings, app_id: str, pa
 
     REQUIRED: `name`, `metric_id`, `metric_version_id` (both UUIDs - `evaluation metrics`
     prints them as `id` and `latest_version_id`). Optional: `enabled` (default true),
-    `sample_rate` 0.0-1.0, `input_transformer`.
+    `sample_rate` 0.0-1.0 (default 0.1), `input_transformer`.
 
     There is no dataset and no ground truth here, so a metric that compares against an
     expected answer cannot work - pick one that judges the answer on its own. Every sampled
     run costs an extra LLM call, so start around 0.1-0.2 rather than 1.0.
     """
-    echo_response(api.post(f"/v1/apps/{app_id}/evaluations", json=read_json_arg(payload)))
+    body = read_json_arg(payload)
+    # The API reads a missing `enabled` as false and a missing `sample_rate` as 0, and either
+    # one means nothing is ever scored. Send the documented defaults instead.
+    body.setdefault("enabled", True)
+    body.setdefault("sample_rate", DEFAULT_APP_EVALUATION_SAMPLE_RATE)
+    echo_response(api.post(f"/v1/apps/{app_id}/evaluations", json=body))
 
 
 @evaluation.command("app-get")

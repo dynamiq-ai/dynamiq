@@ -513,6 +513,9 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         if tool_data := kwargs.get("tool_data"):
             run.metadata["tool_data"] = tool_data
 
+        if hook_events := kwargs.get("hook_events"):
+            run.metadata.setdefault("hooks", []).extend(hook_events)
+
     @staticmethod
     def _canceled_message(kind: str, serialized: dict[str, Any]) -> str:
         """Build a human-readable cancellation message from serialized node/flow/workflow data."""

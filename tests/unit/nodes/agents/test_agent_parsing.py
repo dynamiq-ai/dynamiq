@@ -340,6 +340,23 @@ def test_structured_output_action_input_with_literal_newlines():
     assert action_input == {"command": "echo hello\necho world"}
 
 
+def test_structured_output_plain_text_action_input_names_the_fix():
+    """Plain text in action_input is rejected with an error that says a JSON object is required."""
+    from dynamiq.nodes.types import InferenceMode
+
+    agent = _make_agent(inference_mode=InferenceMode.STRUCTURED_OUTPUT)
+
+    output = (
+        '{"thought": "ask first", "action": "message-sender", '
+        '"action_input": "Which genre do you prefer?", "output_files": ""}'
+    )
+    with pytest.raises(ActionParsingException) as exc_info:
+        agent._handle_structured_output_mode(output, loop_num=1)
+
+    assert exc_info.value.recoverable
+    assert "must be a JSON object encoded as a string" in str(exc_info.value)
+
+
 def test_structured_output_fallback_decoder_with_literal_newlines():
     """Fallback JSONDecoder(strict=False) handles multiple concatenated JSONs with literal newlines."""
     import uuid

@@ -153,9 +153,6 @@ async def test_task_cancellation_while_waiting_closes_stream(llm_node):
     assert stream.closed
 
 
-# A Messages API stream as Anthropic sends it: chunked SSE on a keep-alive connection, with the body's final
-# zero-length chunk written a moment after message_stop. LiteLLM stops reading at message_stop, so that chunk is
-# still unread when the call returns.
 ANTHROPIC_EVENTS = (
     {
         "type": "message_start",
@@ -228,7 +225,6 @@ def run_anthropic_stream():
     return llm.run(
         input_data={},
         prompt=Prompt(messages=[Message(role="user", content="Say hello.")]),
-        # The node streams only when a streaming callback is listening, as when the runtime serves a run.
         config=RunnableConfig(callbacks=[StreamingIteratorCallbackHandler()]),
     )
 
@@ -236,7 +232,6 @@ def run_anthropic_stream():
 def test_anthropic_stream_releases_its_connection(anthropic_api):
     origin = httpcore.Origin(b"http", b"127.0.0.1", anthropic_api)
     pool = litellm.module_level_client.client._transport._pool
-    # An unclosed stream sits in a reference cycle; a collection during the test would release it and hide the leak.
     gc.disable()
     try:
         result = run_anthropic_stream()
@@ -249,8 +244,6 @@ def test_anthropic_stream_releases_its_connection(anthropic_api):
     assert in_use == []
 
 
-# Runs in a fresh interpreter, because the failure it guards against deadlocks a thread inside gc.collect(), and the
-# interpreter can't collect garbage again after that.
 COLLECT_UNDER_POOL_LOCK = """
 import gc
 import os
@@ -269,8 +262,6 @@ create_request = connection_pool.PoolRequest.__init__
 
 
 def collect_under_pool_lock(self, request):
-    # ConnectionPool.handle_request creates its PoolRequest while holding the pool lock. In production, an allocation
-    # there started a collection that finalized a leaked stream, and that stream's close takes the same lock.
     connection_pool.PoolRequest.__init__ = create_request
     gc.collect()
     create_request(self, request)

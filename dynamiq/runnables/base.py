@@ -52,11 +52,20 @@ class RunnableConfig(BaseModel):
         ),
     )
 
+    trusted_context: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Facts about the caller that the server vouches for, e.g. {'user_id': ..., 'metadata': {'role': 'admin'}}. "
+            "Unlike the run input, which the client sends, agent hooks read access rules (`tool_policy` `allow_if`, "
+            "`approval_unless`) from here. Never saved in a checkpoint: pass it again when resuming."
+        ),
+    )
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def to_checkpoint_dict(self) -> dict:
         """Serialize config for checkpoint storage, excluding non-serializable runtime fields."""
-        return self.model_dump(mode="json", exclude={"callbacks", "checkpoint", "cancellation"})
+        return self.model_dump(mode="json", exclude={"callbacks", "checkpoint", "cancellation", "trusted_context"})
 
 
 class RunnableStatus(str, Enum):
