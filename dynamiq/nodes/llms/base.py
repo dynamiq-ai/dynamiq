@@ -201,6 +201,12 @@ _SAMPLING_UNSUPPORTED_INDICATORS: tuple[str, ...] = (
     "deprecated",
 )
 
+# `stop` named as a parameter (also `stop_sequences` / `stopSequences`), not as part of another word.
+_STOP_PARAM_RE = re.compile(r"(?<![a-z_])stop(?:[_ ]?sequences?)?(?![a-z])")
+
+# "only `"auto"` is supported for `tool_choice`": the provider naming the one value it accepts.
+_ONLY_AUTO_TOOL_CHOICE_RE = re.compile(r"only\W*auto\b")
+
 
 def provider_error_text(exc: BaseException) -> str:
     """The error's text with the backslash escapes a bytes repr adds removed.
@@ -1097,7 +1103,9 @@ class BaseLLM(ConnectionNode):
         but are not matched by ``_model_rejects_sampling_params``: returns the params
         with the sampling params stripped. That one only fires when the error both names a present
         sampling param and looks like an unsupported-param error, so genuine validation
-        errors (e.g. out-of-range temperature) still surface.
+        errors (e.g. out-of-range temperature) still surface. ``stop`` gets the same treatment
+        under the same two conditions, and a ``tool_choice`` that forces a call (``"required"`` or a
+        named function) falls back to ``"auto"`` when the error says the forced choice is unsupported.
         """
         msg = provider_error_text(exc).lower()
         if not common_params.get("stream") and any(ind in msg for ind in _STREAMING_REQUIRED_INDICATORS):
@@ -1123,6 +1131,31 @@ class BaseLLM(ConnectionNode):
             for param in SAMPLING_PARAMS:
                 recovered.pop(param, None)
             return recovered
+
+        # Same backstop for `stop`: some OpenAI-compatible endpoints reject it outright.
+        if common_params.get("stop") and looks_unsupported and _STOP_PARAM_RE.search(msg):
+            logger.warning(
+                "LLM '%s': model '%s' rejected `stop`; retrying without stop sequences.",
+                self.name,
+                self.model,
+            )
+            recovered = dict(common_params)
+            recovered.pop("stop", None)
+            return recovered
+
+        # Some endpoints accept only tool_choice="auto" and say so; a forced or named choice gets a 400.
+        # Limited to a choice that forces a call: "none" rules tool calls out and must never become
+        # "auto", and any other value is a misconfiguration that has to surface.
+        tool_choice = common_params.get("tool_choice")
+        forces_a_call = tool_choice == "required" or isinstance(tool_choice, dict)
+        rejects_forced_choice = looks_unsupported or bool(_ONLY_AUTO_TOOL_CHOICE_RE.search(msg))
+        if forces_a_call and "tool_choice" in msg and rejects_forced_choice:
+            logger.warning(
+                "LLM '%s': model '%s' accepts only tool_choice='auto'; retrying with it.",
+                self.name,
+                self.model,
+            )
+            return common_params | {"tool_choice": "auto"}
         return None
 
     def _persist_completion_recovery(self, common_params: dict, recovered: dict) -> None:
@@ -1135,6 +1168,10 @@ class BaseLLM(ConnectionNode):
         """
         if recovered.get("stream") and not common_params.get("stream"):
             self._force_stream = True
+        if common_params.get("stop") and "stop" not in recovered:
+            self.stop = None
+        if recovered.get("tool_choice") == "auto" and common_params.get("tool_choice") != "auto":
+            self.tool_choice = "auto"
         for param in SAMPLING_PARAMS:
             if param in common_params and param not in recovered:
                 if param in type(self).model_fields:

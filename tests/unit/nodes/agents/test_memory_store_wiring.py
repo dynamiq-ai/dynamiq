@@ -355,5 +355,4 @@ def test_a_repeated_read_is_not_served_from_the_tool_cache(llm, mocker):
     result = agent.run({"input": "Which English do I prefer?"})
 
     assert result.status == RunnableStatus.SUCCESS
-    # read, the edit's own read, and the second read: all three must reach the store.
     assert reads.call_count == 3
