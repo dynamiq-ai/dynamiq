@@ -2330,6 +2330,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             inference_mode=self.inference_mode,
             has_tools=bool(tools)
             or (self.skills.enabled and self.skills.source is not None)
+            or any(server.discover_per_run for server in self._mcp_servers)
             or ltm_enabled
             or bool(self.memory_store_backend)
             or bool(self.artifacts_backend),

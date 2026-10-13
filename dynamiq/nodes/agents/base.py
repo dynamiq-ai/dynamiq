@@ -84,7 +84,7 @@ from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.nodes.schema_utils import strip_inaccessible_fields
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileSearchTool, FileWriteTool
-from dynamiq.nodes.tools.mcp import MCPServer
+from dynamiq.nodes.tools.mcp import MCP_HTTP_HEADERS_FIELD, MCPServer
 from dynamiq.nodes.tools.memory_store_tool import MemoryStoreTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsTool
 from dynamiq.nodes.tools.python import Python
@@ -526,6 +526,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         for tool in self.tools:
             if isinstance(tool, MCPServer):
                 self._mcp_servers.append(tool)
+                if tool.discover_per_run:
+                    # Listed at the start of each run instead, with that run's mcp_http_headers.
+                    continue
                 subtools = tool.get_mcp_tools()
                 expanded_tools.extend(subtools)
                 self._excluded_tool_ids.update(subtool.id for subtool in subtools)
@@ -1002,6 +1005,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
             if input_data.tool_params:
                 kwargs["tool_params"] = input_data.tool_params
+
+            run_tools.extend(self._list_per_run_mcp_tools(kwargs.get("tool_params")))
 
             self.system_prompt_manager.update_variables(dict(input_data))
             kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
@@ -1725,6 +1730,49 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     debug_info.append(f"  - From {source}: encountered nested ToolParams ({detail})")
             elif isinstance(value, dict):
                 self._apply_parameters(merged_input, value, source, debug_info)
+
+    def _list_per_run_mcp_tools(self, tool_params: ToolParams | dict | None) -> list[Node]:
+        """List the tools of every ``discover_per_run`` MCP server for this run, with this run's headers.
+
+        The tools go into the run's tool overlay rather than ``self.tools``, so concurrent runs of a
+        shared agent each get what the server listed for their own headers.
+        """
+        servers = [server for server in self._mcp_servers if server.discover_per_run]
+        if not servers:
+            return []
+        if isinstance(tool_params, dict):
+            tool_params = ToolParams.model_validate(tool_params)
+        tools: list[Node] = []
+        for server in servers:
+            tools.extend(server.get_run_tools(headers=self._mcp_run_headers(server, tool_params)))
+        return tools
+
+    def _mcp_run_headers(self, server: MCPServer, tool_params: ToolParams | None) -> dict[str, Any] | None:
+        """The ``mcp_http_headers`` this run passes for ``server``, layered the way tool calls layer them.
+
+        ``global`` first, then ``by_name`` (only while no other MCP server has the same name, as for
+        tool calls), then ``by_id``. A later layer wins on the same header.
+        """
+        if not tool_params:
+            return None
+        layers = [tool_params.global_params]
+        if sum(1 for other in self._mcp_servers if other.name == server.name) == 1:
+            layers.append(tool_params.by_name_params.get(server.name))
+            layers.append(tool_params.by_name_params.get(self.sanitize_tool_name(server.name)))
+        elif tool_params.by_name_params.get(server.name) or tool_params.by_name_params.get(
+            self.sanitize_tool_name(server.name)
+        ):
+            logger.warning(
+                f"Agent {self.name} - {self.id}: tool_params entry by_name[{server.name!r}] is ambiguous - "
+                f"more than one MCP server is named {server.name!r}, so it is not used to list that server's "
+                "tools. Rename the servers, or key the params by server id instead."
+            )
+        layers.append(tool_params.by_id_params.get(server.id))
+        headers: dict[str, Any] = {}
+        for layer in layers:
+            if isinstance(layer, dict) and isinstance(layer.get(MCP_HTTP_HEADERS_FIELD), dict):
+                headers.update(layer[MCP_HTTP_HEADERS_FIELD])
+        return headers or None
 
     def _owner_server_name_is_unambiguous(self, owner: Any) -> bool:
         """Whether ``owner.name`` identifies exactly one MCP server among this run's tools.
