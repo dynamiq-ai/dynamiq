@@ -12,7 +12,7 @@ profile = click.Group(name="resource-profiles", help="Manage profiles")
     "--purpose",
     default="service",
     required=False,
-    type=click.Choice(["inference", "service", "fine_tuning"], case_sensitive=True),
+    type=click.Choice(["inference", "service", "fine_tuning", "database"], case_sensitive=True),
 )
 @click.option(
     "--sort-by",

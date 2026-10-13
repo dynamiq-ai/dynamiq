@@ -58,7 +58,6 @@ FLOW_ID = "file-store-checkpoint-flow"
 AGENT_ID = "file-store-agent"
 REPORT_PATH = "report.md"
 REPORT_CONTENT = b"# Report\nwritten before checkpoint"
-# Not valid UTF-8, so a text round-trip would corrupt it.
 IMAGE_PATH = "charts/chart.png"
 IMAGE_CONTENT = bytes(range(256))
 INPUT_PATH = "data.csv"
@@ -172,7 +171,6 @@ class TestFileStoreCheckpointRoundTrip:
         agent_a = make_file_store_agent("agent-a")
         write_files(agent_a)
 
-        # Round-trip through JSON, as a real checkpoint backend would.
         state_dict = json.loads(json.dumps(agent_a.to_checkpoint_state().model_dump()))
         assert set(state_dict["file_store_state"]["files"]) == {REPORT_PATH, IMAGE_PATH}
 
@@ -187,7 +185,6 @@ class TestFileStoreCheckpointRoundTrip:
         report, image = store.list_files_bytes([REPORT_PATH, IMAGE_PATH])
         assert report.description == "Quarterly report"
         assert image.content_type == "image/png"
-        # The file tools were built over the same store, so the restored files are visible to them.
         list_tool = next(tool for tool in agent_b.tools if isinstance(tool, FileListTool))
         assert list_tool.file_store is store
 
@@ -209,7 +206,6 @@ class TestFileStoreCheckpointRoundTrip:
 
         agent_b = make_file_store_agent("agent-b")
         agent_b.from_checkpoint_state(state_dict)
-        # A resumed run stores its input files again, under their own names.
         assert agent_b._upload_files_to_file_store([input_file()]) == [INPUT_PATH]
         assert stored_paths(agent_b) == [INPUT_PATH, REPORT_PATH]
 
@@ -235,7 +231,6 @@ class TestFileStoreCheckpointRoundTrip:
 
     def test_restore_creates_the_store_an_agent_makes_for_input_files(self):
         agent_a = make_agent_without_store("agent-a")
-        # What the agent does when input files arrive, before a tool returns a file.
         agent_a._setup_in_memory_file_store_and_tools()
         agent_a._upload_files_to_file_store([input_file()])
         store_chart_from_tool(agent_a)
@@ -287,7 +282,6 @@ class TestFileStoreCheckpointInFlow:
         assert flow1.run_sync(input_data={"input": "hello"}).status == RunnableStatus.SUCCESS
         mocker.stopall()
 
-        # Simulate a crash: the agent is still "active" in the checkpoint.
         cp = backend.get_latest_by_flow(flow1.id)
         assert set(cp.node_states[AGENT_ID].internal_state["file_store_state"]["files"]) == {REPORT_PATH, IMAGE_PATH}
         cp.node_states[AGENT_ID].status = CheckpointStatus.ACTIVE.value
@@ -296,7 +290,6 @@ class TestFileStoreCheckpointInFlow:
         cp.status = CheckpointStatus.ACTIVE
         backend.save(cp)
 
-        # New process: fresh agent with a new, empty store.
         agent2 = make_file_store_agent()
         assert agent2.file_store_backend.is_empty()
         flow2 = make_flow(backend, agent2)
@@ -391,7 +384,6 @@ class TestFileStoreSurvivesInputTimeout:
         assert set(saved.node_states[AGENT_ID].internal_state["file_store_state"]["files"]) == {REPORT_PATH}
 
         resumed_agent = self._make_agent(self._answered())
-        # The input is replayed on resume, attached file included.
         second = self._make_flow(backend, resumed_agent).run_sync(
             input_data={"input": "Draft the report", "files": [input_file()]}, resume_from=saved.id
         )

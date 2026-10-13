@@ -321,12 +321,13 @@ Important:
             ),
         )
         logger.debug(f"Tool {self.name} - {self.id}: sending output event {event}")
-        self.run_on_node_execute_stream(callbacks=config.callbacks, event=event, **kwargs)
-        event = self.get_input_streaming_event(
-            event_msg_type=HFStreamingInputEventMessage,
-            event=streaming.event,
-            config=config,
-        )
+        with self._input_queue_turn(config):
+            self.run_on_node_execute_stream(callbacks=config.callbacks, event=event, **kwargs)
+            event = self.get_input_streaming_event(
+                event_msg_type=HFStreamingInputEventMessage,
+                event=streaming.event,
+                config=config,
+            )
         logger.debug(f"Tool {self.name} - {self.id}: received input event {event}")
 
         answers = event.data.answers

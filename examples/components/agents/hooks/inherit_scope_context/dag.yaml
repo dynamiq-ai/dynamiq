@@ -1,0 +1,100 @@
+# Options that decide where and how hooks apply: `inherit`, PII `scope`, `live_stream` and `from_context`.
+#
+#   pii (scope: request)   history, memory and checkpoints keep the raw values; every LLM call is sent a masked copy
+#                          of the history. (The default `scope: persisted` masks once at the source instead.)
+#   pii (inherit: true)    the hook also runs inside the Researcher sub-agent and shares the run state, so a value the
+#                          sub-agent finds gets the next placeholder (<EMAIL_2>), never raw to the parent's model.
+#   pii (live_stream: true) with streaming on, the answer is masked while it is generated (held back by
+#                          `stream_lookback` characters) instead of being buffered until the end. Opt-in: a match
+#                          longer than the lookback can leak. It only shows with a real LLM and a stream consumer.
+#   transform (from_context) `tenant` is set from the caller's metadata: whatever the model sends for it is replaced.
+#   call_limit (inherit)   a budget of 2 crm-lookup calls for the parent and the sub-agent together.
+
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+nodes:
+  crm-agent:
+    type: dynamiq.nodes.agents.Agent
+    name: CRM Agent
+    role: |
+      CRM assistant. Use crm-lookup to find a customer, send-email to send mail and the Researcher sub-agent for
+      deeper research. Text such as <EMAIL_1> stands for a real value: pass placeholders through unchanged.
+    inference_mode: STRUCTURED_OUTPUT
+    llm:
+      id: crm-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o-mini
+    max_loops: 8
+    streaming:
+      enabled: true
+      mode: final
+    tools:
+      - id: crm-lookup-tool
+        type: dynamiq.nodes.tools.python.Python
+        name: crm-lookup
+        description: Look up a customer. Input fields - query, tenant.
+        code: |
+          def run(input_data):
+              return "record for %s in tenant %s" % (input_data.get("query"), input_data.get("tenant"))
+      - id: send-email-tool
+        type: dynamiq.nodes.tools.python.Python
+        name: send-email
+        description: Send an email. Input fields - to, subject, body.
+        code: |
+          def run(input_data):
+              return "EMAIL SENT to=%s" % input_data.get("to")
+      - type: dynamiq.nodes.tools.agent_tool.SubAgentTool
+        name: Researcher
+        description: Does deeper research and reports findings.
+        agent_factory:
+          name: Researcher
+          role: You are a research sub-agent. Investigate the topic you are given and report findings.
+          inference_mode: STRUCTURED_OUTPUT
+          llm:
+            type: dynamiq.nodes.llms.OpenAI
+            connection:
+              type: dynamiq.connections.OpenAI
+              api_key: ${oc.env:OPENAI_API_KEY}
+            model: gpt-4o-mini
+          max_loops: 6
+          tools:
+            - type: dynamiq.nodes.tools.python.Python
+              name: crm-lookup
+              description: Look up a customer. Input fields - query, tenant.
+              code: |
+                def run(input_data):
+                    return "record for %s in tenant %s" % (input_data.get("query"), input_data.get("tenant"))
+    hooks:
+      - type: pii
+        name: pii
+        scope: request
+        entities: [email, phone]
+        on: [input, tool_result, output]
+        restore_in_tools: [send-email]
+        restore_in_output: true
+        live_stream: true
+        stream_lookback: 48
+        inherit: true
+      - type: transform
+        name: tenant-from-caller
+        tools: [crm-lookup]
+        from_context:
+          tenant: metadata.tenant
+      - type: call_limit
+        name: crm-budget
+        tools: [crm-lookup]
+        max_per_run: 2
+        inherit: true
+
+flows:
+  crm-flow:
+    name: Options flow
+    nodes: [crm-agent]
+
+workflows:
+  crm-workflow:
+    flow: crm-flow

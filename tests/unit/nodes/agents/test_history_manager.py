@@ -199,6 +199,19 @@ class TestCompactHistory:
         assert "summary" in summary_msg.content.lower()
         assert summary_msg.role == MessageRole.USER
 
+    def test_pinned_request_is_framed_as_reference(self):
+        """The original request is kept verbatim, introduced as context rather than as a new task."""
+        msgs = [_system(), _user("Generate one word."), _assistant("old response " * 1000)]
+        agent = FakeAgent(messages=msgs, max_preserved_tokens=0)
+
+        agent._compact_history(summary="The word was generated.", preserved=[], pinned_content="Generate one word.")
+
+        summary_msg = agent._prompt.messages[1].content
+        assert summary_msg.endswith(
+            "continue from the state described above instead of starting over): Generate one word.\n"
+        )
+        assert summary_msg.index("The word was generated.") < summary_msg.index("Original request (kept for reference")
+
     def test_compact_without_summary(self):
         """Compaction without summary keeps only prefix + preserved."""
         msgs = [

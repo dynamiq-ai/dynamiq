@@ -117,7 +117,6 @@ def test_a_sub_agent_publishes_in_the_sandbox_it_borrows(llm, store, caplog):
     finally:
         _shared_session.reset(session_token)
 
-    # Reused later on its own: no workspace, so neither the tool nor its instructions.
     sub._sync_react_prompt_for_shared_sandbox()
     assert _artifact_tool(sub) is None
     assert "## Artifacts" not in _ops(sub)
@@ -157,8 +156,9 @@ def test_the_prompt_block_says_when_to_use_an_artifact(llm, store):
     assert "## Artifacts" in ops
     assert "`artifact` tool" in ops
     assert "Use output files instead" in ops
-    assert "'get' the artifact (it is saved into your workspace)" in ops
-    assert "then 'update' with that file and the artifact's 'artifact_id'" in ops
+    assert "'get' an artifact (it is saved into your workspace) only when you do not have its file" in ops
+    assert "earlier in this conversation is still in your workspace" in ops, "no reload in a later turn"
+    assert "'update' with that file and the artifact's 'artifact_id'" in ops
     assert "Never 'create' a changed copy" in ops
     assert "read it with 'get' before answering" in ops, "a reader agent must know published documents live here"
     assert "You cannot make a public link" in ops, "the agent points the user at sharing instead of improvising"
@@ -453,7 +453,6 @@ def test_repeated_gets_are_not_served_from_the_tool_cache(llm, store, mocker):
     result = agent.run({"input": "go"})
 
     assert result.status == RunnableStatus.SUCCESS
-    # The update reads metadata too, to check it builds on the latest; count the content reads only.
     reads = [call for call in gets.call_args_list if call.kwargs.get("include_content", True)]
     assert len(reads) == 2, "the second identical 'get' must reach the store"
     assert result.output["artifacts"][0]["version"] == 2
