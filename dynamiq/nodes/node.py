@@ -6,9 +6,12 @@ import inspect
 import logging
 import random
 import reprlib
+import threading
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Iterable, Iterator
 from concurrent.futures import TimeoutError
+from contextlib import contextmanager
 from datetime import datetime
 from functools import cached_property
 from queue import Empty
@@ -114,6 +117,8 @@ def is_retryable_error(exc: BaseException) -> bool:
     Only certainly-permanent failures are non-retryable; anything unrecognised is retried
     as before. Every node type runs through this loop, not only LLMs.
     """
+    if getattr(exc, "retryable", True) is False:
+        return False
     try:
         from litellm.exceptions import (
             AuthenticationError,
@@ -131,6 +136,70 @@ def is_retryable_error(exc: BaseException) -> bool:
         exc,
         (AuthenticationError, PermissionDeniedError, BadRequestError, NotFoundError, BudgetExceededError),
     )
+
+
+# The time.monotonic() by which the innermost node with a timeout that is running this code must finish.
+_execution_deadline: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "dynamiq_execution_deadline", default=None
+)
+
+
+@contextmanager
+def _deadline_after(timeout: float | None) -> Iterator[None]:
+    """Give code started in the block a deadline ``timeout`` seconds away, unless an earlier one applies."""
+    if timeout is None:
+        yield
+        return
+    deadline = time.monotonic() + timeout
+    current = _execution_deadline.get()
+    token = _execution_deadline.set(deadline if current is None else min(current, deadline))
+    try:
+        yield
+    finally:
+        _execution_deadline.reset(token)
+
+
+class _SharedInputQueue:
+    """The state of an input queue while ``maps`` running Maps share it; ``missed`` is set once a request times out."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.maps = 0
+        self.missed = False
+
+
+# Keyed by the queue's not_empty condition, which the shallow copy of the queue in a node's clone shares.
+_shared_input_queues: dict[threading.Condition, _SharedInputQueue] = {}
+_shared_input_queues_guard = threading.Lock()
+
+
+@contextmanager
+def share_input_queues(nodes: Iterable["Node"], config: RunnableConfig) -> Iterator[None]:
+    """Make the copies of ``nodes`` take turns on their input queues while the block runs.
+
+    A Map's copies of a node keep its id, and a reply names only the node it answers, so it cannot tell their
+    requests apart. A request on one of these queues waits until the one before it has its reply, and once a
+    request times out, later ones raise InputStreamingTimeoutError without asking: the reply to the missed request
+    may still come, and would be taken for theirs. The wait counts toward the timeout of the node making the
+    request, which gives up without asking once that timeout has passed.
+    """
+    keys = set()
+    for node in nodes:
+        streaming = getattr(config.nodes_override.get(node.id), "streaming", None) or node.streaming
+        if streaming.input_streaming_enabled:
+            keys.add(streaming.input_queue.not_empty)
+    with _shared_input_queues_guard:
+        for key in keys:
+            _shared_input_queues.setdefault(key, _SharedInputQueue()).maps += 1
+    try:
+        yield
+    finally:
+        with _shared_input_queues_guard:
+            for key in keys:
+                shared = _shared_input_queues[key]
+                shared.maps -= 1
+                if not shared.maps:
+                    del _shared_input_queues[key]
 
 
 class ErrorHandling(BaseModel):
@@ -240,7 +309,6 @@ class NodeDependency(BaseModel):
 
     @model_validator(mode="after")
     def validate_trigger(self) -> "NodeDependency":
-        # A Choice reports its options in a successful result, so an option can only follow a success.
         if self.trigger == DependencyTrigger.FAILURE and self.option:
             raise ValueError(
                 f"Dependency on '{self.node.id}' cannot both select option '{self.option}' and trigger on failure."
@@ -572,7 +640,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             and (isinstance(dep_output_data.output, dict))
             and (dep_condition_result := dep_output_data.output.get(depend.option))
         ):
-            # Restored from a checkpoint, a Choice's option results come back as plain dicts.
             if isinstance(dep_condition_result, dict):
                 dep_condition_result = RunnableResult.model_validate(dep_condition_result)
             if dep_condition_result.status == RunnableStatus.FAILURE:
@@ -902,7 +969,13 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         return data
 
     def send_streaming_approval_message(
-        self, template: str, input_data: dict, approval_config: ApprovalConfig, config: RunnableConfig = None, **kwargs
+        self,
+        template: str,
+        input_data: dict,
+        approval_config: ApprovalConfig,
+        config: RunnableConfig = None,
+        request_id: str | None = None,
+        **kwargs,
     ) -> ApprovalInputData:
         """
         Sends approval message and waits for response.
@@ -912,6 +985,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             input_data (dict): Data that will be sent.
             approval_config (ApprovalConfig): Configuration for approval.
             config (RunnableConfig, optional): Configuration for the runnable.
+            request_id (str, optional): Id of the request. The answer has to echo it; answers with another id are
+                ignored (they belong to an earlier request).
             **kwargs: Additional keyword arguments.
 
         Return:
@@ -921,7 +996,12 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         event = ApprovalStreamingOutputEventMessage(
             wf_run_id=config.run_id,
             entity_id=self.id,
-            data={"template": template, "data": input_data, "mutable_data_params": approval_config.mutable_data_params},
+            data={
+                "template": template,
+                "data": input_data,
+                "mutable_data_params": approval_config.mutable_data_params,
+                "request_id": request_id,
+            },
             event=approval_config.event,
             source=StreamingEntitySource(
                 id=self.id,
@@ -934,13 +1014,18 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         logger.info(self._node_run_log("sending approval."))
         check_cancellation(config)
 
-        self.run_on_node_execute_stream(callbacks=config.callbacks, event=event, **kwargs)
+        with self._input_queue_turn(config):
+            self.run_on_node_execute_stream(callbacks=config.callbacks, event=event, **kwargs)
 
-        output: ApprovalInputData = self.get_input_streaming_event(
-            event=approval_config.event, event_msg_type=ApprovalStreamingInputEventMessage, config=config
-        ).data
-
-        return output
+            while True:
+                output: ApprovalInputData = self.get_input_streaming_event(
+                    event=approval_config.event, event_msg_type=ApprovalStreamingInputEventMessage, config=config
+                ).data
+                if request_id is None or output.request_id == request_id:
+                    return output
+                logger.warning(
+                    self._node_run_log(f"ignoring an approval answer that is not for request {request_id}.")
+                )
 
     def send_console_approval_message(self, template: str, config: RunnableConfig = None) -> ApprovalInputData:
         """
@@ -960,7 +1045,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         result = {}
 
         def _read_input():
-            result["feedback"] = input(template)
+            try:
+                result["feedback"] = input(template)
+            except BaseException as e:  # noqa: BLE001 - re-raised in the caller; a thread would swallow it
+                result["error"] = e
 
         input_thread = _threading.Thread(target=_read_input, daemon=True)
         input_thread.start()
@@ -969,6 +1057,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             check_cancellation(config)
             input_thread.join(timeout=0.5)
 
+        if "error" in result:
+            raise result["error"]
         return ApprovalInputData(feedback=result.get("feedback", ""))
 
     def send_approval_message(
@@ -993,7 +1083,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             logger.info(self._node_run_log("using stored approval response from checkpoint."))
             approval_result = self._pending_approval_response
         else:
-            message = Template(approval_config.msg_template).render(self.to_dict(), input_data=input_data)
+            # The tracing form masks connection credentials, which a user-written template could otherwise render.
+            message = Template(approval_config.msg_template).render(
+                self.to_dict(for_tracing=True), input_data=input_data
+            )
 
             check_cancellation(config)
             match approval_config.feedback_method:
@@ -1722,7 +1815,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             TimeoutError: If execution exceeds the timeout.
             Exception: If execution fails.
         """
-        future = executor.submit(self.execute, input_data, config=config, **kwargs)
+        with _deadline_after(timeout):
+            future = executor.submit(self.execute, input_data, config=config, **kwargs)
 
         try:
             return future.result(timeout=timeout)
@@ -1777,10 +1871,11 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
             try:
                 if timeout is not None:
-                    output = await asyncio.wait_for(
-                        self.execute_async(input_data=input_data, config=config, **merged_kwargs),
-                        timeout=timeout,
-                    )
+                    with _deadline_after(timeout):
+                        output = await asyncio.wait_for(
+                            self.execute_async(input_data=input_data, config=config, **merged_kwargs),
+                            timeout=timeout,
+                        )
                 else:
                     output = await self.execute_async(input_data=input_data, config=config, **merged_kwargs)
 
@@ -1814,6 +1909,40 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
     def get_context_for_input_schema(self) -> dict:
         """Provides context for input schema that is required for proper validation."""
         return {}
+
+    @contextmanager
+    def _input_queue_turn(self, config: RunnableConfig) -> Iterator[None]:
+        """Hold the node's input queue for one request and its reply, if a Map shares it (see share_input_queues)."""
+        streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
+        with _shared_input_queues_guard:
+            shared = _shared_input_queues.get(getattr(streaming.input_queue, "not_empty", None))
+        if shared is None:
+            yield
+            return
+        deadline = _execution_deadline.get()
+
+        def check_still_wanted() -> None:
+            check_cancellation(config)
+            # The node has timed out, so its thread only lingers: a request sent now would be for nobody.
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutError("Timed out waiting for a turn on the input queue.")
+
+        while not shared.lock.acquire(timeout=0.5):
+            check_still_wanted()
+        try:
+            check_still_wanted()
+            if shared.missed:
+                logger.warning(
+                    self._node_run_log("not asking: the reply to an earlier request on its input queue never came.")
+                )
+                raise InputStreamingTimeoutError(node_id=self.id, timeout=streaming.timeout)
+            try:
+                yield
+            except InputStreamingTimeoutError:
+                shared.missed = True
+                raise
+        finally:
+            shared.lock.release()
 
     def get_input_streaming_event(
         self,
