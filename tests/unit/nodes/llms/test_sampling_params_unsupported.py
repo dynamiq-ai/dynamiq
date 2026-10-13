@@ -216,6 +216,96 @@ class TestReactiveBackstop:
         assert "temperature" not in recovered
 
 
+class TestStopBackstop:
+    @pytest.fixture
+    def custom(self):
+        return CustomLLM(name="c", model="openai/some-model", connection=HttpApiKey(url="https://x", api_key="k"))
+
+    def test_recovers_when_the_endpoint_rejects_stop(self, custom):
+        custom.stop = ["Observation:"]
+        common = {"model": custom.model, "stop": ["Observation:"], "temperature": 0.1, "max_tokens": 100}
+        exc = Exception("litellm.BadRequestError: OpenAIException - `stop` is not supported")
+        recovered = custom._recover_completion_params(exc, common)
+        assert recovered is not None
+        assert "stop" not in recovered
+        # Only the rejected param goes; the rest of the request is kept.
+        assert recovered["temperature"] == 0.1
+        assert recovered["max_tokens"] == 100
+        # Pure until the retry succeeds, then persisted so later calls skip the failing attempt.
+        assert custom.stop == ["Observation:"]
+        custom._persist_completion_recovery(common, recovered)
+        assert custom.stop is None
+
+    def test_no_recovery_when_stop_is_only_part_of_another_word(self, custom):
+        common = {"model": custom.model, "stop": ["Observation:"], "max_tokens": 100}
+        exc = Exception("litellm.BadRequestError: nonstop mode is not supported for this model")
+        assert custom._recover_completion_params(exc, common) is None
+
+    def test_no_recovery_on_stop_validation_error(self, custom):
+        common = {"model": custom.model, "stop": ["a", "b", "c", "d", "e"], "max_tokens": 100}
+        exc = Exception("litellm.BadRequestError: stop: array too long, expected at most 4 items")
+        assert custom._recover_completion_params(exc, common) is None
+
+    def test_no_recovery_when_no_stop_was_sent(self, custom):
+        common = {"model": custom.model, "max_tokens": 100}
+        exc = Exception("litellm.BadRequestError: OpenAIException - `stop` is not supported")
+        assert custom._recover_completion_params(exc, common) is None
+
+
+class TestToolChoiceBackstop:
+    AUTO_ONLY_ERROR = (
+        'litellm.BadRequestError: OpenAIException - only `"auto"` is supported for `tool_choice`. '
+        '`"none"`, `"required"`, and named function choices are not currently supported'
+    )
+
+    @pytest.fixture
+    def custom(self):
+        return CustomLLM(name="c", model="openai/some-model", connection=HttpApiKey(url="https://x", api_key="k"))
+
+    def test_falls_back_to_auto_when_only_auto_is_accepted(self, custom):
+        tools = [{"type": "function", "function": {"name": "t"}}]
+        common = {"model": custom.model, "tools": tools, "tool_choice": "required", "max_tokens": 100}
+        recovered = custom._recover_completion_params(Exception(self.AUTO_ONLY_ERROR), common)
+        assert recovered is not None
+        assert recovered["tool_choice"] == "auto"
+        assert recovered["tools"] == tools
+        # Pure until the retry succeeds, then persisted so later calls skip the failing attempt.
+        assert custom.tool_choice is None
+        custom._persist_completion_recovery(common, recovered)
+        assert custom.tool_choice == "auto"
+
+    def test_no_recovery_when_auto_was_already_sent(self, custom):
+        common = {"model": custom.model, "tools": [{}], "tool_choice": "auto", "max_tokens": 100}
+        assert custom._recover_completion_params(Exception(self.AUTO_ONLY_ERROR), common) is None
+
+    def test_named_function_choice_falls_back_to_auto(self, custom):
+        named = {"type": "function", "function": {"name": "t"}}
+        common = {"model": custom.model, "tools": [{}], "tool_choice": named, "max_tokens": 100}
+        exc = Exception("litellm.BadRequestError: tool_choice with a named function is not supported")
+        assert custom._recover_completion_params(exc, common)["tool_choice"] == "auto"
+
+    def test_none_is_never_rewritten_to_auto(self, custom):
+        # "none" rules tool calls out; switching it to "auto" would turn them back on.
+        common = {"model": custom.model, "tools": [{}], "tool_choice": "none", "max_tokens": 100}
+        assert custom._recover_completion_params(Exception(self.AUTO_ONLY_ERROR), common) is None
+
+    def test_no_recovery_on_a_validation_error_listing_allowed_values(self, custom):
+        common = {"model": custom.model, "tools": [{}], "tool_choice": "required", "max_tokens": 100}
+        exc = Exception(
+            "litellm.BadRequestError: Invalid value for tool_choice. Supported values are: 'none', 'auto', 'required'"
+        )
+        assert custom._recover_completion_params(exc, common) is None
+
+    def test_no_recovery_for_a_misconfigured_value(self, custom):
+        common = {"model": custom.model, "tools": [{}], "tool_choice": "requierd", "max_tokens": 100}
+        assert custom._recover_completion_params(Exception(self.AUTO_ONLY_ERROR), common) is None
+
+    def test_no_recovery_on_another_tool_choice_error(self, custom):
+        common = {"model": custom.model, "tools": [{}], "tool_choice": "required", "max_tokens": 100}
+        exc = Exception("litellm.BadRequestError: tool_choice is set but no tools were provided")
+        assert custom._recover_completion_params(exc, common) is None
+
+
 class TestBedrockBackstop:
     @pytest.fixture
     def bedrock(self):
