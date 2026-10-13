@@ -276,3 +276,17 @@ def test_dynamiq_connection_keeps_a_given_user_agent():
     connection = DynamiqConnection(url="https://api.example.test", api_key="key", headers={"User-Agent": "custom/1.0"})
 
     assert connection.headers["User-Agent"] == "custom/1.0"
+
+
+def test_connection_repr_hides_credentials():
+    """repr() and str() of a connection, and of a model holding one, show only its id and type."""
+    from dynamiq.connections import E2B as E2BConnection
+    from dynamiq.sandboxes.e2b import E2BSandbox
+
+    connection = E2BConnection(api_key="e2b_secret_value", domain="private.example.com")
+
+    for text in (repr(connection), str(connection), repr(E2BSandbox(connection=connection))):
+        assert "e2b_secret_value" not in text
+        assert "private.example.com" not in text
+    assert connection.id in repr(connection)
+    assert connection.api_key == "e2b_secret_value"
