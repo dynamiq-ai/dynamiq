@@ -165,7 +165,7 @@ class TokenSplitterComponent(SplitterComponentBase):
             chunk = tokenizer.decode(window)
             if "\ufffd" in chunk:
                 # A window cut through a multi-byte character: use the whole characters from the source text.
-                # Such chunks may exceed chunk_size by a token or two.
+                # Such chunks may exceed chunk_size by a few tokens.
                 chunk = text[start_index:end_index]
             if chunk:
                 chunks.append((chunk, start_index, end_index))
