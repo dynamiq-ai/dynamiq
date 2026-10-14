@@ -8,6 +8,7 @@ import requests
 from tenacity import retry, retry_if_exception_type, retry_if_result, stop_after_attempt, wait_exponential
 
 from dynamiq.connections import HTTPMethod
+from dynamiq.utils.user_agent import CLI_USER_AGENT
 
 from .config import Settings
 
@@ -71,6 +72,7 @@ class ApiClient:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._client = requests.Session()
+        self._client.headers["User-Agent"] = CLI_USER_AGENT
 
     def get(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
         return self._request("GET", path, params=params)
@@ -112,15 +114,25 @@ class ApiClient:
     ) -> Any:
         return self._request("PUT", path, headers=headers, json=json, data=data, files=files)
 
-    def delete(
+    def patch(
         self,
         path: str,
         *,
         headers: dict[str, Any] | None = None,
         json: dict[str, Any] | None = None,
+    ) -> Any:
+        return self._request("PATCH", path, headers=headers, json=json)
+
+    def delete(
+        self,
+        path: str,
+        *,
+        headers: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
     ) -> Any:
-        return self._request("DELETE", path, headers=headers, json=json, data=data)
+        return self._request("DELETE", path, headers=headers, params=params, json=json, data=data)
 
     def _request_once(self, method, path, **kwargs):
         """One attempt, no retry - the undecorated call.

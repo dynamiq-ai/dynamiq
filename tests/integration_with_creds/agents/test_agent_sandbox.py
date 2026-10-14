@@ -154,9 +154,7 @@ def test_agent_with_e2b_sandbox_executes_shell(openai_llm, e2b_connection):
         assert b"Hello from FileWriteTool" in stored, f"Expected file on sandbox, got: {stored[:200]}"
 
         executed_tool_names = {run.name for run in tracing_callback.runs.values()}
-        assert (
-            "FileWriteTool" in executed_tool_names
-        ), f"Expected 'filewritetool' in traced runs, got: {executed_tool_names}"
+        assert "file-write" in executed_tool_names, f"Expected 'file-write' in traced runs, got: {executed_tool_names}"
 
     finally:
         sandbox.close(kill=True)

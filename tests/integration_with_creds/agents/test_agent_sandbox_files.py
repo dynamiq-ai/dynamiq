@@ -206,7 +206,6 @@ def test_agent_sandbox_with_input_files_returns_output(openai_llm, e2b_connectio
             llm=openai_llm,
             role=(
                 "You are a helpful assistant that can execute commands in the sandbox. "
-                "When asked to create files, save them to /home/user/output so they are returned. "
                 "For Python tasks, write a .py script file first, then run it with 'python script.py'. "
                 "Never use Python one-liners with semicolons for multi-step logic."
             ),
@@ -223,9 +222,11 @@ def test_agent_sandbox_with_input_files_returns_output(openai_llm, e2b_connectio
 
         input_data = {
             "input": (
-                "I've uploaded scores.csv. Read it from /home/user/scores.csv, "
+                # Paths match what the agent is told about its sandbox: a wrong upload path or a
+                # save directory that does not exist costs it most of its loops.
+                "I've uploaded scores.csv. Read it from /home/user/input/scores.csv, "
                 "calculate the average score using Python, "
-                "and save the result to /home/user/average.txt. "
+                "save the result to /home/user/average.txt and return that file. "
                 "Write a Python script file and run it rather than using a one-liner."
             ),
             "files": [input_file],

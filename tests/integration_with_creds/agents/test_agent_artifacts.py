@@ -40,7 +40,6 @@ API_URL = "https://artifacts.simulated"
 KINDS = {kind.value for kind in ArtifactKind}
 TEXT_KIND_VALUES = {kind.value for kind in TEXT_KINDS}
 
-# The platform's content rules (nexus artifacts/service/content.go): limits and MIME types per kind.
 MAX_BYTES = {"html": 16 << 20, "bundle": 100 << 20}
 DEFAULT_MAX_BYTES = 25 << 20
 KIND_MIME_TYPES = {
@@ -57,7 +56,6 @@ KIND_MIME_TYPES = {
 IMAGE_SIGNATURES = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a")
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 
-# Arbitrary on purpose: a model invents plausible metrics, so only these prove the record was read.
 EMPLOYEE = "Dana Okafor"
 MTTR = "37 minutes"
 RATING = "Exceeds expectations"
@@ -178,7 +176,6 @@ class ArtifactAPISimulator:
         self.calls: list[tuple[str, str]] = []
         self.if_matches: list[str | None] = []
 
-    # -- transport ---------------------------------------------------------
     def request(self, verb, url, headers=None, params=None, json=None, data=None, files=None, timeout=None):
         path = url.split("/v1/artifacts", 1)[1]
         self.calls.append((verb, path))
@@ -218,7 +215,6 @@ class ArtifactAPISimulator:
         body["content"] = content if isinstance(content, bytes) else content.read()
         return body
 
-    # -- endpoints ---------------------------------------------------------
     def _create(self, body, client, upload):
         file_name = body.get("file_name") or body.get("_file_name")
         missing = {k: "cannot be blank" for k in ("name", "kind") if not body.get(k)}
@@ -276,8 +272,6 @@ class ArtifactAPISimulator:
                 {"content": "cannot be blank"},
             )
         content = content.encode() if isinstance(content, str) else content
-        # Every version is checked against the artifact's kind, which never changes, and a bundle
-        # opens on index.html unless this version names another page.
         problem, entry_path = _check_content(artifact["kind"], content, body.get("entry_path"))
         if problem:
             return problem
@@ -341,7 +335,6 @@ class ArtifactAPISimulator:
         artifact["visibility"] = "link"
         return _Response(200, {"data": artifact["share"]})
 
-    # -- helpers -----------------------------------------------------------
     def _record(
         self,
         artifact_id,
@@ -488,7 +481,6 @@ JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 16
 DOCX = b"PK\x03\x04docx-bytes"
 XLSX = b"PK\x03\x04xlsx-bytes"
 
-# One case per kind: (file, v1, explicit kind, file published as v2 or None for the loaded copy, v2).
 EVERY_KIND = [
     pytest.param("q3.html", "<!doctype html><p>v1</p>", None, None, "<!doctype html><p>v2</p>", id="html"),
     pytest.param("notes.md", "# Notes v1", None, None, "# Notes v2", id="markdown"),
@@ -542,7 +534,6 @@ def test_every_kind_is_created_loaded_and_updated_through_the_tool(api, backend,
     assert first["content"] == v1_bytes
     assert first["entry_path"] == entry_path
 
-    # A later conversation: a fresh tool loads the artifact and publishes a changed file as v2.
     later = ArtifactTool(backend=backend, workspace=workspace)
     loaded = _tool_run(later, action="get", artifact_id=artifact_id)
     assert workspace.retrieve(loaded["path"]) == v1_bytes, "the loaded copy is the published bytes"
@@ -622,7 +613,6 @@ def test_a_deliverable_is_published_then_read_by_another_agent(openai_llm, run_c
     ], f"Run output did not report the deliverable's latest version: {refs}"
     assert html not in written.output["content"], "The answer should link the record, not paste it."
 
-    # A new agent and conversation; the only thing carried over is the backend.
     reader = Agent(
         name="ReviewReader",
         llm=openai_llm,
