@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from dynamiq.utils.json_parser import clean_json_string, parse_llm_json_output
+from dynamiq.utils.json_parser import _remove_comments_outside_strings, clean_json_string, parse_llm_json_output
 
 
 def test_basic_single_quoted_keys_and_strings():
@@ -250,3 +250,97 @@ def test_empty_json_object_and_array():
     # Just confirm that empty objects/arrays parse without error.
     assert parse_llm_json_output("{}") == {}
     assert parse_llm_json_output("[]") == []
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "True False None",
+        "literal ,} and ,]",
+        "It's 'quoted'",
+        'He said "True" and then "None"',
+        "path\\True\\None",
+        "中文 True // text /* text */",
+    ],
+)
+def test_json_corrections_preserve_double_quoted_strings(message):
+    quoted = json.dumps(message, ensure_ascii=False)
+    response = f'{{"message": {quoted}, "active": True, "missing": None,}}'
+    expected = {"message": message, "active": True, "missing": None}
+
+    assert json.loads(clean_json_string(response)) == expected
+    assert parse_llm_json_output(response) == expected
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "True False None",
+        "literal ,} and ,]",
+        "It's 'quoted'",
+        'He said "True" and then "None"',
+    ],
+)
+def test_json_corrections_preserve_single_quoted_strings(message):
+    quoted = "'" + message.replace("'", "\\'") + "'"
+    response = f"{{'message': {quoted}, 'active': False, 'missing': None,}}"
+    expected = {"message": message, "active": False, "missing": None}
+
+    assert json.loads(clean_json_string(response)) == expected
+    assert parse_llm_json_output(response) == expected
+
+
+def test_json_corrections_preserve_quoted_keys_and_nested_values():
+    response = """{
+        "True": ["False", "None", "keep ,]",],
+        'None': {'False': "keep ,}",},
+    }"""
+    expected = {"True": ["False", "None", "keep ,]"], "None": {"False": "keep ,}"}}
+
+    assert json.loads(clean_json_string(response)) == expected
+    assert parse_llm_json_output(response) == expected
+
+
+@pytest.mark.parametrize("comment_text", ["Don't change this value", "'quoted' comment"])
+@pytest.mark.parametrize("comment_style", ["line", "block"])
+def test_json_extraction_ignores_apostrophes_in_comments(comment_text, comment_style):
+    comment = f"// {comment_text}" if comment_style == "line" else f"/* {comment_text} */"
+    response = f'{{\n{comment}\n"message": "hello", "active": True,\n}}'
+
+    assert parse_llm_json_output(response) == {"message": "hello", "active": True}
+
+
+@pytest.mark.parametrize("n", [2000, 4000, 8000, 16000])
+def test_json_cleanup_preserves_repeated_escaped_quotes(n):
+    response = "{" + ('\\"' + "\n") * n + "}"
+
+    assert clean_json_string(response) == response
+
+
+@pytest.mark.parametrize("trailing_backslashes", [1, 2])
+@pytest.mark.parametrize("note", ["/* keep me */", "// keep me"])
+def test_escaped_backslash_at_string_end_preserves_following_string(trailing_backslashes, note):
+    expected = {"path": "C:\\dir" + "\\" * trailing_backslashes, "note": note, "x": 1}
+    # A trailing comma forces the public parser through comment cleanup.
+    source = json.dumps(expected)[:-1] + ",}"
+
+    assert json.loads(clean_json_string(source)) == expected
+    assert parse_llm_json_output(source) == expected
+
+
+@pytest.mark.parametrize("quote", ["'", '"'])
+@pytest.mark.parametrize("escaped_backslashes", [2, 4])
+def test_comment_cleanup_closes_strings_after_escaped_backslashes(quote, escaped_backslashes):
+    path = quote + "C:\\\\dir" + "\\" * escaped_backslashes + quote
+    source = f"{{{quote}path{quote}: {path}, /* remove me */ " f"{quote}note{quote}: {quote}/* keep me */{quote}}}"
+
+    assert _remove_comments_outside_strings(source) == source.replace("/* remove me */", "")
+
+
+@pytest.mark.parametrize("backslashes_before_quote", [0, 1])
+def test_comment_cleanup_keeps_escaped_quotes_inside_strings(backslashes_before_quote):
+    expected = {"note": "prefix " + "\\" * backslashes_before_quote + '" /* keep me */ // keep me', "x": 1}
+    source = json.dumps(expected)[:-1] + ", /* remove me */}"
+
+    assert json.loads(clean_json_string(source)) == expected
+    assert parse_llm_json_output(source) == expected
