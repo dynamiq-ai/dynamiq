@@ -139,6 +139,9 @@ def _approval_lock_for(approver: "Node", config: RunnableConfig | None) -> threa
 
 _model_output_rewritten: ContextVar[bool] = ContextVar("dynamiq_agent_model_output_rewritten", default=False)
 
+# Marks that a run did not record its memory scope's newest item, so the concurrent-save check is skipped.
+_NOT_LOADED = object()
+
 
 # Per-call tool overlay (e.g. LTM tools bound to a request's user_id); isolated
 # per thread / per asyncio task via ContextVar.
@@ -917,6 +920,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             # inherit this agent's overlay via ContextAwareThreadPoolExecutor.
             sandbox_overlay_token = _shared_sandbox_tools.set(self._maybe_borrow_shared_sandbox())
             if use_memory:
+                # Read before the history, so a save that lands while it loads is still noticed.
+                memory_newest_at_load = self._newest_memory_item_key(custom_metadata)
                 history_messages = self._retrieve_memory(input_data)
                 if len(history_messages) > 0:
                     history_messages.insert(
@@ -930,6 +935,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     )
             else:
                 history_messages = None
+                memory_newest_at_load = _NOT_LOADED
 
             images = []
             videos = []
@@ -1028,21 +1034,15 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                         content=self._answer_as_text(result), source=self.name, step="answer", config=config, **kwargs
                     )
             except CanceledException:
+                # The prompt ends mid-step (e.g. a pending tool call), so only the input is kept.
                 if use_memory:
                     try:
-                        self._save_history_to_memory(custom_metadata)
+                        self._append_user_input_to_memory(custom_metadata)
                     except Exception as save_error:
                         logger.error(
-                            f"Agent {self.name} - {self.id}: failed to save history to memory "
+                            f"Agent {self.name} - {self.id}: failed to save user input to memory "
                             f"after cancel: {save_error}",
                         )
-                        try:
-                            self._append_user_input_to_memory(custom_metadata)
-                        except Exception as save_error2:
-                            logger.error(
-                                f"Agent {self.name} - {self.id}: also failed to save user input "
-                                f"after cancel: {save_error2}",
-                            )
                 raise
             except Exception:
                 if use_memory:
@@ -1067,7 +1067,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     self._save_history_to_memory(
                         custom_metadata,
                         final_output=memory_result,
-                        answer_rewritten=bool(hook_blocked or self.hooks or current_hook_ctx.get().hooks),
+                        newest_at_load=memory_newest_at_load,
                     )
                 except Exception as save_error:
                     logger.error(
@@ -1257,6 +1257,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         """Return True when a message is an internal ReAct/tool-trace entry."""
         content = message.content.strip()
 
+        # Function calling: tool results and the assistant turns that made the calls.
+        if message.role == MessageRole.TOOL or (message.role == MessageRole.ASSISTANT and message.tool_calls):
+            return True
+
         if message.role == MessageRole.USER:
             return content.startswith("Observation:")
 
@@ -1435,12 +1439,16 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         self,
         metadata: dict,
         final_output: Any | None = None,
-        answer_rewritten: bool = True,
+        newest_at_load: Any = _NOT_LOADED,
     ) -> None:
         """Snapshot prompt state into memory for current user/session scope.
 
-        ``answer_rewritten`` tells FULL mode whether ``final_output`` may differ from the model's own final
-        message (hooks or memory transforms ran); when False the prompt's final message is stored as is.
+        The trailing assistant turn is always ``final_output`` as plain text, never the model's raw
+        final message (XML, ``Thought:``/``Answer:`` text, JSON or a ``provide_final_answer`` call).
+
+        ``newest_at_load`` is ``_newest_memory_item_key`` as it stood when this run loaded its history.
+        When the scope's newest item has changed since, another run saved in between, and replacing the
+        scope would delete that run's turn, so only this run's input and answer are appended instead.
 
         Replaces only the messages matching current ``user_id``/``session_id``
         filters. What gets written depends on ``memory.save_mode``: FULL stores
@@ -1490,10 +1498,18 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             self._append_fallback_messages(metadata, raw_snapshot_messages, final_output=final_output)
             return
 
+        if newest_at_load is not _NOT_LOADED and self._newest_memory_item_key(metadata) != newest_at_load:
+            logger.info(
+                f"Agent {self.name} - {self.id}: memory changed since this run loaded it (a concurrent run "
+                "saved), appending this turn instead of replacing the session.",
+            )
+            self._append_fallback_messages(metadata, raw_snapshot_messages, final_output=final_output)
+            return
+
         snapshot_messages = raw_snapshot_messages
         if self.memory.save_mode == MemorySaveMode.INPUT_OUTPUT:
             snapshot_messages = self._input_output_history(metadata, snapshot_messages, final_output=final_output)
-        elif answer_rewritten:
+        else:
             snapshot_messages = self._with_final_output(metadata, snapshot_messages, final_output)
 
         saved = len(snapshot_messages)
@@ -1523,6 +1539,18 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         pinned_content = extract_message_text(self._pinned_input)
         self.memory.add(role=MessageRole.USER, content=pinned_content, metadata=metadata.copy())
         logger.info(f"Agent {self.name} - {self.id}: saved user input to memory after agent error")
+
+    def _newest_memory_item_key(self, metadata: dict) -> Any:
+        """Identity of the newest stored item in the run's user/session scope (None when empty).
+
+        Only meaningful where the snapshot replace runs (both ids set); elsewhere it returns
+        ``_NOT_LOADED`` without reading memory, which skips the concurrent-save check.
+        """
+        user_id, session_id = metadata.get("user_id"), metadata.get("session_id")
+        if not (user_id and session_id):
+            return _NOT_LOADED
+        newest = self.memory.search(query=None, filters={"user_id": user_id, "session_id": session_id}, limit=1)
+        return Memory._dedup_key(newest[0]) if newest else None
 
     def _append_fallback_messages(
         self,
