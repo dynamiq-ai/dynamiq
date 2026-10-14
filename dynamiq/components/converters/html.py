@@ -384,21 +384,19 @@ class MarkdownConverter:
 
         self.process_children(element)
 
-        if not self.table_headers and self.table_rows:
-            self.table_headers = self.table_rows[0]
-            self.table_rows = self.table_rows[1:]
+        rows = [row for row in self.table_rows if any(row)]
+        if not self.table_headers and rows:
+            self.table_headers, rows = rows[0], rows[1:]
 
         if not self.table_headers:
             self.in_table = False
             return ""
 
-        result = []
-        result.append("| " + " | ".join(self.table_headers) + " |")
-        result.append("| " + " | ".join(["---"] * len(self.table_headers)) + " |")
-
-        for row in self.table_rows:
-            padded_row = row + [""] * (len(self.table_headers) - len(row))
-            result.append("| " + " | ".join(padded_row) + " |")
+        width = max(len(row) for row in [self.table_headers, *rows])
+        header = self.table_headers + [""] * (width - len(self.table_headers))
+        result = ["| " + " | ".join(header) + " |", "| " + " | ".join(["---"] * width) + " |"]
+        for row in rows:
+            result.append("| " + " | ".join(row + [""] * (width - len(row))) + " |")
 
         self.in_table = False
         return "\n\n" + "\n".join(result) + "\n\n"

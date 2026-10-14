@@ -309,6 +309,25 @@ def test_html_converter_header_row_of_th_cells_after_leading_rows():
     assert "| 1 | 2 |" in document["content"]
 
 
+def _convert_html(content: bytes, name: str) -> str:
+    html_buffer = BytesIO(content)
+    html_buffer.name = name
+    wf_html = Workflow(flow=Flow(nodes=[HTMLConverter()]))
+    response = wf_html.run(input_data={"files": [html_buffer]})
+    assert response.status == RunnableStatus.SUCCESS
+    return response.output[wf_html.flow.nodes[0].id]["output"]["documents"][0]["content"]
+
+
+def test_html_converter_pads_narrow_colspan_header_row():
+    content = b"<table><tr><th colspan='2'>Title</th></tr><tr><td>a</td><td>b</td><td>c</td></tr></table>"
+    assert "| Title |  |  |\n| --- | --- | --- |\n| a | b | c |" in _convert_html(content, "colspan.html")
+
+
+def test_html_converter_skips_leading_empty_row():
+    content = b"<table><tr></tr><tr><td>A</td><td>B</td></tr><tr><td>1</td><td>2</td></tr></table>"
+    assert "| A | B |\n| --- | --- |\n| 1 | 2 |" in _convert_html(content, "empty_row.html")
+
+
 def test_html_converter_with_non_utf8_charset():
     content = '<html><head><meta charset="iso-8859-1"></head><body><p>café</p></body></html>'.encode("iso-8859-1")
     html_buffer = BytesIO(content)
