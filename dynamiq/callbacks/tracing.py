@@ -8,11 +8,13 @@ from importlib.metadata import distributions
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.callbacks.base import get_execution_run_id, get_parent_run_id, get_run_id
+from dynamiq.checkpoints.types import RunPausedException
 from dynamiq.clients import BaseTracingClient, DynamiqTracingClient
+from dynamiq.types.streaming import InputStreamingTimeoutError
 from dynamiq.utils import JsonWorkflowEncoder, format_value, generate_uuid
 
 UTC = timezone.utc
@@ -24,6 +26,7 @@ class RunStatus(str, Enum):
     FAILED = "failed"
     SKIPPED = "skipped"
     CANCELED = "canceled"
+    PAUSED = "paused"
 
 
 class RunType(str, Enum):
@@ -148,6 +151,10 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    # Runs and executions stopped by an input timeout. Whether that is a failure is known only once the
+    # flow ends: with a checkpoint the run pauses to wait for the input, and these runs are what it waits on.
+    _input_timeouts: list[tuple["Run | ExecutionRun", BaseException]] = PrivateAttr(default_factory=list)
+
     @cached_property
     def host(self) -> dict:
         """Get host information.
@@ -215,6 +222,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             **kwargs (Any): Additional arguments.
         """
         run_id = get_run_id(kwargs)
+        self._input_timeouts.clear()
 
         self.runs[run_id] = Run(
             id=run_id,
@@ -261,17 +269,13 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
-        run.status = RunStatus.FAILED
 
         failed_nodes = kwargs.get("failed_nodes", [])
         failed_nodes_info = [node.to_dict() if hasattr(node, "to_dict") else node for node in failed_nodes]
         if failed_nodes_info:
             run.metadata["failed_nodes"] = failed_nodes_info
 
-        run.error = {
-            "message": str(error),
-            "traceback": traceback.format_exc(),
-        }
+        self._record_error(run, error)
 
         self.flush()
 
@@ -332,17 +336,13 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
-        run.status = RunStatus.FAILED
 
         failed_nodes = kwargs.get("failed_nodes", [])
         failed_nodes_info = [node.to_dict() if hasattr(node, "to_dict") else node for node in failed_nodes]
         if failed_nodes_info:
             run.metadata["failed_nodes"] = failed_nodes_info
 
-        run.error = {
-            "message": str(error),
-            "traceback": traceback.format_exc(),
-        }
+        self._record_error(run, error)
 
         # If parent_run_id is None, the run is the highest in the execution tree
         if run.parent_run_id is None:
@@ -399,11 +399,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             self.runs[run_id] = run
 
         run.end_time = datetime.now(UTC)
-        run.status = RunStatus.FAILED
-        run.error = {
-            "message": str(error),
-            "traceback": traceback.format_exc(),
-        }
+        self._record_error(run, error)
         run.metadata["is_mocked"] = kwargs.get("is_mocked", False)
 
         # If parent_run_id is None, the run is the highest in the execution tree
@@ -490,11 +486,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         run = ensure_run(get_run_id(kwargs), self.runs)
         execution = ensure_execution_run(get_execution_run_id(kwargs), run.executions)
         execution.end_time = datetime.now(UTC)
-        execution.status = RunStatus.FAILED
-        execution.error = {
-            "message": str(error),
-            "traceback": traceback.format_exc(),
-        }
+        self._record_error(execution, error)
 
     def on_node_execute_run(self, serialized: dict[str, Any], **kwargs: Any):
         """Called when the node execute runs.
@@ -553,6 +545,56 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
 
         if run.parent_run_id is None:
             self.flush()
+
+    def _record_error(self, run: "Run | ExecutionRun", error: BaseException) -> None:
+        """Record why a run stopped: a pause is not a failure.
+
+        A paused run waits for input or a time and continues when it resumes. The pause reaches the flow and
+        workflow as ``RunPausedException``; a node waiting for input stops on its input timeout first, which
+        becomes a pause only when the flow then pauses, so it is recorded as a failure until then.
+        """
+        if isinstance(error, RunPausedException):
+            self._mark_paused(run, error)
+            if isinstance(run, Run):
+                for execution in run.executions:
+                    if execution.status is None:
+                        execution.end_time = run.end_time
+                        self._mark_paused(execution, error)
+            for waiting, timeout in self._input_timeouts:
+                self._mark_paused(waiting, timeout)
+                if isinstance(waiting, Run):
+                    self._mark_failed_ancestors_paused(waiting, timeout)
+            self._input_timeouts.clear()
+            return
+
+        run.status = RunStatus.FAILED
+        run.error = {
+            "message": str(error),
+            "traceback": traceback.format_exc(),
+        }
+        if isinstance(error, InputStreamingTimeoutError):
+            self._input_timeouts.append((run, error))
+
+    def _mark_failed_ancestors_paused(self, run: "Run", reason: BaseException) -> None:
+        """The nodes around a waiting one, such as the agent whose tool asked, stopped because of the wait."""
+        seen = set()
+        parent = self.runs.get(run.parent_run_id) if run.parent_run_id else None
+        while parent is not None and parent.id not in seen and parent.type == RunType.NODE:
+            seen.add(parent.id)
+            if parent.status == RunStatus.FAILED:
+                self._mark_paused(parent, reason)
+                for execution in parent.executions:
+                    if execution.status == RunStatus.FAILED:
+                        self._mark_paused(execution, reason)
+            parent = self.runs.get(parent.parent_run_id) if parent.parent_run_id else None
+
+    @staticmethod
+    def _mark_paused(run: "Run | ExecutionRun", reason: BaseException) -> None:
+        run.status = RunStatus.PAUSED
+        run.error = None
+        if run.metadata is None:
+            run.metadata = {}
+        run.metadata["pause"] = {"message": str(reason)}
 
     def flush(self):
         """Flush the runs to the tracing client."""
