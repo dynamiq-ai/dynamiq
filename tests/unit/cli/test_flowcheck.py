@@ -364,13 +364,24 @@ def judgement(**overrides) -> dict:
 
 
 def system_one_judge(**overrides) -> dict:
-    judge = {"type": "dynamiq.nodes.detectors.SystemOne", "connection": str(uuid.uuid4())}
+    judge = {
+        "id": "judge",
+        "name": "judge",
+        "type": "dynamiq.nodes.detectors.SystemOne",
+        "connection": str(uuid.uuid4()),
+    }
     judge.update(overrides)
     return judge
 
 
 def llm_judge(**overrides) -> dict:
-    judge = {"type": "dynamiq.nodes.llms.OpenAI", "model": "gpt-4o", "connection": str(uuid.uuid4())}
+    judge = {
+        "id": "judge",
+        "name": "judge",
+        "type": "dynamiq.nodes.llms.OpenAI",
+        "model": "gpt-4o",
+        "connection": str(uuid.uuid4()),
+    }
     judge.update(overrides)
     return judge
 
@@ -438,7 +449,8 @@ def test_a_judge_missing_what_its_node_class_requires_is_caught_before_the_load_
     named = errors_of(flow_with(judgement(judge={"type": "dynamiq.nodes.agents.Agent", "llm": llm_judge(model="")})))
     assert [e for e in named if "judge.llm: an LLM node needs `model`" in e], named
 
-    assert errors_of(flow_with(judgement(judge={"type": "dynamiq.nodes.agents.Agent", "llm": llm_judge()}))) == []
+    agent_judge = {"id": "judge-agent", "name": "judge-agent", "type": "dynamiq.nodes.agents.Agent", "llm": llm_judge()}
+    assert errors_of(flow_with(judgement(judge=agent_judge))) == []
 
 
 def test_sampling_without_samples_is_caught_the_way_the_node_defaults_it():
@@ -529,3 +541,76 @@ def test_a_judgement_that_judges_an_agent_answer_is_not_told_to_become_a_tool():
         "depends": [{"node": "writer"}],
     }
     assert [w for w in warnings_of(flow_with(agent, python)) if "standalone step" in w]
+
+
+def agent(**overrides) -> dict:
+    node = {
+        "id": "helper",
+        "name": "helper",
+        "type": "dynamiq.nodes.agents.Agent",
+        "role": "Answer the question.",
+        "depends": [{"node": "start"}],
+        "llm": {
+            "id": "helper-llm",
+            "name": "helper-llm",
+            "type": "dynamiq.nodes.llms.OpenAI",
+            "model": "gpt-4o",
+            "connection": str(uuid.uuid4()),
+        },
+        "tools": [
+            {
+                "id": "search",
+                "name": "search",
+                "type": "dynamiq.nodes.tools.TavilyTool",
+                "connection": str(uuid.uuid4()),
+            }
+        ],
+    }
+    node.update(overrides)
+    return node
+
+
+def test_streaming_without_an_event_passes_as_the_runtime_defaults_it():
+    node = agent(streaming={"enabled": True, "mode": "all"})
+    node["tools"][0]["streaming"] = {"enabled": True}
+
+    assert errors_of(flow_with(node)) == []
+
+
+def test_node_settings_the_platform_refuses_are_caught_on_every_node():
+    node = agent(
+        streaming={"enabled": True, "event": "", "mode": "answer", "timeout": 0.5},
+        error_handling={"timeout_seconds": 0, "max_retries": -1, "backoff_rate": 0.5, "behavior": "ignore"},
+        max_loops=0,
+        behaviour_on_max_loops="stop",
+    )
+    node["llm"].pop("model")
+    node["tools"][0].pop("name")
+    node["tools"].append(
+        {"name": "triage", "type": JUDGEMENT, "judge": {"type": "dynamiq.nodes.llms.OpenAI", "name": "judge"}}
+    )
+    node["tools"][0]["streaming"] = {"enabled": True, "event": "  "}
+    node["tools"][0]["approval"] = {"enabled": True, "feedback_method": "email"}
+    node["tools"][0]["mock"] = {"enabled": True, "error": "", "latency_seconds": -1}
+
+    errors = "\n".join(errors_of(flow_with(node)))
+
+    for expected in [
+        "node 'helper': streaming.event is blank",
+        "node 'helper': streaming.mode 'answer'",
+        "node 'helper': streaming.timeout 0.5",
+        "node 'helper': error_handling.timeout_seconds 0",
+        "node 'helper': error_handling.max_retries -1",
+        "node 'helper': error_handling.backoff_rate 0.5",
+        "node 'helper': error_handling.behavior 'ignore'",
+        "node 'helper': max_loops 0",
+        "node 'helper': behaviour_on_max_loops 'stop'",
+        "agent 'helper': llm needs `model`",
+        "helper > search: streaming.event is blank",
+        "helper > search: approval.feedback_method 'email'",
+        "helper > search: mock.error is blank",
+        "helper > search: mock.latency_seconds -1",
+        "helper > search: needs a `name`",
+        "helper > triage > judge: needs an `id`",
+    ]:
+        assert expected in errors, f"{expected!r} not in:\n{errors}"
