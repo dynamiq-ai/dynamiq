@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Any, ClassVar, Literal
 
 from jinja2 import Template
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import Node, ensure_config
@@ -40,6 +40,14 @@ class Question(BaseModel):
         default=True, description="Whether a free-text 'Other' answer is allowed alongside/instead of options."
     )
 
+    @field_validator("options", mode="before")
+    @classmethod
+    def coerce_bare_string_options(cls, value: Any) -> Any:
+        """Accept bare strings as options, a shape models often produce on the first try."""
+        if isinstance(value, list):
+            return [{"label": option} if isinstance(option, str) else option for option in value]
+        return value
+
     @model_validator(mode="after")
     def validate_options(self):
         if self.options and not (2 <= len(self.options) <= 4):
@@ -65,10 +73,15 @@ class HFStreamingInputEventMessage(StreamingEventMessage):
 
 
 class HFStreamingOutputEventMessageData(BaseModel):
-    prompt: str
+    prompt: str = Field(description="The message as authored, without the structured questions.")
     action: HumanFeedbackAction = HumanFeedbackAction.ASK
     is_browser_takeover: bool = False
     questions: list[Question] | None = None
+    prompt_text_fallback: str | None = Field(
+        default=None,
+        description="Set only when 'questions' are present: the prompt followed by a numbered text rendering of "
+        "the questions and their options, for clients that cannot render 'questions'.",
+    )
 
 
 class HFStreamingOutputEventMessage(StreamingEventMessage):
@@ -87,6 +100,14 @@ def _render_questions_prompt(questions: list[Question]) -> str:
         if question.allow_custom_answer:
             lines.append("   - Other (free text)")
     return "\n".join(lines)
+
+
+def _prompt_with_rendered_questions(prompt: str, questions: list[Question] | None) -> str:
+    """Return the prompt followed by the text rendering of the questions, or the prompt alone if there are none."""
+    if not questions:
+        return prompt
+    rendered_questions = _render_questions_prompt(questions)
+    return f"{prompt}\n{rendered_questions}".strip() if prompt else rendered_questions
 
 
 def _format_answers_for_llm(questions: list[Question], answers: list[Answer]) -> str:
@@ -196,12 +217,14 @@ Use 'ask' action to request input - workflow WAITS for user response before cont
 Use 'info' action to send notification - workflow continues immediately without waiting.
 For 'ask', you may optionally pass 1-4 structured 'questions' instead of (or in addition to) free-text
 'input' - each question can offer 2-4 selectable options (single- or multi-select) plus a free-text
-'Other' answer, so the user can click instead of typing.
+'Other' answer, so the user can click instead of typing. Each option is an object with a 'label' and an
+optional 'description', not bare strings.
 
 Examples:
 - {"action": "ask", "input": "Should I proceed? (yes/no)"}
-- {"action": "ask", "questions": [{"question": "Which scope?", "options": [{"label": "Q1 only"}, \
-{"label": "Full year"}]}]}
+- {"action": "ask", "input": "Before I build the report:", "questions": [{"header": "Scope", \
+"question": "Which period should it cover?", "options": [{"label": "Q1 only"}, \
+{"label": "Full year", "description": "Slower, includes all quarters"}], "multi_select": false}]}
 - {"action": "info", "input": "Task completed."}
 
 Important:
@@ -311,6 +334,7 @@ Important:
                 action=HumanFeedbackAction.ASK,
                 is_browser_takeover=self.is_browser_takeover,
                 questions=questions,
+                prompt_text_fallback=_prompt_with_rendered_questions(prompt, questions) if questions else None,
             ),
             event=streaming.event,
             source=StreamingEntitySource(
@@ -379,7 +403,10 @@ Important:
         check_cancellation(config)
         if isinstance(self.input_method, FeedbackMethod):
             if self.input_method == FeedbackMethod.CONSOLE:
-                return self.input_method_console(input_text, config=config), None
+                return (
+                    self.input_method_console(_prompt_with_rendered_questions(input_text, questions), config=config),
+                    None,
+                )
             elif self.input_method == FeedbackMethod.STREAM:
                 streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
                 if not streaming.input_streaming_enabled:
@@ -390,7 +417,7 @@ Important:
             else:
                 raise ValueError(f"Unsupported input method: {self.input_method}")
         else:
-            return self.input_method.get_input(input_text), None
+            return self.input_method.get_input(_prompt_with_rendered_questions(input_text, questions)), None
 
     def _execute_send(self, input_text: str, config: RunnableConfig, **kwargs) -> None:
         """Execute the 'info' action - send info message to user."""
@@ -434,12 +461,8 @@ Important:
             # Browser takeover hands control to the user directly; structured click-through
             # questions don't apply there, so any questions are ignored in that mode.
             questions = getattr(input_data, "questions", None) if not self.is_browser_takeover else None
-            prompt_text = input_text
-            if questions:
-                rendered_questions = _render_questions_prompt(questions)
-                prompt_text = f"{input_text}\n{rendered_questions}".strip() if input_text else rendered_questions
 
-            content, answers = self._execute_ask(prompt_text, config, questions=questions, **kwargs)
+            content, answers = self._execute_ask(input_text, config, questions=questions, **kwargs)
             logger.debug(f"Tool {self.name} - {self.id}: finished with result {content}")
             result = {"content": content}
             if answers is not None:

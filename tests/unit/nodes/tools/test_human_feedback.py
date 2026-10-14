@@ -17,6 +17,7 @@ from dynamiq.nodes.tools.human_feedback import (
     HumanFeedbackAction,
     HumanFeedbackInputSchema,
     HumanFeedbackTool,
+    InputMethodCallable,
     Question,
     QuestionOption,
 )
@@ -237,3 +238,118 @@ def test_execute_ask_ignores_questions_in_browser_takeover_mode():
     )
 
     assert capture.events[0].data.questions is None
+
+
+def test_question_coerces_bare_string_options_to_labels():
+    question = Question(question="Pick one", options=["Yes", {"label": "No", "description": "Skip it"}])
+
+    assert question.options == [QuestionOption(label="Yes"), QuestionOption(label="No", description="Skip it")]
+
+
+def test_input_schema_accepts_bare_string_options_from_tool_call():
+    schema = HumanFeedbackInputSchema.model_validate(
+        {"action": "ask", "questions": [{"question": "Which scope?", "options": ["Q1 only", "Full year"]}]}
+    )
+
+    assert [option.label for option in schema.questions[0].options] == ["Q1 only", "Full year"]
+
+
+def test_description_shows_options_as_label_objects():
+    tool = HumanFeedbackTool()
+
+    assert '"options": [{"label": ' in tool.description
+    assert "not bare strings" in tool.description
+
+
+def _scope_questions() -> list[Question]:
+    return [
+        Question(
+            question="Which scope?",
+            options=[QuestionOption(label="Q1 only"), QuestionOption(label="Full year")],
+        )
+    ]
+
+
+def test_execute_ask_streams_authored_prompt_and_separate_text_fallback():
+    node_id = "hf-fallback"
+    tool = HumanFeedbackTool(
+        id=node_id,
+        input_method=FeedbackMethod.STREAM,
+        output_method=FeedbackMethod.STREAM,
+        streaming=StreamingConfig(enabled=True, input_queue=_preloaded_queue(node_id)),
+    )
+    capture = _CaptureStreamCallback()
+
+    tool.execute(
+        HumanFeedbackInputSchema(action=HumanFeedbackAction.ASK, input="Before I start:", questions=_scope_questions()),
+        config=RunnableConfig(callbacks=[capture]),
+    )
+
+    sent = capture.events[0].data
+    assert sent.prompt == "Before I start:"
+    assert (
+        sent.prompt_text_fallback
+        == "Before I start:\n1. Which scope?\n   - Q1 only\n   - Full year\n   - Other (free text)"
+    )
+
+
+def test_execute_ask_questions_only_streams_empty_prompt_with_fallback():
+    node_id = "hf-questions-only"
+    tool = HumanFeedbackTool(
+        id=node_id,
+        input_method=FeedbackMethod.STREAM,
+        output_method=FeedbackMethod.STREAM,
+        streaming=StreamingConfig(enabled=True, input_queue=_preloaded_queue(node_id)),
+    )
+    capture = _CaptureStreamCallback()
+
+    tool.execute(
+        HumanFeedbackInputSchema(action=HumanFeedbackAction.ASK, questions=_scope_questions()),
+        config=RunnableConfig(callbacks=[capture]),
+    )
+
+    sent = capture.events[0].data
+    assert sent.prompt == ""
+    assert sent.prompt_text_fallback.startswith("1. Which scope?")
+
+
+def test_execute_ask_without_questions_has_no_text_fallback():
+    node_id = "hf-no-fallback"
+    tool = HumanFeedbackTool(
+        id=node_id,
+        input_method=FeedbackMethod.STREAM,
+        output_method=FeedbackMethod.STREAM,
+        streaming=StreamingConfig(enabled=True, input_queue=_preloaded_queue(node_id)),
+    )
+    capture = _CaptureStreamCallback()
+
+    tool.execute(
+        HumanFeedbackInputSchema(action=HumanFeedbackAction.ASK, input="Approve?"),
+        config=RunnableConfig(callbacks=[capture]),
+    )
+
+    sent = capture.events[0].data
+    assert sent.prompt == "Approve?"
+    assert sent.prompt_text_fallback is None
+
+
+def test_execute_ask_text_only_input_method_still_gets_rendered_questions():
+    class _RecordingInput(InputMethodCallable):
+        def __init__(self):
+            self.prompts = []
+
+        def get_input(self, prompt: str, **kwargs) -> str:
+            self.prompts.append(prompt)
+            return "Full year"
+
+    recorder = _RecordingInput()
+    tool = HumanFeedbackTool(input_method=recorder)
+
+    tool.execute(
+        HumanFeedbackInputSchema(action=HumanFeedbackAction.ASK, input="Before I start:", questions=_scope_questions()),
+        config=RunnableConfig(),
+    )
+
+    assert recorder.prompts == [
+        "Before I start:\n1. Which scope?\n   - Q1 only\n   - Full year\n   - Other (free text)"
+    ]
