@@ -316,8 +316,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         default_factory=list,
         description=(
             "Hooks around user input, LLM calls, tool calls (sub-agents included) and the final answer. "
-            "Built-in `type`s: pii, prompt_injection, tool_policy, call_limit, regex, transform; "
-            "or a Python subclass of Hook via a dotted `type`."
+            "Built-in hooks are addressed by import path (`dynamiq.nodes.agents.hooks.PIIHook`; the short names pii, "
+            "prompt_injection, tool_policy, call_limit, regex, transform are accepted as aliases); "
+            "a Python subclass of Hook by its dotted `type`."
         ),
     )
     tool_output_sandbox_persistence: ToolOutputSandboxPersistenceConfig = Field(
@@ -1977,9 +1978,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     @staticmethod
     def _hook_to_dict(hook: Hook, dumped: dict, include_secure_params: bool = False, **kwargs) -> dict:
         detector = getattr(hook, "detector", None)
-        if detector is None or include_secure_params:
+        if detector is None:
             return dumped
-        return {**dumped, "detector": {**dumped["detector"], "connection": detector.connection.to_dict(**kwargs)}}
+        return {**dumped, "detector": detector.to_dict(include_secure_params=include_secure_params, **kwargs)}
 
     def _snapshot_hook_state(self) -> dict | None:
         """JSON-safe copy of the run's hook state for checkpoints."""

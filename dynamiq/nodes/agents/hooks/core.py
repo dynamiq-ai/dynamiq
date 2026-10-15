@@ -109,10 +109,12 @@ class Modify:
 
 @dataclass(frozen=True)
 class Block:
-    """Refuse. ``reason`` is shown to the model or user, so it must not contain the offending payload."""
+    """Refuse. ``reason`` is shown to the model or user, so it must not contain the offending payload. ``detail``
+    is added to the trace event of the block (which detector flagged it, where): never the payload either."""
 
     reason: str
     as_: BlockAs = BlockAs.OBSERVATION
+    detail: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -247,7 +249,9 @@ def register_hook(name: str):
 
 class Hook(BaseModel):
     """Base class of every hook. Override the points you need; reference a Python subclass from YAML with
-    ``type: my_pkg.my_module.MyHook``. Unknown fields are rejected, so a typo cannot yield a hook that does nothing.
+    ``type: my_pkg.my_module.MyHook``. Built-ins are addressed like nodes, by import path
+    (``dynamiq.nodes.agents.hooks.PIIHook``); their short names (``pii``) stay accepted as aliases. Unknown fields
+    are rejected, so a typo cannot yield a hook that does nothing.
 
     Attributes:
         name: Shown in traces, stream events and block outcomes, and keys the hook's saved state (so it is unique
@@ -270,15 +274,28 @@ class Hook(BaseModel):
 
     hook_type: ClassVar[str | None] = None
 
+    @classmethod
+    def import_path(cls) -> str:
+        """The dotted path ``type`` is saved as, built like ``Node.type`` (``dynamiq.nodes.agents.hooks.PIIHook``).
+
+        The package-level path is used when it resolves back to this class (the built-ins re-export from the
+        package); otherwise the full module path, so a custom hook always loads again."""
+        short = f"{cls.__module__.rsplit('.', 1)[0]}.{cls.__name__}"
+        module_name, _, class_name = short.rpartition(".")
+        try:
+            if getattr(importlib.import_module(module_name), class_name, None) is cls:
+                return short
+        except ImportError:
+            pass
+        return f"{cls.__module__}.{cls.__qualname__}"
+
     @model_serializer(mode="wrap")
     def _serialize_with_type(self, handler):
         data = handler(self)
         cls = type(self)
-        if cls.__dict__.get("hook_type"):
-            return {"type": cls.hook_type, **data}
         if cls is Hook:
             return data
-        return {"type": f"{cls.__module__}.{cls.__qualname__}", **data}
+        return {"type": cls.import_path(), **data}
 
     def on_input(self, ctx: HookContext, text: str) -> Decision:
         return ALLOW
@@ -350,7 +367,10 @@ def resolve_hook(item: Any) -> Hook:
         raise ValueError(f"A hook must be a mapping with a `type`, got {type(item).__name__}")
     hook_type = item.get("type")
     if not hook_type:
-        raise ValueError(f"Hook is missing `type` (built-in: {sorted(HOOK_REGISTRY)}, or a dotted class path): {item}")
+        raise ValueError(
+            "Hook is missing `type` (an import path such as `dynamiq.nodes.agents.hooks.PIIHook`, "
+            f"or a short name: {sorted(HOOK_REGISTRY)}): {item}"
+        )
     hook_type = str(hook_type)
     fields = {key: value for key, value in item.items() if key != "type"}
     if True in fields and "on" not in fields:
@@ -544,7 +564,7 @@ class HookRunner:
                 ask, asked_by = ask or decision, asked_by or hook
             elif isinstance(decision, Block):
                 kind = self._effective_block_as(point, decision)
-                _record(events, hook, point, "block", call, outcome=kind.value)
+                _record(events, hook, point, "block", call, outcome=kind.value, **(decision.detail or {}))
                 reason = decision.reason
                 if kind == BlockAs.FAIL:
                     reason = f"Hook '{hook.display_name}' stopped the run at {point.value}: {reason}"

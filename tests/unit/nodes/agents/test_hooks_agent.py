@@ -14,6 +14,7 @@ from dynamiq.nodes.agents.hooks import (
     BlockAs,
     CallLimitHook,
     Hook,
+    HookPoint,
     Modify,
     PIIHook,
     RegexHook,
@@ -329,6 +330,54 @@ def test_only_admins_can_call_delete_customer(mode):
     assert len(tool_inputs("delete-customer")) == 1
 
 
+SECRET = "sk-" + "a1B2c3D4e5F6g7H8i9J0k"
+
+
+@modes
+def test_a_regex_hook_on_tool_input_blocks_a_secret_the_model_puts_in_an_argument(mode):
+    hook = RegexHook(presets=["secrets"], on=["tool_input"], tools=["send-email"], message="no secrets in mails")
+    steps = [tool_step("send-email", to="a@x.com", body=f"key {SECRET}"), final_step("ok")]
+    result, recorder = run_scripted(build_agent([hook]), mode, steps)
+    assert result.status == RunnableStatus.SUCCESS and tool_inputs("send-email") == []
+    assert "no secrets in mails" in recorder.sent_text(1)  # the model's own message still holds what it wrote
+
+
+@modes
+def test_a_tool_input_hook_only_applies_to_the_tools_it_names(mode):
+    hook = RegexHook(presets=["secrets"], on=["tool_input"], tools=["send-email"])
+    steps = [tool_step("search", query=SECRET), final_step("ok")]
+    run_scripted(build_agent([hook]), mode, steps)
+    assert [i["query"] for i in tool_inputs("search")] == [SECRET]
+
+
+@modes
+def test_a_regex_hook_masks_tool_input_in_place(mode):
+    hook = RegexHook(presets=["secrets"], on=["tool_input"], action="mask", replacement="[KEY]")
+    steps = [tool_step("send-email", to="a@x.com", body=f"key {SECRET}"), final_step("ok")]
+    run_scripted(build_agent([hook]), mode, steps)
+    assert tool_inputs("send-email") == [{"to": "a@x.com", "body": "key [KEY]"}]
+
+
+@modes
+def test_pii_on_tool_input_masks_arguments_except_those_a_tool_may_see(mode):
+    hook = PIIHook(on=["input", "tool_input"], restore_in_tools={"send-email": ["to"]})
+    steps = [
+        tool_step("send-email", to="<EMAIL_1>", body="cc bob@y.com"),
+        tool_step("search", query="ann@x.com"),
+        final_step("ok"),
+    ]
+    run_scripted(build_agent([hook]), mode, steps, question="mail ann@x.com")
+    sent = tool_inputs("send-email")[0]
+    assert sent["to"] == "ann@x.com" and "bob@y.com" not in sent["body"] and "<EMAIL_" in sent["body"]
+    assert [i["query"] for i in tool_inputs("search")] == ["<EMAIL_1>"]
+
+
+def test_tool_input_is_not_screened_unless_the_hook_asks_for_it():
+    assert HookPoint.BEFORE_TOOL not in RegexHook(presets=["secrets"]).points()
+    assert HookPoint.BEFORE_TOOL in RegexHook(presets=["secrets"], on=["tool_input"]).points()
+    assert HookPoint.BEFORE_TOOL not in PIIHook().points()
+
+
 def test_a_call_limit_holds_with_parallel_tool_calls():
     agent = build_agent([CallLimitHook(tools=["search"], max_per_run=2)])
     calls = [("search", {"query": f"q{i}"}) for i in range(4)]
@@ -526,8 +575,8 @@ def test_a_tool_name_that_matches_nothing_is_reported_with_a_warning(monkeypatch
 def test_hooks_are_dumped_with_all_their_fields():
     agent = build_agent([RegexHook(patterns=["a"], on=["input"]), PIIHook(restore_in_tools=["send-email"])])
     dumped = agent.model_dump()["hooks"]
-    assert dumped[0]["type"] == "regex" and dumped[0]["patterns"] == ["a"]
-    assert dumped[1]["type"] == "pii" and dumped[1]["restore_in_tools"] == ["send-email"]
+    assert dumped[0]["type"] == "dynamiq.nodes.agents.hooks.RegexHook" and dumped[0]["patterns"] == ["a"]
+    assert dumped[1]["type"] == "dynamiq.nodes.agents.hooks.PIIHook" and dumped[1]["restore_in_tools"] == ["send-email"]
 
 
 def test_the_hook_state_survives_a_checkpoint_and_a_resume():

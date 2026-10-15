@@ -581,29 +581,39 @@ class WorkflowYAMLLoader:
         return node_depends
 
     @classmethod
-    def get_hooks_with_connections(
-        cls, hooks_data: Any, connections: dict[str, BaseConnection], registry: dict[str, Any]
-    ) -> Any:
-        """Pass agent hook configs through untouched (their ``type`` is a hook type, not a node type), except that
-        a ``detector.connection`` reference (``connection: lakera-conn``) is resolved to the workflow connection."""
+    def get_hooks_with_connections(cls, hooks_data: Any, **kwargs) -> Any:
+        """Pass agent hook configs through untouched (their ``type`` is a hook type, not a node type), except for a
+        ``detector``: with a node ``type`` (``dynamiq.nodes.detectors.PromptInjectionDetector``) it is built like
+        any node, with its ``connection`` resolved to the workflow connection; without one (the ``kind`` form) only
+        its ``connection`` reference is resolved."""
         if not isinstance(hooks_data, list):
             return hooks_data
+        connections, registry = kwargs["connections"], kwargs["registry"]
         resolved = []
         for hook_data in hooks_data:
             detector = hook_data.get("detector") if isinstance(hook_data, dict) else None
-            if (
-                isinstance(detector, dict)
-                and detector.get("connection") is not None
-                and not isinstance(detector["connection"], BaseConnection)
-            ):
+            if isinstance(detector, dict):
                 hook_id = hook_data.get("name") or hook_data.get("type")
-                connection = cls.get_node_connection(
-                    node_id=f"hook {hook_id}",
-                    node_data=detector,
-                    connections=connections,
-                    registry=registry,
-                )
-                hook_data = {**hook_data, "detector": {**detector, "connection": connection}}
+                node_id = f"hook {hook_id}"
+                if cls.is_node_type(detector.get("type")):
+                    node_kwargs = {
+                        key: kwargs[key]
+                        for key in ("nodes", "flows", "connections", "prompts", "registry")
+                        if key in kwargs
+                    }
+                    _, detector_node = cls.get_node_without_depends(
+                        node_id=detector.get("id"),
+                        node_data={**detector, "is_postponed_component_init": False},
+                        connection_manager=kwargs.get("connection_manager"),
+                        init_components=kwargs.get("init_components", False),
+                        **node_kwargs,
+                    )
+                    hook_data = {**hook_data, "detector": detector_node}
+                elif detector.get("connection") is not None and not isinstance(detector["connection"], BaseConnection):
+                    connection = cls.get_node_connection(
+                        node_id=node_id, node_data=detector, connections=connections, registry=registry
+                    )
+                    hook_data = {**hook_data, "detector": {**detector, "connection": connection}}
             resolved.append(hook_data)
         return resolved
 
@@ -653,7 +663,7 @@ class WorkflowYAMLLoader:
             # We had to add this condition because some nodes have a `schema`/`response_format` params,
             # that have a `type` field that contains types supported by JSON schema (e.g., string, object).
             if param_name == "hooks":
-                updated_node_init_data[param_name] = cls.get_hooks_with_connections(param_data, connections, registry)
+                updated_node_init_data[param_name] = cls.get_hooks_with_connections(param_data, **kwargs)
 
             elif param_name in ("schema", "response_format", "agent_factory"):
                 updated_node_init_data[param_name] = param_data
@@ -663,7 +673,7 @@ class WorkflowYAMLLoader:
                 for param_name_inner, param_data_inner in param_data.items():
                     if param_name_inner == "hooks":
                         updated_param_data[param_name_inner] = cls.get_hooks_with_connections(
-                            param_data_inner, connections, registry
+                            param_data_inner, **kwargs
                         )
                     elif param_name_inner in ("prompt", "schema", "response_format", "agent_factory", "connection"):
                         updated_param_data[param_name_inner] = param_data_inner

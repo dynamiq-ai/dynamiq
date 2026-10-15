@@ -17,13 +17,20 @@ import threading
 from collections import OrderedDict
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 import regex
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import (
+    Field,
+    PrivateAttr,
+    ValidationError,
+    WithJsonSchema,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
-from dynamiq.connections import HuggingFace, Lakera, Replicate
 from dynamiq.nodes.agents.hooks.core import (
     ALLOW,
     Ask,
@@ -40,8 +47,9 @@ from dynamiq.nodes.agents.hooks.core import (
     sanitize_tool_name,
 )
 from dynamiq.nodes.agents.utils import decode_text_payload
-from dynamiq.nodes.detectors import LlamaGuardDetector, PromptInjectionDetector
+from dynamiq.nodes.detectors import LlamaGuardDetector, PIIDetector, PromptInjectionDetector
 from dynamiq.nodes.node import InputTransformer, Node, OutputTransformer
+from dynamiq.nodes.types import NodeGroup
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.feedback import FeedbackMethod
@@ -51,8 +59,13 @@ from dynamiq.utils.logger import logger
 
 REGEX_TIMEOUT_SECONDS = 1.0
 
-RunPoint = Literal["input", "tool_result", "output"]
-_RUN_POINTS = {"input": HookPoint.ON_INPUT, "tool_result": HookPoint.AFTER_TOOL, "output": HookPoint.ON_OUTPUT}
+RunPoint = Literal["input", "tool_input", "tool_result", "output"]
+_RUN_POINTS = {
+    "input": HookPoint.ON_INPUT,
+    "tool_input": HookPoint.BEFORE_TOOL,
+    "tool_result": HookPoint.AFTER_TOOL,
+    "output": HookPoint.ON_OUTPUT,
+}
 
 
 def iter_strings(value: Any) -> Iterator[str]:
@@ -205,8 +218,8 @@ class GuardHook(Hook):
     message: str = "Blocked by policy."
     on_violation: BlockAs = BlockAs.OBSERVATION
 
-    def violation(self) -> Block:
-        return Block(self.message, self.on_violation)
+    def violation(self, **detail: Any) -> Block:
+        return Block(self.message, self.on_violation, detail or None)
 
 
 @register_hook("tool_policy")
@@ -299,12 +312,17 @@ class CallLimitHook(GuardHook):
 
 
 class TextGuardHook(GuardHook):
-    """Shared by the hooks that scan text: the user input, tool results (failures included) and the final answer.
+    """Shared by the hooks that scan text: the user input, the arguments the model sends to tools, tool results
+    (failures included) and the final answer.
 
     Subclasses define ``_violates`` (``action: block``) and ``_mask`` (``action: mask``).
 
     Attributes:
-        on: ``input`` (the user's message, once per run), ``tool_result`` (each tool result), ``output`` (the answer).
+        on: ``input`` (the user's message, once per run), ``tool_input`` (the arguments of each tool call, so that
+            text the model was talked into sending cannot leave through a tool; not on by default). The tool never
+            gets what a block or mask removed, but the model's own message that holds the call stays in the history,
+            memory and checkpoints as the model wrote it,
+            ``tool_result`` (each tool result), ``output`` (the answer).
     """
 
     on: list[RunPoint] = Field(default_factory=lambda: ["input", "tool_result", "output"], min_length=1)
@@ -341,6 +359,9 @@ class TextGuardHook(GuardHook):
 
     def on_input(self, ctx: HookContext, text: str) -> Decision:
         return self._screen(ctx, text, "input")
+
+    def before_tool(self, ctx: HookContext, call: ToolCall) -> Decision:
+        return self._screen(ctx, call.input, "tool_input")
 
     def after_tool(self, ctx: HookContext, call: ToolCall, result: ToolResult) -> Decision:
         return self._screen(ctx, result, "tool_result")
@@ -681,18 +702,27 @@ class PIIHook(TextGuardHook):
         return "tool_result" if str(text).startswith("Observation") else "input"
 
     def before_tool(self, ctx: HookContext, call: ToolCall) -> Decision:
+        """Screen the arguments (``tool_input``), then give the tools that are allowed to see them the real values
+        back: a placeholder that the model made up of a value it was sent is restored for those tools only."""
+        value = call.input
+        if "tool_input" in self.on:
+            decision = self._screen(ctx, value, "tool_input")
+            if isinstance(decision, Block):
+                return decision
+            if isinstance(decision, Modify):
+                value = decision.value
         args = self._restore_args(call.name)
-        if args is None:
-            return ALLOW
+        if args is not None:
+            value = self._restored_input(ctx, value, args)
+        return Modify(value) if value != call.input else ALLOW
 
+    def _restored_input(self, ctx: HookContext, tool_input: Any, args: list[str]) -> Any:
         def put_back(value):
             return map_strings(value, lambda text: self._restore(ctx, text))
 
-        if args and isinstance(call.input, dict):
-            restored = {key: put_back(value) if key in args else value for key, value in call.input.items()}
-        else:
-            restored = put_back(call.input)
-        return Modify(restored) if restored != call.input else ALLOW
+        if args and isinstance(tool_input, dict):
+            return {key: put_back(value) if key in args else value for key, value in tool_input.items()}
+        return put_back(tool_input)
 
     def on_output(self, ctx: HookContext, answer: Any) -> Decision:
         value = answer
@@ -708,65 +738,128 @@ class PIIHook(TextGuardHook):
         return Modify(value) if value != answer else ALLOW
 
 
-class DetectorConfig(BaseModel):
-    """The detector node to use and the workflow connection it talks through (no API key in the hook)."""
+_LEGACY_DETECTOR_KINDS = {"prompt_injection": PromptInjectionDetector, "llama_guard": LlamaGuardDetector}
 
-    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
-    kind: Literal["prompt_injection", "llama_guard"] = "prompt_injection"
-    connection: HuggingFace | Lakera | Replicate
-    model: str | None = None
-    timeout: float | None = None
+def build_detector(value: Any) -> Any:
+    """Build the detector node of a ``prompt_injection`` hook from its config.
 
-    @field_validator("connection", mode="before")
-    @classmethod
-    def _build_connection(cls, value):
-        """A dumped connection (a dict with its dotted ``type``) is rebuilt as that connection class."""
-        if not (isinstance(value, dict) and value.get("type")):
-            return value
-        module_name, _, class_name = str(value["type"]).rpartition(".")
+    ``type: dynamiq.nodes.detectors.PromptInjectionDetector`` (a node type, like ``llm`` on an agent) is the form
+    that is saved. A mapping without ``type`` is the older ``kind`` form (``prompt_injection`` by default or
+    ``llama_guard``), still accepted. A dumped connection (a mapping with its dotted ``type``) is rebuilt."""
+    if not isinstance(value, dict):
+        return value
+    fields = dict(value)
+    if node_type := fields.pop("type", None):
+        module_name, _, class_name = str(node_type).rpartition(".")
         try:
-            connection_class = getattr(importlib.import_module(module_name), class_name)
+            node_class = getattr(importlib.import_module(module_name), class_name)
         except (ImportError, AttributeError, ValueError) as e:
-            raise ValueError(f"connection type {value['type']!r} could not be imported: {e}") from e
-        return connection_class(**{key: item for key, item in value.items() if key != "type"})
+            raise ValueError(f"detector type {node_type!r} could not be imported: {e}") from e
+        if not (isinstance(node_class, type) and issubclass(node_class, Node)):
+            raise ValueError(f"detector type {node_type!r} is not a node")
+    else:
+        kind = fields.pop("kind", "prompt_injection")
+        if kind not in _LEGACY_DETECTOR_KINDS:
+            raise ValueError(f"detector kind {kind!r} is not one of {sorted(_LEGACY_DETECTOR_KINDS)}")
+        node_class = _LEGACY_DETECTOR_KINDS[kind]
+    fields.pop("kind", None)
+    connection = fields.get("connection")
+    if isinstance(connection, dict) and connection.get("type"):
+        conn_module, _, conn_name = str(connection["type"]).rpartition(".")
+        try:
+            conn_class = getattr(importlib.import_module(conn_module), conn_name)
+        except (ImportError, AttributeError, ValueError) as e:
+            raise ValueError(f"connection type {connection['type']!r} could not be imported: {e}") from e
+        fields["connection"] = conn_class(**{key: item for key, item in connection.items() if key != "type"})
+    if unknown := sorted(set(fields) - set(node_class.model_fields)):
+        raise ValueError(f"detector {node_type or kind!r} has no field {unknown}")
+    try:
+        return node_class(**fields)
+    except ValidationError as e:
+        label = node_type or f"kind {kind}"
+        raise ValueError(f"detector {label!r} is invalid: {' '.join(str(e).split())}") from e
 
-    @model_validator(mode="after")
-    def _connection_matches_kind(self):
-        if (self.kind == "llama_guard") != isinstance(self.connection, Replicate):
-            raise ValueError(
-                "detector kind `llama_guard` needs a Replicate connection, "
-                "`prompt_injection` a HuggingFace or Lakera one"
-            )
-        return self
+
+_DETECTOR_JSON_SCHEMA = {
+    "type": "object",
+    "description": (
+        "A detector node, configured like `llm` on an agent: `type` is the node's import path, `connection` the "
+        "name of a workflow connection, `model` the model of the detector."
+    ),
+    "properties": {
+        "type": {
+            "type": "string",
+            "enum": [
+                f"{detector.__module__.rsplit('.', 1)[0]}.{detector.__name__}"
+                for detector in (PromptInjectionDetector, LlamaGuardDetector, PIIDetector)
+            ],
+        },
+        "kind": {
+            "type": "string",
+            "enum": list(_LEGACY_DETECTOR_KINDS),
+            "deprecated": True,
+            "description": "The older form: use `type` with the detector node's import path instead.",
+        },
+        "connection": {"type": "string"},
+        "model": {"type": "string"},
+    },
+    "anyOf": [{"required": ["type"]}, {"required": ["kind"]}, {"required": ["connection"]}],
+}
 
 
 @register_hook("prompt_injection")
 class PromptInjectionHook(GuardHook):
-    """Check the user's input and tool results (failed calls included) with a hosted detector.
+    """Check the user's input, the arguments of tool calls, tool results (failed calls included) and the final
+    answer with a detector node.
 
-    ``detector.connection`` references a connection of the workflow (``connection: lakera-conn``). A detector that
-    errors fails per ``on_error`` (closed by default). Each message and each tool result is checked once, as one text
+    ``detector`` is configured like any node, the way ``llm`` is on an agent: its ``type`` is the node's import path
+    and ``connection`` references a connection of the workflow (``connection: lakera-conn``). Any detector node
+    plugs in; the hook only turns its output into a yes/no (``prompt_detected``, ``is_detected`` or ``is_safe``). The
+    older ``kind: prompt_injection | llama_guard`` form is still accepted. A detector that errors fails per
+    ``on_error`` (closed by default). Each message, tool call and tool result is checked once, as one text
     (several detector calls only when it is longer than ``max_chars``). The detector sees the text after the masking
     hooks (``pii``) ran, whatever the order of the list.
     """
 
     message: str = "Potential prompt injection detected; the content was withheld."
-    detector: DetectorConfig
-    on: list[Literal["input", "tool_result"]] = Field(default_factory=lambda: ["input", "tool_result"], min_length=1)
+    detector: Annotated[Node, WithJsonSchema(_DETECTOR_JSON_SCHEMA)]
+    on: list[RunPoint] = Field(
+        default_factory=lambda: ["input", "tool_result"],
+        min_length=1,
+        description=(
+            "`input`, `tool_input` (the arguments of each tool call), `tool_result` and `output` (the final answer); "
+            "`input` and `tool_result` by default."
+        ),
+    )
     max_chars: int = Field(default=20000, gt=0, description="The longest text sent to the detector in one call.")
 
-    _node: LlamaGuardDetector | PromptInjectionDetector | None = PrivateAttr(default=None)
+    @field_validator("detector", mode="before")
+    @classmethod
+    def _build_detector(cls, value):
+        return build_detector(value)
+
+    @field_validator("detector")
+    @classmethod
+    def _detector_is_a_detector_node(cls, detector: Node):
+        """A node of another group (an LLM, a tool) would only fail at run time, and so would every request."""
+        if detector.group != NodeGroup.DETECTORS:
+            raise ValueError(
+                f"detector must be a detector node (group 'detectors'), got {type(detector).__name__} "
+                f"(group {detector.group.value!r}), e.g. dynamiq.nodes.detectors.PromptInjectionDetector"
+            )
+        if "message" not in detector.input_schema.model_fields:
+            raise ValueError(
+                f"detector {type(detector).__name__} must take a `message` input: the hook sends it the text to check"
+            )
+        return detector
+
+    @field_serializer("detector")
+    def _dump_detector(self, detector: Node):
+        return detector.to_dict(include_secure_params=True)
 
     def points(self) -> set[HookPoint]:
         return {_RUN_POINTS[name] for name in self.on}
-
-    def _detector_node(self) -> LlamaGuardDetector | PromptInjectionDetector:
-        if self._node is None:
-            node_class = LlamaGuardDetector if self.detector.kind == "llama_guard" else PromptInjectionDetector
-            options = self.detector.model_dump(include={"model", "timeout"}, exclude_none=True)
-            self._node = node_class(connection=self.detector.connection, **options)
-        return self._node
 
     def order(self, point: HookPoint) -> int:
         return 1
@@ -775,11 +868,18 @@ class PromptInjectionHook(GuardHook):
         """Whether the detector flags ``text``. Override to plug another detector."""
         config = ctx.config or RunnableConfig(callbacks=[])
         options = {"parent_run_id": ctx.run_id} if ctx.run_id else {}
-        result = self._detector_node().run_sync(input_data={"message": text}, config=config, **options)
+        result = self.detector.run_sync(input_data={"message": text}, config=config, **options)
         if result.status != RunnableStatus.SUCCESS:
             raise RuntimeError(f"detector failed: {result.error.message if result.error else result.status}")
         output = result.output or {}
-        return bool(output["prompt_detected"]) if "prompt_detected" in output else output.get("is_safe") is False
+        for key in ("prompt_detected", "is_detected"):
+            if key in output:
+                return bool(output[key])
+        if "is_safe" in output:
+            return output["is_safe"] is False
+        raise RuntimeError(
+            f"detector {self.detector.name!r} returned none of prompt_detected, is_detected, is_safe: {sorted(output)}"
+        )
 
     def _batches(self, value: Any) -> Iterator[str]:
         """All the text of ``value`` joined, cut into pieces of at most ``max_chars``."""
@@ -787,8 +887,19 @@ class PromptInjectionHook(GuardHook):
         for start in range(0, len(text), self.max_chars):
             yield text[start : start + self.max_chars]
 
+    def _check(self, ctx: HookContext, value: Any, origin: str) -> Decision:
+        if any(self.detect(ctx, batch) for batch in self._batches(value)):
+            return self.violation(detector=type(self.detector).__name__, origin=origin)
+        return ALLOW
+
     def on_input(self, ctx: HookContext, text: str) -> Decision:
-        return self.violation() if any(self.detect(ctx, batch) for batch in self._batches(text)) else ALLOW
+        return self._check(ctx, text, "input")
+
+    def before_tool(self, ctx: HookContext, call: ToolCall) -> Decision:
+        return self._check(ctx, call.input, "tool_input")
 
     def after_tool(self, ctx: HookContext, call: ToolCall, result: ToolResult) -> Decision:
-        return self.violation() if any(self.detect(ctx, batch) for batch in self._batches(result)) else ALLOW
+        return self._check(ctx, result, "tool_result")
+
+    def on_output(self, ctx: HookContext, answer: Any) -> Decision:
+        return self._check(ctx, answer, "output")

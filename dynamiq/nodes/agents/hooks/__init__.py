@@ -1,6 +1,5 @@
 from dynamiq.nodes.agents.hooks.builtin import (
     CallLimitHook,
-    DetectorConfig,
     GuardHook,
     PIIHook,
     PromptInjectionHook,
@@ -43,7 +42,6 @@ __all__ = [
     "BlockAs",
     "CallLimitHook",
     "Decision",
-    "DetectorConfig",
     "GuardHook",
     "Hook",
     "HookContext",
@@ -69,13 +67,17 @@ __all__ = [
 
 
 def hook_json_schemas() -> dict[str, dict]:
-    """JSON schema of every built-in hook, keyed by its ``type``: lets a UI render a form per hook type.
+    """JSON schema of every built-in hook, keyed by its short name: lets a UI render a form per hook type.
 
-    Each schema describes the hook as it is written in a config, so it has the ``type`` property too."""
+    Each schema describes the hook as it is written in a config, so it has the ``type`` property too: the import
+    path (what is saved, like a node's ``type``) and the short name, which is accepted as an alias."""
     schemas = {}
     for name, hook_class in sorted(HOOK_REGISTRY.items()):
         schema = hook_class.model_json_schema()
-        schema["properties"] = {"type": {"const": name, "type": "string"}, **schema.get("properties", {})}
+        schema["properties"] = {
+            "type": {"type": "string", "enum": [hook_class.import_path(), name]},
+            **schema.get("properties", {}),
+        }
         schema["required"] = ["type", *schema.get("required", [])]
         schemas[name] = schema
     return schemas

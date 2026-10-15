@@ -3,7 +3,7 @@
 import time
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from dynamiq.connections import HuggingFace, Replicate
 from dynamiq.nodes.agents.exceptions import HookAnswerException, HookStopException, ToolBlockedException
@@ -21,6 +21,7 @@ from dynamiq.nodes.agents.hooks import (
     TransformHook,
     resolve_hook,
 )
+from dynamiq.nodes.detectors import LlamaGuardDetector, PIIDetector, PromptInjectionDetector
 
 CTX_KEY = "0:pii"
 
@@ -291,6 +292,14 @@ def test_prompt_injection_points_and_detector_validation():
     with pytest.raises(ValidationError, match="llama_guard.*Replicate"):
         PromptInjectionHook(detector={"kind": "llama_guard", "connection": HuggingFace(api_key="k")})
     assert PromptInjectionHook(detector={"kind": "llama_guard", "connection": Replicate(api_key="k")})
+    assert isinstance(
+        PromptInjectionHook(detector={"kind": "llama_guard", "connection": Replicate(api_key="k")}).detector,
+        LlamaGuardDetector,
+    )
+    with pytest.raises(ValidationError, match="not a node"):
+        PromptInjectionHook(detector={"type": "dynamiq.nodes.agents.hooks.PIIHook"})
+    with pytest.raises(ValidationError, match="kind 'other'"):
+        PromptInjectionHook(detector={"kind": "other", "connection": HuggingFace(api_key="k")})
     with pytest.raises(ValidationError):
         PromptInjectionHook(detector={"connection": HuggingFace(api_key="k"), "api_key": "k"})  # no keys in the hook
     with pytest.raises(ValidationError):
@@ -305,7 +314,9 @@ def test_builtin_types_resolve_from_dicts():
         {"type": "call_limit", "max_per_run": 1},
         {"type": "transform", "output_transformer": {"selector": {"content": "$.content.a"}}},
     ):
-        assert resolve_hook(item).model_dump()["type"] == item["type"]
+        hook = resolve_hook(item)
+        assert hook.model_dump()["type"] == f"dynamiq.nodes.agents.hooks.{type(hook).__name__}"
+        assert resolve_hook({**item, "type": hook.model_dump()["type"]}) == hook  # the import path loads too
 
 
 class FakeResponse:
@@ -402,13 +413,15 @@ def test_hook_schemas_describe_the_hook_as_written_in_a_config():
     from dynamiq.nodes.agents.hooks import hook_json_schemas
 
     schemas = hook_json_schemas()
-    jsonschema.validate({"type": "pii", "entities": ["email"]}, schemas["pii"])
+    jsonschema.validate({"type": "pii", "entities": ["email"]}, schemas["pii"])  # the alias
+    jsonschema.validate({"type": "dynamiq.nodes.agents.hooks.PIIHook", "entities": ["email"]}, schemas["pii"])
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate({"entities": ["email"]}, schemas["pii"])  # `type` is required
     agent_schema = Agent._generate_json_schema(llms={}, tools=[])
-    listed = [item["properties"]["type"]["const"] for item in agent_schema["properties"]["hooks"]["items"]["anyOf"]]
-    assert listed == sorted(schemas)
-    assert "DetectorConfig" in agent_schema["$defs"]  # the shared definitions are reachable from the root
+    listed = [item["properties"]["type"]["enum"][0] for item in agent_schema["properties"]["hooks"]["items"]["anyOf"]]
+    assert listed == [f"dynamiq.nodes.agents.hooks.{schemas[name]['title']}" for name in sorted(schemas)]
+    detector = schemas["prompt_injection"]["properties"]["detector"]
+    assert "dynamiq.nodes.detectors.PromptInjectionDetector" in detector["properties"]["type"]["enum"]
 
 
 def test_a_detector_is_called_once_per_text_with_the_whole_tool_result():
@@ -474,3 +487,103 @@ def test_a_declined_call_is_given_back_to_the_call_limit():
         runner.run(HookPoint.BEFORE_TOOL, ctx, {}, call=call)
     runner.refund(ctx, call)
     runner.run(HookPoint.BEFORE_TOOL, ctx, {}, call=call)  # the slot is free again
+
+
+@pytest.mark.parametrize(
+    "output, flagged",
+    [
+        ({"prompt_detected": True}, True),
+        ({"prompt_detected": False}, False),
+        ({"is_detected": True, "detected_pii": ["x"]}, True),
+        ({"is_detected": False}, False),
+        ({"is_safe": False, "violated_policies": ["S1"]}, True),
+        ({"is_safe": True}, False),
+    ],
+)
+def test_any_detector_node_plugs_in_through_its_output(monkeypatch, output, flagged):
+    from types import SimpleNamespace
+
+    from dynamiq.runnables import RunnableStatus
+
+    detector = PIIDetector(connection=HuggingFace(api_key="k"))
+    hook = PromptInjectionHook(detector=detector)
+    assert hook.detector is detector
+    monkeypatch.setattr(
+        type(detector),
+        "run_sync",
+        lambda self, **kwargs: SimpleNamespace(status=RunnableStatus.SUCCESS, output=output, error=None),
+    )
+    assert hook.detect(HookContext(), "text") is flagged
+
+
+def test_a_detector_output_the_hook_cannot_read_fails_closed(monkeypatch):
+    from types import SimpleNamespace
+
+    from dynamiq.runnables import RunnableStatus
+
+    hook = PromptInjectionHook(detector=PromptInjectionDetector(connection=HuggingFace(api_key="k")))
+    monkeypatch.setattr(
+        type(hook.detector),
+        "run_sync",
+        lambda self, **kwargs: SimpleNamespace(status=RunnableStatus.SUCCESS, output={"score": 1}, error=None),
+    )
+    with pytest.raises(HookStopException):
+        HookRunner([hook]).run(HookPoint.ON_INPUT, HookContext(), "x")
+
+
+def test_the_detector_is_configured_as_a_node_and_round_trips():
+    hook = PromptInjectionHook(
+        detector={
+            "type": "dynamiq.nodes.detectors.PromptInjectionDetector",
+            "connection": HuggingFace(api_key="k"),
+            "model": "org/model",
+        }
+    )
+    assert isinstance(hook.detector, PromptInjectionDetector) and hook.detector.model == "org/model"
+    dumped = hook.model_dump()
+    assert dumped["detector"]["type"] == "dynamiq.nodes.detectors.PromptInjectionDetector"
+    rebuilt = resolve_hook(dumped)
+    assert isinstance(rebuilt.detector, PromptInjectionDetector) and rebuilt.detector.model == "org/model"
+    assert rebuilt.detector.connection.api_key == "k"
+
+
+def test_a_detector_must_be_a_detector_node_that_takes_a_message():
+    from dynamiq.connections import OpenAI as OpenAIConnection
+    from dynamiq.nodes.llms import OpenAI
+
+    llm = OpenAI(connection=OpenAIConnection(api_key="k"), model="gpt-4o")
+    with pytest.raises(ValidationError, match="must be a detector node"):
+        PromptInjectionHook(detector=llm)
+    with pytest.raises(ValidationError, match="must be a detector node"):
+        PromptInjectionHook(
+            detector={"type": "dynamiq.nodes.llms.OpenAI", "connection": OpenAIConnection(api_key="k"), "model": "x"}
+        )
+
+    class NoMessage(PromptInjectionDetector):
+        input_schema = type("Schema", (BaseModel,), {"__annotations__": {"text": str}})
+
+    with pytest.raises(ValidationError, match="must take a `message` input"):
+        PromptInjectionHook(detector=NoMessage(connection=HuggingFace(api_key="k")))
+
+
+def test_prompt_injection_can_also_check_tool_arguments_and_the_final_answer():
+    hook = make_detector_hook(on=["tool_input", "output"], on_violation=BlockAs.ANSWER)
+    assert hook.points() == {HookPoint.BEFORE_TOOL, HookPoint.ON_OUTPUT}
+    runner = HookRunner([hook])
+    call = ToolCall(name="send-email", input={"to": "a@x.com", "body": "EVIL"})
+    with pytest.raises(HookAnswerException):
+        runner.run(HookPoint.BEFORE_TOOL, HookContext(), call.input, call=call)
+    with pytest.raises(HookAnswerException):
+        runner.run(HookPoint.ON_OUTPUT, HookContext(), "EVIL answer")
+    assert runner.run(HookPoint.ON_OUTPUT, HookContext(), "fine").value == "fine"
+    assert make_detector_hook().points() == {HookPoint.ON_INPUT, HookPoint.AFTER_TOOL}  # the defaults are unchanged
+
+
+def test_a_block_by_a_detector_is_traced_with_the_detector_and_where_it_was_found_never_the_text():
+    hook = make_detector_hook(on=["tool_input"])
+    call = ToolCall(name="web", input={"q": "EVIL"})
+    events: list[dict] = []
+    with pytest.raises(ToolBlockedException):
+        HookRunner([hook]).run(HookPoint.BEFORE_TOOL, HookContext(), call.input, call=call, events=events)
+    assert events[0]["decision"] == "block" and events[0]["origin"] == "tool_input"
+    assert events[0]["detector"] == "PromptInjectionDetector" and "EVIL" not in str(events)

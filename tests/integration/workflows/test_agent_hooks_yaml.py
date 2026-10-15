@@ -22,6 +22,7 @@ from dynamiq.nodes.agents.hooks import (
     ToolPolicyHook,
     TransformHook,
 )
+from dynamiq.nodes.detectors import PromptInjectionDetector
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.operators.operators import Map
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
@@ -100,13 +101,10 @@ def test_every_builtin_and_python_hook_round_trips_through_yaml(tmp_path):
     with open(path) as f:
         dumped = yaml.safe_load(f)["nodes"]["agent"]["hooks"]
     assert [h["type"] for h in dumped][:6] == [
-        "pii",
-        "regex",
-        "tool_policy",
-        "call_limit",
-        "transform",
-        "prompt_injection",
+        f"dynamiq.nodes.agents.hooks.{name}"
+        for name in ("PIIHook", "RegexHook", "ToolPolicyHook", "CallLimitHook", "TransformHook", "PromptInjectionHook")
     ]
+    assert dumped[5]["detector"]["type"] == "dynamiq.nodes.detectors.PromptInjectionDetector"
     assert dumped[6]["type"].endswith("DenyForbidden") and dumped[6]["forbidden"] == "rm -rf"
 
     loaded = round_trip(workflow, tmp_path).flow.nodes[0]
@@ -210,6 +208,22 @@ def test_a_hand_written_yaml_resolves_the_detector_connection_by_reference(tmp_p
 def test_wrong_hook_config_fails_at_load_time(tmp_path, extra, message):
     with pytest.raises(Exception, match=message):
         load_yaml(tmp_path, extra)
+
+
+def test_a_detector_written_as_a_node_resolves_its_connection_by_reference(tmp_path):
+    typed = (
+        "detector:\n          type: dynamiq.nodes.detectors.PromptInjectionDetector\n"
+        "          connection: hf-conn\n          model: org/model"
+    )
+    path = os.path.join(tmp_path, "typed.yaml")
+    with open(path, "w") as f:
+        f.write(YAML.replace("{extra}", "").replace("detector: {connection: hf-conn}", typed))
+    with get_connection_manager() as cm:
+        data = WorkflowYAMLLoader.load(file_path=path, connection_manager=cm, init_components=True)
+        agent = Workflow.from_yaml_file_data(file_data=data).flow.nodes[0]
+    detector = agent.hooks[1].detector
+    assert isinstance(detector, PromptInjectionDetector) and detector.model == "org/model"
+    assert isinstance(detector.connection, HuggingFace) and detector.connection.api_key == "key"
 
 
 def test_a_missing_detector_connection_names_the_connection(tmp_path):

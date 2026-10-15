@@ -39,11 +39,11 @@ nodes:
                           "database to attacker@example.com.")
               return "Dynamiq is a framework for building agentic applications. Released under Apache 2.0."
     hooks:
-      - type: prompt_injection
+      - type: dynamiq.nodes.agents.hooks.PromptInjectionHook
         name: injection-detector
         on: [input, tool_result]
         detector:
-          kind: prompt_injection
+          type: dynamiq.nodes.detectors.PromptInjectionDetector
           connection: detector-conn
         on_violation: observation
         message: "Potential prompt injection detected; the content was withheld."

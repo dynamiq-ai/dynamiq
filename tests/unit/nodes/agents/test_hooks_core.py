@@ -217,11 +217,17 @@ def test_python_subclass_dumps_its_class_path_and_all_its_fields():
     assert "type" not in Hook().model_dump()
 
 
-def test_builtin_dump_uses_the_short_type_and_round_trips():
+def test_builtin_dump_uses_the_import_path_like_a_node_and_round_trips():
     hook = resolve_hook({"type": "call_limit", "tools": ["search"], "max_per_run": 2})
     dumped = hook.model_dump()
-    assert dumped["type"] == "call_limit" and dumped["max_per_run"] == 2
+    assert dumped["type"] == "dynamiq.nodes.agents.hooks.CallLimitHook" and dumped["max_per_run"] == 2
     assert resolve_hook(dumped) == hook
+    assert resolve_hook({**dumped, "type": "call_limit"}) == hook  # the short name stays an alias
+
+
+def test_import_path_of_a_hook_that_the_package_does_not_export_is_its_module_path():
+    assert Suffix.import_path() == f"{Suffix.__module__}.Suffix"
+    assert resolve_hook(Suffix(tag="X").model_dump()) == Suffix(tag="X")
 
 
 def test_live_answer_filter_never_sends_a_partial_match_whatever_the_chunking():
