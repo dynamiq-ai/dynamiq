@@ -123,11 +123,11 @@ def get_union_type(types: list[Any]) -> Any:
         return Any
     if len(unique_types) == 1:
         return unique_types[0]
-    return Union.__getitem__(tuple(unique_types))
+    return Union[tuple(unique_types)]
 
 
 def get_literal_type(values: list[Any]) -> Any:
-    return Literal.__getitem__(tuple(values))
+    return Literal[tuple(values)]
 
 
 def get_list_annotation(item_type: Any) -> Any:
