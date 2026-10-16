@@ -581,17 +581,20 @@ class WorkflowYAMLLoader:
         return node_depends
 
     @classmethod
-    def get_hooks_with_connections(
-        cls, hooks_data: Any, connections: dict[str, BaseConnection], registry: dict[str, Any]
-    ) -> Any:
-        """Pass agent hook configs through untouched (their ``type`` is a hook type, not a node type), except that
-        a ``detector.connection`` reference (``connection: lakera-conn``) is resolved to the workflow connection."""
+    def get_hooks_with_initialized_nodes(cls, hooks_data: Any, **kwargs) -> Any:
+        """Pass agent hook configs through untouched (their ``type`` is a hook's, not a node's), except for a
+        ``detector``: a node config (``type: dynamiq.nodes.detectors.PromptInjectionDetector``) is built like any
+        nested node, and in the earlier ``kind`` form the ``connection`` reference is resolved to the workflow
+        connection."""
         if not isinstance(hooks_data, list):
             return hooks_data
         resolved = []
         for hook_data in hooks_data:
             detector = hook_data.get("detector") if isinstance(hook_data, dict) else None
-            if (
+            if isinstance(detector, dict) and cls.is_node_type(detector.get("type")):
+                node = cls.get_updated_node_init_data_with_initialized_nodes({"detector": detector}, **kwargs)
+                hook_data = {**hook_data, "detector": node["detector"]}
+            elif (
                 isinstance(detector, dict)
                 and detector.get("connection") is not None
                 and not isinstance(detector["connection"], BaseConnection)
@@ -600,8 +603,8 @@ class WorkflowYAMLLoader:
                 connection = cls.get_node_connection(
                     node_id=f"hook {hook_id}",
                     node_data=detector,
-                    connections=connections,
-                    registry=registry,
+                    connections=kwargs["connections"],
+                    registry=kwargs["registry"],
                 )
                 hook_data = {**hook_data, "detector": {**detector, "connection": connection}}
             resolved.append(hook_data)
@@ -653,7 +656,7 @@ class WorkflowYAMLLoader:
             # We had to add this condition because some nodes have a `schema`/`response_format` params,
             # that have a `type` field that contains types supported by JSON schema (e.g., string, object).
             if param_name == "hooks":
-                updated_node_init_data[param_name] = cls.get_hooks_with_connections(param_data, connections, registry)
+                updated_node_init_data[param_name] = cls.get_hooks_with_initialized_nodes(param_data, **kwargs)
 
             elif param_name in ("schema", "response_format", "agent_factory"):
                 updated_node_init_data[param_name] = param_data
@@ -662,8 +665,8 @@ class WorkflowYAMLLoader:
                 updated_param_data = {}
                 for param_name_inner, param_data_inner in param_data.items():
                     if param_name_inner == "hooks":
-                        updated_param_data[param_name_inner] = cls.get_hooks_with_connections(
-                            param_data_inner, connections, registry
+                        updated_param_data[param_name_inner] = cls.get_hooks_with_initialized_nodes(
+                            param_data_inner, **kwargs
                         )
                     elif param_name_inner in ("prompt", "schema", "response_format", "agent_factory", "connection"):
                         updated_param_data[param_name_inner] = param_data_inner

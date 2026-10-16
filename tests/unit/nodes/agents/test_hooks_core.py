@@ -203,7 +203,7 @@ def test_unknown_fields_are_rejected():
 def test_resolve_requires_a_type_and_names_the_known_ones():
     with pytest.raises(ValueError, match="missing `type`"):
         resolve_hook({"patterns": ["x"]})
-    with pytest.raises(ValueError, match="Unknown hook type 'piii'.*pii"):
+    with pytest.raises(ValueError, match=r"Unknown hook type 'piii'.*dynamiq\.nodes\.agents\.hooks\.PIIHook"):
         resolve_hook({"type": "piii"})
     with pytest.raises(ValueError, match="could not be imported"):
         resolve_hook({"type": "no.such.module.Hook"})
@@ -217,11 +217,13 @@ def test_python_subclass_dumps_its_class_path_and_all_its_fields():
     assert "type" not in Hook().model_dump()
 
 
-def test_builtin_dump_uses_the_short_type_and_round_trips():
-    hook = resolve_hook({"type": "call_limit", "tools": ["search"], "max_per_run": 2})
+def test_builtin_dump_uses_the_import_path_and_round_trips():
+    hook = resolve_hook({"type": "call_limit", "tools": ["search"], "max_per_run": 2})  # the short name still loads
     dumped = hook.model_dump()
-    assert dumped["type"] == "call_limit" and dumped["max_per_run"] == 2
+    assert dumped["type"] == "dynamiq.nodes.agents.hooks.CallLimitHook" and dumped["max_per_run"] == 2
     assert resolve_hook(dumped) == hook
+    assert resolve_hook({**dumped, "type": "dynamiq.nodes.agents.hooks.builtin.CallLimitHook"}) == hook
+    assert hook.display_name == "call_limit"  # traces and the saved state keep the short name
 
 
 def test_live_answer_filter_never_sends_a_partial_match_whatever_the_chunking():

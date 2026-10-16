@@ -24,6 +24,7 @@ import dataclasses
 import fnmatch
 import importlib
 import re
+import sys
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -233,7 +234,8 @@ def sanitize_tool_name_pattern(pattern: str) -> str:
 
 
 def register_hook(name: str):
-    """Class decorator: make ``type: <name>`` resolve to the decorated hook."""
+    """Class decorator: make the short name ``type: <name>`` resolve to the decorated hook too. A hook is written
+    with its import path (``Hook.import_path``); the short name stays a shorthand that configs may use."""
 
     def decorator(cls):
         if HOOK_REGISTRY.get(name, cls) is not cls:
@@ -246,12 +248,15 @@ def register_hook(name: str):
 
 
 class Hook(BaseModel):
-    """Base class of every hook. Override the points you need; reference a Python subclass from YAML with
-    ``type: my_pkg.my_module.MyHook``. Unknown fields are rejected, so a typo cannot yield a hook that does nothing.
+    """Base class of every hook. Override the points you need. A config names a hook by its import path, as it
+    names a node (``type: dynamiq.nodes.agents.hooks.PIIHook``, ``type: my_pkg.my_module.MyHook``); built-ins also
+    load from their short name (``type: pii``). Unknown fields are rejected, so a typo cannot yield a hook that does
+    nothing.
 
     Attributes:
         name: Shown in traces, stream events and block outcomes, and keys the hook's saved state (so it is unique
-            per agent; unnamed hooks of one type are told apart by their order). Defaults to the hook type.
+            per agent; unnamed hooks of one type are told apart by their order). Defaults to the hook's short type
+            name (``pii``).
         tools: Tool points only: the tools the hook applies to (``*`` or empty = all). An entry is a tool name, an MCP
             server name (all its tools) or a ``*`` pattern of either, e.g. ``github`` or ``delete_*``.
         inherit: Also apply in the sub-agents this agent calls (and theirs), sharing the run state, so that for
@@ -274,11 +279,18 @@ class Hook(BaseModel):
     def _serialize_with_type(self, handler):
         data = handler(self)
         cls = type(self)
-        if cls.__dict__.get("hook_type"):
-            return {"type": cls.hook_type, **data}
         if cls is Hook:
             return data
-        return {"type": f"{cls.__module__}.{cls.__qualname__}", **data}
+        return {"type": cls.import_path(), **data}
+
+    @classmethod
+    def import_path(cls) -> str:
+        """The ``type`` the hook is written with: the path of its package when the package exports it, as for nodes
+        (``dynamiq.nodes.agents.hooks.PIIHook``), else of its module."""
+        package = cls.__module__.rpartition(".")[0]
+        if package and getattr(sys.modules.get(package), cls.__name__, None) is cls:
+            return f"{package}.{cls.__name__}"
+        return f"{cls.__module__}.{cls.__qualname__}"
 
     def on_input(self, ctx: HookContext, text: str) -> Decision:
         return ALLOW
@@ -342,15 +354,21 @@ class Hook(BaseModel):
         give back what ``before_tool`` took, e.g. a call count."""
 
 
+def builtin_hook_types() -> list[str]:
+    """The import paths of the built-in hooks, for messages and schemas."""
+    return sorted(hook_class.import_path() for hook_class in HOOK_REGISTRY.values())
+
+
 def resolve_hook(item: Any) -> Hook:
-    """Build a hook from an instance or a dict (``type: pii`` or ``type: pkg.mod.Class``, plus its fields)."""
+    """Build a hook from an instance or a dict (``type: pkg.mod.Class``, or a built-in's short name such as
+    ``type: pii``, plus its fields)."""
     if isinstance(item, Hook):
         return item
     if not isinstance(item, dict):
         raise ValueError(f"A hook must be a mapping with a `type`, got {type(item).__name__}")
     hook_type = item.get("type")
     if not hook_type:
-        raise ValueError(f"Hook is missing `type` (built-in: {sorted(HOOK_REGISTRY)}, or a dotted class path): {item}")
+        raise ValueError(f"Hook is missing `type` (built-in: {builtin_hook_types()}, or a class path): {item}")
     hook_type = str(hook_type)
     fields = {key: value for key, value in item.items() if key != "type"}
     if True in fields and "on" not in fields:
@@ -367,7 +385,7 @@ def resolve_hook(item: Any) -> Hook:
         if not (isinstance(hook_class, type) and issubclass(hook_class, Hook)):
             raise ValueError(f"Hook type {hook_type!r} is not a Hook subclass")
     else:
-        raise ValueError(f"Unknown hook type {hook_type!r}. Built-in types: {sorted(HOOK_REGISTRY)}")
+        raise ValueError(f"Unknown hook type {hook_type!r}. Built-in types: {builtin_hook_types()}")
     return hook_class.model_validate(fields)
 
 

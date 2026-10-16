@@ -72,26 +72,26 @@ nodes:
             model: gpt-4o-mini
           max_loops: 6
     hooks:
-      - type: tool_policy
+      - type: dynamiq.nodes.agents.hooks.ToolPolicyHook
         name: admin-only-delete
         tools: [delete-customer]
         allow_if:
           metadata.role: admin
         message: "Deleting customers is restricted to admins. Tell the user to ask an administrator."
-      - type: tool_policy
+      - type: dynamiq.nodes.agents.hooks.ToolPolicyHook
         name: researcher-access
         tools: [Researcher]
         allow_if:
           metadata.role: [admin, analyst]
         message: "Your role may not use the Researcher. Answer from what you already know."
-      - type: tool_policy
+      - type: dynamiq.nodes.agents.hooks.ToolPolicyHook
         name: refund-approval
         tools: [refund-customer]
         approval: true
         approval_unless:
           metadata.role: admin
         approval_message: "Approve this refund?"
-      - type: call_limit
+      - type: dynamiq.nodes.agents.hooks.CallLimitHook
         name: search-budget
         tools: [web-search]
         max_per_run: 2
