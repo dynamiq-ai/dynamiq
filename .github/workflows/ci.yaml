@@ -166,10 +166,6 @@ jobs:
         with:
           version: "0.11.24"
 
-      # The agent hook examples read OPENAI_API_KEY from .env while loading their YAML, even when they run offline.
-      - name: Create .env file
-        run: echo "OPENAI_API_KEY=offline-placeholder" > .env
-
       - name: Install dependencies
         run: uv sync --frozen
 
