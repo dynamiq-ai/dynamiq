@@ -1,5 +1,6 @@
 """Tests for InMemoryLongTermMemoryBackend storage primitives."""
-from datetime import UTC, datetime, timedelta
+
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -8,7 +9,7 @@ from dynamiq.memory.long_term.schemas import Fact
 
 def _fact(fact_id: str, user_id: str, content: str,
           content_hash: str | None = None) -> Fact:
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     return Fact(
         id=fact_id, content=content,
         hash=content_hash or f"h-{fact_id}",
@@ -175,7 +176,7 @@ def test_update_unknown_is_noop(backend, fake_embedder):
         content_hash="h",
         embedding=fake_embedder.embed("x"),
         metadata={},
-        updated_at=datetime.now(UTC),
+        updated_at=datetime.now(timezone.utc),
     )  # must not raise
     assert backend.get("does-not-exist") is None
 
