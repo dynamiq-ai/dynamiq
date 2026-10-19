@@ -29,7 +29,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Create .env file
-        uses: SpicyPizza/create-envfile@v2.0.3
+        uses: SpicyPizza/create-envfile@v2
         with:
           envkey_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           envkey_UNSTRUCTURED_API_KEY: ${{ secrets.UNSTRUCTURED_API_KEY }}
@@ -59,7 +59,7 @@ jobs:
       - name: Load Test Image
         uses: docker/bake-action@v7
         with:
-          source: .  # build from the checkout; v6+ defaults to the Git context
+          source: .
           load: true
           set: |
             *.cache-from=type=gha

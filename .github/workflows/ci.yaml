@@ -20,7 +20,7 @@ jobs:
 
       - name: Create .env file on push or internal PR
         if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
-        uses: SpicyPizza/create-envfile@v2.0.3
+        uses: SpicyPizza/create-envfile@v2
         with:
           envkey_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           envkey_UNSTRUCTURED_API_KEY: ${{ secrets.UNSTRUCTURED_API_KEY }}
@@ -34,12 +34,12 @@ jobs:
 
       - name: Create .env file on fork PR
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-        uses: SpicyPizza/create-envfile@v2.0.3
+        uses: SpicyPizza/create-envfile@v2
 
       - name: Build
         uses: docker/bake-action@v7
         with:
-          source: .  # build from the checkout; v6+ defaults to the Git context
+          source: .
           set: |
             *.cache-from=type=gha
             *.cache-to=type=gha,mode=max
@@ -82,7 +82,7 @@ jobs:
 
       - name: Create .env file on push or internal PR
         if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
-        uses: SpicyPizza/create-envfile@v2.0.3
+        uses: SpicyPizza/create-envfile@v2
         with:
           envkey_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           envkey_UNSTRUCTURED_API_KEY: ${{ secrets.UNSTRUCTURED_API_KEY }}
@@ -97,12 +97,12 @@ jobs:
 
       - name: Create .env file on fork PR
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-        uses: SpicyPizza/create-envfile@v2.0.3
+        uses: SpicyPizza/create-envfile@v2
 
       - name: Load Image
         uses: docker/bake-action@v7
         with:
-          source: .  # build from the checkout; v6+ defaults to the Git context
+          source: .
           load: true
           set: |
             *.cache-from=type=gha
@@ -138,7 +138,7 @@ jobs:
           path: reports
 
       - name: Produce the coverage report on push or internal PR
-        uses: MishaKav/pytest-coverage-comment@v1.12.3
+        uses: MishaKav/pytest-coverage-comment@v1
         with:
           pytest-xml-coverage-path: ./reports/coverage.xml
           junitxml-path: ./reports/test-results.xml
