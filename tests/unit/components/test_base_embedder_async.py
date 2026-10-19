@@ -275,3 +275,17 @@ class TestClientOnlyEmbedParams:
         embedder = OpenAIEmbedder(client=MagicMock())
 
         assert embedder.embed_params_async == {}
+
+    def test_embed_params_keeps_dimensions_with_client(self):
+        client = MagicMock()
+        embedder = OpenAIEmbedder(client=client, dimensions=256)
+
+        assert embedder.embed_params == {"client": client, "dimensions": 256}
+
+    def test_embed_params_async_merges_connection_with_client(self):
+        embedder = OpenAIEmbedder(client=MagicMock(), connection=OpenAIConnection(api_key="x"), dimensions=8)
+
+        params = embedder.embed_params_async
+        assert "client" not in params
+        assert params["api_key"] == "x"
+        assert params["dimensions"] == 8

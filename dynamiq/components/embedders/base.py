@@ -127,7 +127,7 @@ class BaseEmbedder(BaseModel):
 
     @property
     def embed_params(self) -> dict:
-        if self.client:
+        if self.client is not None:
             return {"client": self.client}
         return self.connection.conn_params
 
