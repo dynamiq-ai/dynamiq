@@ -179,3 +179,46 @@ def test_a_bounded_queue_given_with_a_set_loop_receives_every_event():
     )
 
     assert done.returncode == 0, done.stderr
+
+
+def test_a_queue_given_with_a_set_loop_reaches_a_direct_reader():
+    done = run_in_fresh_interpreter(
+        """
+        import asyncio
+        from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        queue = asyncio.Queue()
+        handler = AsyncStreamingIteratorCallbackHandler(queue=queue)
+        assert handler.loop is loop
+        handler.send_to_queue("event")
+
+        assert loop.run_until_complete(asyncio.wait_for(queue.get(), timeout=5)) == "event"
+        """
+    )
+
+    assert done.returncode == 0, done.stderr
+
+
+def test_a_closed_set_loop_is_not_used():
+    done = run_in_fresh_interpreter(
+        """
+        import asyncio
+        from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.close()
+        handler = AsyncStreamingIteratorCallbackHandler()
+        assert handler.loop is None
+        handler.send_to_queue("event")
+
+        async def consume():
+            return await asyncio.wait_for(handler.__anext__(), timeout=5)
+
+        assert asyncio.run(consume()) == "event"
+        """
+    )
+
+    assert done.returncode == 0, done.stderr

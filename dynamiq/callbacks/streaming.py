@@ -1,4 +1,5 @@
 import asyncio
+import sys
 import threading
 from collections import deque
 from enum import Enum
@@ -313,8 +314,8 @@ class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
         Args:
             queue (asyncio.Queue | None): Queue for streaming events.
             done_event (asyncio.Event | None): Event to signal completion.
-            loop (asyncio.AbstractEventLoop | None): Event loop the consumer runs in. Defaults to the running loop;
-                built outside one, the handler binds to the loop that first reads from it.
+            loop (asyncio.AbstractEventLoop | None): Event loop the consumer runs in. Defaults to the running loop,
+                else the loop set for this thread; with neither, the handler binds to the loop that first reads from it.
         """
         self._loop_lock = threading.Lock()
         self._pending: deque[StreamingEventMessage] = deque()
@@ -325,21 +326,35 @@ class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
             done_event = asyncio.Event()
         super().__init__(queue, done_event)
         self._iterator = self._iter_queue_events()
-        self.loop = loop or self._running_loop()
+        self.loop = loop or self._configured_loop()
 
     @staticmethod
-    def _running_loop() -> asyncio.AbstractEventLoop | None:
+    def _configured_loop() -> asyncio.AbstractEventLoop | None:
+        """The loop running in this thread, else the open loop set for it, without creating one.
+
+        A loop set with `asyncio.set_event_loop()` is the one a caller runs later with `run_until_complete()`, so the
+        handler keeps using it, as it always has. Before Python 3.14 `asyncio.get_event_loop()` creates a loop in the
+        main thread when none is set, so the set one is read from the policy instead.
+        """
         try:
             return asyncio.get_running_loop()
         except RuntimeError:
-            return None
+            pass
+        if sys.version_info >= (3, 14):
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                return None
+        else:
+            loop = getattr(getattr(asyncio.get_event_loop_policy(), "_local", None), "_loop", None)
+        return None if loop is None or loop.is_closed() else loop
 
     def _bind_to_consumer_loop(self) -> None:
         """Bind to the loop reading the handler, if none was known at construction, and deliver what was held.
 
-        A handler built before its loop starts, `handler = ...; asyncio.run(consume(handler))`, used to take whatever
-        `asyncio.get_event_loop()` returned there: a fresh loop that never runs, so every event went to it and the
-        consumer waited forever.
+        A handler built with no loop running or set, `handler = ...; asyncio.run(consume(handler))`, used to take
+        whatever `asyncio.get_event_loop()` returned there: a fresh loop that never runs, so every event went to it and
+        the consumer waited forever.
         """
         if self.loop is not None:
             return
