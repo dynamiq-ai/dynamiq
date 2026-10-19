@@ -38,3 +38,18 @@ def test_convert_filters_to_query_with_contains_any():
     where_clause, params = _convert_filters_to_query(filters)
     assert "jsonb_array_elements_text" in where_clause.as_string(None)
     assert params == ("tags", "tags", ["ai", "ml"])
+
+
+@pytest.mark.parametrize(
+    "operator, value, expected",
+    [
+        ("in", [1, 2], "(metadata->>'page')::int = ANY(%s::int[])"),
+        ("in", [1.5, 2.5], "(metadata->>'page')::float = ANY(%s::float[])"),
+        ("in", ["a", "b"], "(metadata->>'page')::text = ANY(%s::text[])"),
+        ("not in", [1, 2], "(metadata->>'page')::int IS NULL OR (metadata->>'page')::int != ALL(%s::int[])"),
+    ],
+)
+def test_in_operators_cast_array_to_field_type(operator, value, expected):
+    query, params = _convert_filters_to_query({"field": "metadata.page", "operator": operator, "value": value})
+    assert expected in repr(query)
+    assert params == (value,)
