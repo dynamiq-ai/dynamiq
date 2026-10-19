@@ -403,7 +403,7 @@ def _not_in(field: str, value: Any) -> tuple[str, list]:
         VectorStoreFilterException: If the value is not a list or contains unsupported types.
     """
     _validate_list_value(field, value, "not in")
-    return f"{field} IS NULL OR {field} != ALL(%s::text[])", value
+    return f"({field} IS NULL OR {field} != ALL(%s::text[]))", value
 
 
 def _in(field: str, value: Any) -> tuple[str, list]:
