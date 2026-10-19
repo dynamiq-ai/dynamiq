@@ -10,7 +10,9 @@ EXAMPLES = os.path.join(os.path.dirname(__file__), "..", "..", "..", "examples",
 
 
 def run_example(name: str, *args: str) -> str:
-    env = {k: v for k, v in os.environ.items() if k not in ("DYNAMIQ_TRACE_ACCESS_KEY", "OPENAI_API_KEY")}
+    env = {k: v for k, v in os.environ.items() if k != "DYNAMIQ_TRACE_ACCESS_KEY"}
+    # dag.yaml resolves ${oc.env:OPENAI_API_KEY} on load; --offline means it is never used
+    env["OPENAI_API_KEY"] = "offline"
     done = subprocess.run(
         [sys.executable, os.path.join(EXAMPLES, name, "main.py"), "--offline", *args],
         capture_output=True,

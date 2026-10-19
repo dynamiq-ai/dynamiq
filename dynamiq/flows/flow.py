@@ -90,7 +90,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
 
     name: str = "Flow"
     nodes: list[Node] = []
-    executor: type[BaseExecutor] = ThreadExecutor
+    executor: builtins.type[BaseExecutor] = ThreadExecutor
     max_node_workers: int | None = None
     connection_manager: ConnectionManager = Field(default_factory=ConnectionManager)
 

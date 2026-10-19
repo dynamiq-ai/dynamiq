@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import io
 import threading
 from typing import Any, ClassVar, Coroutine, Literal
@@ -823,7 +824,7 @@ class CuaDesktopTool(ConnectionNode):
                 try:
                     if hasattr(self._computer, "stop"):
                         stop_method = getattr(self._computer, "stop")
-                        if asyncio.iscoroutinefunction(stop_method):
+                        if inspect.iscoroutinefunction(stop_method):
                             # Method is async, run it in the event loop
                             if self._loop and not self._loop.is_closed():
                                 future = asyncio.run_coroutine_threadsafe(stop_method(), self._loop)

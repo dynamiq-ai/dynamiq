@@ -50,6 +50,15 @@ def by_id(output: dict) -> dict[str, dict]:
     return {finding["rule_id"]: finding for finding in output["findings"]}
 
 
+def calendar_reason(year: int, month: int, day: int) -> str:
+    """Python's reason for refusing a day the calendar lacks, which Python 3.14 reworded."""
+    try:
+        date(year, month, day)
+    except ValueError as e:
+        return str(e)
+    raise AssertionError(f"{year}-{month}-{day} is a day of the calendar")
+
+
 def statuses(output: dict) -> dict[str, str]:
     return {rule_id: finding["status"] for rule_id, finding in by_id(output).items()}
 
@@ -1022,18 +1031,18 @@ def test_a_date_that_does_not_match_the_format_given_is_unreadable_naming_the_fo
 
 
 @pytest.mark.parametrize(
-    ("raw", "why"),
+    ("raw", "day"),
     [
-        ("2025-02-29", "day is out of range for month"),
-        ("02/29/2025", "day is out of range for month"),
-        ("2025/02/29", "day is out of range for month"),
-        ("August 32, 2026", "day is out of range for month"),
-        ("31 June 2026", "day is out of range for month"),
-        ("13/08/2026", "month must be in 1..12"),
+        ("2025-02-29", (2025, 2, 29)),
+        ("02/29/2025", (2025, 2, 29)),
+        ("2025/02/29", (2025, 2, 29)),
+        ("August 32, 2026", (2026, 8, 32)),
+        ("31 June 2026", (2026, 6, 31)),
+        ("13/08/2026", (2026, 13, 8)),
     ],
     ids=["iso", "us", "year-first", "named", "day-first", "month-out-of-range"],
 )
-def test_a_date_the_calendar_lacks_names_the_text_and_why(raw, why):
+def test_a_date_the_calendar_lacks_names_the_text_and_why(raw, day):
     """Text in a date's shape that names no day of the calendar is unreadable, naming the text as any other text that
     is no date does, with Python's reason after it."""
     node = rules(Rule(id="DT-01", check="date(app.opened) < today()"))
@@ -1042,7 +1051,7 @@ def test_a_date_the_calendar_lacks_names_the_text_and_why(raw, why):
 
     assert (finding["status"], finding["message"]) == (
         "not_evaluated",
-        f"check could not be evaluated: not a date: {raw!r} ({why})",
+        f"check could not be evaluated: not a date: {raw!r} ({calendar_reason(*day)})",
     )
 
 
