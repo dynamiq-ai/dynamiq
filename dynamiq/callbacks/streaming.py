@@ -319,6 +319,8 @@ class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
         """
         self._loop_lock = threading.Lock()
         self._pending: deque[StreamingEventMessage] = deque()
+        # True from binding until the held events that did not fit are all in the queue; events sent meanwhile are held.
+        self._replaying = False
         self._replay_task: asyncio.Task | None = None
         if queue is None:
             queue = _ConsumerBoundQueue(on_read=self._bind_to_consumer_loop)
@@ -359,34 +361,38 @@ class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
         if self.loop is not None:
             return
         with self._loop_lock:
-            if self.loop is None:
-                self.loop = asyncio.get_running_loop()
-                while self._pending and not self.queue.full():
-                    self.queue.put_nowait(self._pending.popleft())
-                if self._pending:
-                    # A bounded queue is full: the rest waits for room through put() instead of raising QueueFull.
-                    self._replay_task = self.loop.create_task(self._replay_pending())
+            if self.loop is not None:
+                return
+            self.loop = asyncio.get_running_loop()
+            while self._pending and not self.queue.full():
+                self.queue.put_nowait(self._pending.popleft())
+            # A bounded queue is full: the rest waits for room through put() instead of raising QueueFull.
+            replay = self._replaying = bool(self._pending)
+        if replay:
+            # Started after releasing the lock: with asyncio.eager_task_factory the task runs right here, and its first
+            # step takes the same lock.
+            self._replay_task = self.loop.create_task(self._replay_pending())
 
     async def _replay_pending(self) -> None:
         """Put the held events that did not fit, in order. Events sent meanwhile are held behind them."""
         while True:
             with self._loop_lock:
                 if not self._pending:
-                    self._replay_task = None
+                    self._replaying = False
                     return
                 event = self._pending.popleft()
             try:
                 await self.queue.put(event)
             except BaseException:
                 with self._loop_lock:
-                    self._replay_task = None
+                    self._replaying = False
                 raise
 
     def send_to_queue(self, event: StreamingEventMessage):
         """Send the event to the queue, holding it until a consumer binds the handler to its loop."""
         with self._loop_lock:
             # Also held while earlier held events are still being replayed, so they keep their order.
-            if self.loop is None or self._replay_task is not None:
+            if self.loop is None or self._replaying:
                 self._pending.append(event)
                 return
             loop = self.loop
@@ -400,7 +406,7 @@ class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
         """
         self._bind_to_consumer_loop()
         try:
-            while not self.queue.empty() or self._replay_task is not None or not self.done_event.is_set():
+            while not self.queue.empty() or self._replaying or not self.done_event.is_set():
                 event = await self.queue.get()
                 yield event
         except Exception as e:

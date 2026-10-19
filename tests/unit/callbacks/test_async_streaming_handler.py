@@ -5,19 +5,21 @@ import textwrap
 import threading
 from pathlib import Path
 
+import pytest
+
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 
 REPO_ROOT = Path(__file__).parents[3]
 
 
-def run_in_fresh_interpreter(code: str) -> subprocess.CompletedProcess:
+def run_in_fresh_interpreter(code: str, timeout: float = 60) -> subprocess.CompletedProcess:
     """Run `code` in a new interpreter, whose main thread has no event loop set, without touching this process's."""
     return subprocess.run(  # nosec B603
         [sys.executable, "-W", "ignore::DeprecationWarning", "-c", textwrap.dedent(code)],
         capture_output=True,
         text=True,
         cwd=REPO_ROOT,
-        timeout=60,
+        timeout=timeout,
     )
 
 
@@ -219,6 +221,34 @@ def test_a_closed_set_loop_is_not_used():
 
         assert asyncio.run(consume()) == "event"
         """
+    )
+
+    assert done.returncode == 0, done.stderr
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="asyncio.eager_task_factory arrived in Python 3.12")
+def test_held_events_replay_in_order_under_the_eager_task_factory():
+    # A deadlock blocks the loop itself, so only a timeout outside the interpreter can stop it.
+    done = run_in_fresh_interpreter(
+        """
+        import asyncio
+        from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
+
+        asyncio.set_event_loop(None)
+        handler = AsyncStreamingIteratorCallbackHandler(queue=asyncio.Queue(maxsize=1))
+        for event in ("first", "second", "third"):
+            handler.send_to_queue(event)
+
+        async def consume():
+            asyncio.get_running_loop().set_task_factory(asyncio.eager_task_factory)
+            received = [await handler.__anext__()]
+            handler.send_to_queue("sent during the replay")
+            received += [await handler.__anext__() for _ in range(3)]
+            return received
+
+        assert asyncio.run(consume()) == ["first", "second", "third", "sent during the replay"]
+        """,
+        timeout=20,
     )
 
     assert done.returncode == 0, done.stderr
