@@ -600,6 +600,8 @@ class MCPServer(ConnectionNode):
       connection (MCPSse | MCPStdio | MCPStreamableHTTP): Connection module for the MCP server.
       include_tools (list[str]): Names of tools to include. If empty, all tools are included.
       exclude_tools (list[str]): Names of tools to exclude.
+      discover_per_run (bool): List tools at the start of each agent run, with that run's
+        ``mcp_http_headers``, instead of once when the agent is built.
       _mcp_tools (dict[str, MCPTool]): Internal dict of initialized MCP tools.
     """
 
@@ -624,17 +626,35 @@ Usage Strategy:
 
     include_tools: list[str] = field(default_factory=list)
     exclude_tools: list[str] = field(default_factory=list)
+    discover_per_run: bool = Field(
+        default=False,
+        description=(
+            "List the server's tools at the start of every agent run, sending that run's mcp_http_headers "
+            "from tool_params, instead of once when the agent is built. For servers that list different "
+            "tools to different callers."
+        ),
+    )
     _mcp_tools: dict[str, MCPTool] = PrivateAttr(default_factory=dict)
 
-    async def initialize_tools(self):
+    async def initialize_tools(self, headers: dict[str, Any] | None = None):
         """
         Initializes the MCP tool list from the client session.
+
+        Args:
+            headers: HTTP headers for this session, merged over the connection's own.
 
         Returns:
             None
         """
+        self._mcp_tools.update(await self._list_tools(headers))
+
+    async def _list_tools(self, headers: dict[str, Any] | None = None) -> dict[str, MCPTool]:
+        """Lists the server's tools over one session, following every page of tools/list."""
+        discovered: dict[str, MCPTool] = {}
         try:
-            async with self.connection.connect() as result:
+            # Without headers this is the same connect() call as before, so build-time discovery is unchanged.
+            transport = self.connection.connect(headers=headers) if headers else self.connection.connect()
+            async with transport as result:
                 read, write = result[:2]
                 async with ClientSession(read, write) as session:
                     await session.initialize()
@@ -653,9 +673,9 @@ Usage Strategy:
                             is_optimized_for_agents=self.is_optimized_for_agents,
                         )
                         mcp_tool._owner_server = self
-                        self._mcp_tools[tool.name] = mcp_tool
+                        discovered[tool.name] = mcp_tool
 
-            logger.info(f"Tool {self.name}: {len(self._mcp_tools)} MCP tools initialized from a server.")
+            logger.info(f"Tool {self.name}: {len(discovered)} MCP tools initialized from a server.")
         except Exception as e:
             error = format_exception(e)
             if self.mock.is_pinned:
@@ -671,9 +691,10 @@ Usage Strategy:
                     f"Tool {self.name} - {self.id}: mocked MCP server is unreachable; continuing without "
                     f"its tools. The agent will not see this server's tools this run. Error: {error}"
                 )
-                return
+                return discovered
             logger.error(f"Tool {self.name} - {self.id}: failed to initialize session. Error: {error}")
             raise ToolExecutionException(f"Tool {self.name} - {self.id}: failed to initialize session. Error: {error}")
+        return discovered
 
     def get_mcp_tools(self, select_all: bool = False) -> list[MCPTool]:
         """
@@ -704,13 +725,42 @@ Usage Strategy:
         if not self._mcp_tools:
             await self.initialize_tools()
 
+        return self._select_tools(self._mcp_tools, select_all)
+
+    def get_run_tools(self, headers: dict[str, Any] | None = None) -> list[MCPTool]:
+        """
+        Synchronously lists the tools for one agent run. See ``get_run_tools_async``.
+        """
+        if is_called_from_async_context():
+            with ContextAwareThreadPoolExecutor() as executor:
+                future = executor.submit(lambda: asyncio.run(self.get_run_tools_async(headers)))
+                return future.result()
+        return asyncio.run(self.get_run_tools_async(headers))
+
+    async def get_run_tools_async(self, headers: dict[str, Any] | None = None) -> list[MCPTool]:
+        """
+        Lists the tools for one agent run over a session that carries that run's headers.
+
+        The result is not cached on the server, so runs with different headers (different callers)
+        each get the tools the server lists for them.
+
+        Args:
+            headers: The run's ``mcp_http_headers``, merged over the connection's own headers.
+
+        Returns:
+            list[MCPTool]: The listed tools after ``include_tools`` and ``exclude_tools``.
+        """
+        return self._select_tools(await self._list_tools(headers))
+
+    def _select_tools(self, tools: dict[str, MCPTool], select_all: bool = False) -> list[MCPTool]:
+        """Applies ``include_tools`` and ``exclude_tools`` to discovered tools."""
         if select_all or not self.include_tools and not self.exclude_tools:
-            return list(self._mcp_tools.values())
+            return list(tools.values())
 
         if self.include_tools:
-            return [v for k, v in self._mcp_tools.items() if k in self.include_tools and k not in self.exclude_tools]
+            return [v for k, v in tools.items() if k in self.include_tools and k not in self.exclude_tools]
 
-        return [v for k, v in self._mcp_tools.items() if k not in self.exclude_tools]
+        return [v for k, v in tools.items() if k not in self.exclude_tools]
 
     def execute(self, **kwargs):
         """
