@@ -80,7 +80,8 @@ def test_events_sent_from_a_worker_thread_reach_the_async_consumer():
 
         worker = threading.Thread(target=produce)
         worker.start()
-        received = [await handler.queue.get() for _ in events]
+        # Bounded, so an event that never arrives fails the test instead of hanging the run.
+        received = [await asyncio.wait_for(handler.queue.get(), timeout=5) for _ in events]
         worker.join()
         return received
 
