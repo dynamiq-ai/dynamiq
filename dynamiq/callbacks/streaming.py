@@ -308,7 +308,24 @@ class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
             done_event = asyncio.Event()
         super().__init__(queue, done_event)
         self._iterator = self._iter_queue_events()
-        self.loop = loop or asyncio.get_event_loop()
+        self.loop = loop or self._current_event_loop()
+
+    @staticmethod
+    def _current_event_loop() -> asyncio.AbstractEventLoop:
+        """The running or set event loop, creating one in the main thread when there is none.
+
+        Python 3.14 made `asyncio.get_event_loop()` raise in the main thread when no loop is set, where earlier versions
+        created and set one. This keeps the earlier behavior so a handler built before its loop starts works the same on
+        every version.
+        """
+        try:
+            return asyncio.get_event_loop()
+        except RuntimeError:
+            if threading.current_thread() is not threading.main_thread():
+                raise
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            return loop
 
     def send_to_queue(self, event: StreamingEventMessage):
         """Send the event to the queue."""
