@@ -115,3 +115,67 @@ def test_events_sent_from_a_worker_thread_reach_the_async_consumer():
         return received
 
     assert asyncio.run(consume()) == ["first", "second"]
+
+
+def test_held_events_wait_for_room_in_a_bounded_queue_and_keep_their_order():
+    asyncio.run(asyncio.sleep(0))  # Leaves no current loop, so the handler holds what it is sent.
+    handler = AsyncStreamingIteratorCallbackHandler(queue=asyncio.Queue(maxsize=1))
+    for event in ("first", "second", "third"):
+        handler.send_to_queue(event)
+
+    async def consume():
+        return [await asyncio.wait_for(handler.__anext__(), timeout=5) for _ in range(3)]
+
+    assert asyncio.run(consume()) == ["first", "second", "third"]
+
+
+def test_events_sent_while_held_ones_are_replayed_come_after_them():
+    asyncio.run(asyncio.sleep(0))
+    handler = AsyncStreamingIteratorCallbackHandler(queue=asyncio.Queue(maxsize=1))
+    handler.send_to_queue("held first")
+    handler.send_to_queue("held second")
+
+    async def consume():
+        received = [await asyncio.wait_for(handler.__anext__(), timeout=5)]
+        worker = threading.Thread(target=handler.send_to_queue, args=("sent later",))
+        worker.start()
+        worker.join()
+        received += [await asyncio.wait_for(handler.__anext__(), timeout=5) for _ in range(2)]
+        return received
+
+    assert asyncio.run(consume()) == ["held first", "held second", "sent later"]
+
+
+def test_a_consumer_starting_after_the_run_ended_gets_every_held_event():
+    asyncio.run(asyncio.sleep(0))
+    handler = AsyncStreamingIteratorCallbackHandler(queue=asyncio.Queue(maxsize=1))
+    handler.send_to_queue("first")
+    handler.send_to_queue("second")
+    handler.done_event.set()
+
+    async def consume():
+        return [event async for event in handler]
+
+    assert asyncio.run(asyncio.wait_for(consume(), timeout=5)) == ["first", "second"]
+
+
+def test_a_bounded_queue_given_with_a_set_loop_receives_every_event():
+    done = run_in_fresh_interpreter(
+        """
+        import asyncio
+        from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        handler = AsyncStreamingIteratorCallbackHandler(queue=asyncio.Queue(maxsize=1))
+        handler.send_to_queue("first")
+        handler.send_to_queue("second")
+
+        async def consume():
+            return [await asyncio.wait_for(handler.__anext__(), timeout=5) for _ in range(2)]
+
+        assert loop.run_until_complete(consume()) == ["first", "second"]
+        """
+    )
+
+    assert done.returncode == 0, done.stderr
