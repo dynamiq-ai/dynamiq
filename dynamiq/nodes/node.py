@@ -1,4 +1,5 @@
 import asyncio
+import builtins
 import contextvars
 import copy
 import functools
@@ -456,7 +457,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         return type(self).execute_async is not Node.execute_async
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    input_schema: type[BaseModel] | None = None
+    input_schema: builtins.type[BaseModel] | None = None
     input_param_modes: dict[str, InputParamMode] = Field(
         default_factory=dict,
         description=(
@@ -469,12 +470,12 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         ),
     )
     callbacks: list[NodeCallbackHandler] = []
-    _resolved_input_schema: type[BaseModel] | None = PrivateAttr(default=None)
+    _resolved_input_schema: builtins.type[BaseModel] | None = PrivateAttr(default=None)
     _json_schema_fields: ClassVar[list[str]] = []
     _clone_init_methods_names: ClassVar[list[str]] = ["reset_run_state"]
 
     @property
-    def resolved_input_schema(self) -> type[BaseModel] | None:
+    def resolved_input_schema(self) -> builtins.type[BaseModel] | None:
         """Read-only view of ``input_schema`` with ``input_param_modes`` applied.
 
         Computed once at construction (see ``_resolve_input_schema``, called from
