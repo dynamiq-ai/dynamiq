@@ -5,16 +5,13 @@ Weaviate v4 collection that mimics the subset of the API the backend uses.
 No live Weaviate calls are made.
 """
 import math
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 
 from dynamiq.connections import Weaviate as WeaviateConnection
-from dynamiq.memory.long_term.backends.weaviate import (
-    WeaviateLongTermMemoryBackend,
-    _to_weaviate_uuid,
-)
+from dynamiq.memory.long_term.backends.weaviate import WeaviateLongTermMemoryBackend, _to_weaviate_uuid
 from dynamiq.memory.long_term.schemas import Fact
 
 # --- Fake Weaviate client / collection -------------------------------------
@@ -166,7 +163,7 @@ def backend(fake_embedder, fake_weaviate_client):
 
 
 def _fact(fact_id: str, user_id: str, content: str, content_hash: str | None = None) -> Fact:
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     return Fact(
         id=fact_id,
         content=content,
@@ -280,7 +277,7 @@ def test_weaviate_update_replaces_content_and_vector(backend, fake_embedder):
         content_hash="h-new",
         embedding=fake_embedder.embed("new"),
         metadata={"k": "v"},
-        updated_at=datetime.now(UTC),
+        updated_at=datetime.now(timezone.utc),
     )
     fetched = backend.get("f1")
     assert fetched.content == "new" and fetched.hash == "h-new" and fetched.metadata == {"k": "v"}
