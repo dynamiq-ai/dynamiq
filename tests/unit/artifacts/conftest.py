@@ -1,3 +1,4 @@
+import builtins
 import hashlib
 from typing import Any
 
@@ -24,7 +25,7 @@ class FakeArtifactBackend(ArtifactBackend):
     Dynamiq backend does within a store.
     """
 
-    calls: list[tuple[str, dict[str, Any]]] = Field(default_factory=list, exclude=True)
+    calls: builtins.list[tuple[str, dict[str, Any]]] = Field(default_factory=list, exclude=True)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

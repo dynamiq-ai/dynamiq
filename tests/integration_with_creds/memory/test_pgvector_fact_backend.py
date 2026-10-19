@@ -1,5 +1,5 @@
 import os
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import pytest
@@ -37,7 +37,7 @@ def backend(fake_embedder):
 
 
 def _fact(fact_id, user_id, content, content_hash=None):
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     return Fact(
         id=fact_id,
         content=content,

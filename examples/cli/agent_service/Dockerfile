@@ -1,4 +1,6 @@
-FROM python:3.13.10-slim
+ARG PYTHON_VERSION=3.13.10
+
+FROM python:${PYTHON_VERSION}-slim
 
 RUN apt-get update && apt-get install -y build-essential curl && rm -rf /var/lib/apt/lists/*
 

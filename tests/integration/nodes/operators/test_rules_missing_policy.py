@@ -26,6 +26,7 @@ import textwrap
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from datetime import date
 from typing import Callable, NamedTuple
 
 import pytest
@@ -46,6 +47,15 @@ LENDING = ("loan", "appraisal", "limits", "rates")
 LIMIT = ("limit", "limits[loan.program]")
 LTV = ("ltv", "loan.amount / appraisal.value")
 LIMITS = {"standard": 500000}
+
+
+def calendar_reason(year: int, month: int, day: int) -> str:
+    """Python's reason for refusing a day the calendar lacks, which Python 3.14 reworded."""
+    try:
+        date(year, month, day)
+    except ValueError as e:
+        return str(e)
+    raise AssertionError(f"{year}-{month}-{day} is a day of the calendar")
 
 
 def run(node: Rules, data: dict) -> dict:
@@ -536,7 +546,7 @@ HELD = {
     "impossible-date-beside-missing-data": Held(
         lambda **policy: screening("date(doc.issued) <= date(doc.due)", inputs=("doc",), **policy),
         {"doc": {"issued": "2026-02-30"}},
-        "check could not be evaluated: not a date: '2026-02-30' (day is out of range for month)",
+        f"check could not be evaluated: not a date: '2026-02-30' ({calendar_reason(2026, 2, 30)})",
     ),
     "unreadable-date-in-days-between": Held(
         lambda **policy: screening("days_between(doc.opened, doc.closed) <= 30", inputs=("doc",), **policy),
