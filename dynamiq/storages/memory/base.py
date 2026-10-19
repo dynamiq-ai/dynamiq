@@ -8,6 +8,7 @@ built on top of it.
 """
 
 import abc
+import builtins
 from datetime import datetime
 from typing import Any, ClassVar, Hashable
 
@@ -99,7 +100,7 @@ class MemoryStore(abc.ABC, BaseModel):
         return id(self)
 
     @abc.abstractmethod
-    def list(self, prefix: str = "", user_id: str | None = None) -> list[MemoryEntry]:
+    def list(self, prefix: str = "", user_id: str | None = None) -> builtins.list[MemoryEntry]:
         """List memories under ``prefix``. An empty prefix lists everything.
 
         Returns metadata only — read a path to get its content. ``user_id`` is the end user this
