@@ -1,6 +1,6 @@
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
 
-Thought: [Your detailed reasoning about what to do next]
+Thought: [A brief note on what you will do next]
 Action: [Tool name from ONLY [{{ tools_name }}]]
 Action Input: [JSON input for the tool]
 
@@ -8,12 +8,12 @@ After each action, you'll receive:
 Observation: [Result from the tool]
 
 When you have enough information to provide a final answer:
-Thought: [Your reasoning for the final answer]
+Thought: [A brief note on the answer]
 Output Files: [Optional: comma-separated file paths to return, omit this line if there are no files]
 Answer: [Your complete answer to the user's question]
 
 For questions that don't require tools:
-Thought: [Your reasoning about the question]
+Thought: [A brief note on the question]
 Output Files: [Optional: comma-separated file paths to return, omit this line if there are no files]
 Answer: [Your direct response]
 
@@ -47,7 +47,7 @@ REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in you
 
 <output>
     <thought>
-        [Your detailed reasoning about what to do next]
+        [A brief note on what you will do next]
     </thought>
     <action>
         [Tool name from ONLY [{{ tools_name }}]]
@@ -63,7 +63,7 @@ Observation: [Result from the tool]
 When you have enough information to provide a final answer:
 <output>
     <thought>
-        [Your reasoning for the final answer]
+        [A brief note on the answer]
     </thought>
     <answer>
         [Your complete answer to the user's question]
@@ -74,7 +74,7 @@ When you have enough information to provide a final answer:
 For questions that don't require tools:
 <output>
     <thought>
-        [Your reasoning about the question]
+        [A brief note on the question]
     </thought>
     <answer>
         [Your direct response]
@@ -83,13 +83,13 @@ For questions that don't require tools:
 </output>
 
 ## Critical XML Format Rules
-- ALWAYS include <thought> tags with detailed reasoning
-- ALWAYS place <thought> BEFORE <action>/<action_input> (or before <answer>); reasoning must come first
+- ALWAYS include a short <thought> note (one or two sentences)
+- ALWAYS place <thought> BEFORE <action>/<action_input> (or before <answer>)
 - Start the text immediately after each opening tag; do not add leading newlines or indentation inside the tags
 - Write thoughts in the first person (e.g., "I will...", "I should...")
 - Explain why this specific tool is the right choice
 - For tool use, always include action and action_input tags
-- For direct answers, only include thought and answer tags
+- For direct answers, include <thought> and <answer> tags
 - Tool names go as PLAIN TEXT inside <action> tags, NOT as XML tags.
 - JSON in <action_input> MUST be on single line with proper escaping
 - NO line breaks or control characters inside JSON strings
@@ -150,7 +150,7 @@ Refer to each tool's function schema for detailed usage.
 
 REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """Always structure your responses in this JSON format:
 
-{thought: [Your reasoning about the next step],
+{thought: [A brief note on the next step],
 action: [The tool you choose to use, if any from ONLY [{{ tools_name }}]],
 action_input: [JSON input in correct format you provide to the tool],
 output_files: ""}
@@ -159,13 +159,13 @@ After each action, you'll receive:
 Observation: [Result from the tool]
 
 When you have enough information to provide a final answer:
-{thought: [Your reasoning for the final answer],
+{thought: [A brief note on the answer],
 action: finish,
 action_input: [Response for initial request],
 output_files: [comma-separated file paths to return, or empty string if none]}
 
 For questions that don't require tools:
-{thought: [Your reasoning for the final answer],
+{thought: [A brief note on the answer],
 action: finish,
 action_input: [Your direct response],
 output_files: [comma-separated file paths to return, or empty string if none]}
@@ -223,17 +223,15 @@ you call `provide_final_answer` to deliver the final response.
 REACT_BLOCK_INSTRUCTIONS_NO_TOOLS = """
 Always structure your responses in this exact format:
 
-Thought: [Your detailed reasoning about the user's question]
+Thought: [A brief note on how you will answer]
 Output Files: [Optional: comma-separated file paths to return, omit this line if there are no files]
 Answer: [Your complete response to the user's question]
 
 IMPORTANT RULES:
-- ALWAYS begin with "Thought:" to show your reasoning process
+- ALWAYS begin with "Thought:" followed by a short note (one or two sentences)
 - Keep the explanation on the same line as the label, avoiding leading spaces or blank lines
-- Write your reasoning in first person (e.g., "I should...", "I know...")
-- Use the "Thought" section to analyze the question and plan your response
-- Only after thinking through the problem, provide your answer
-- If you cannot fully answer, explain why in your thinking
+- Write the note in first person (e.g., "I should...", "I know...")
+- If you cannot fully answer, explain why in your answer
 - Be thorough and helpful in your response
 - Do not mention tools or actions as you don't have access to any
 - If you want to return files, include an "Output Files:" line before "Answer:" listing file paths (comma-separated). This line is optional — omit it if there are no files to return.
@@ -243,7 +241,7 @@ IMPORTANT RULES:
 REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS = """Always use this exact XML format in your responses:
 <output>
     <thought>
-        [Your detailed reasoning about the question]
+        [A brief note on the question]
     </thought>
     <answer>
         [Your direct response to the user's question]
@@ -252,10 +250,10 @@ REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS = """Always use this exact XML format in y
 </output>
 
 IMPORTANT RULES:
-- ALWAYS include <thought> tags with detailed reasoning
+- ALWAYS include a short <thought> note (one or two sentences)
 - Emit EXACTLY ONE <output>...</output> block per response, then STOP — never produce a second <output> block.
 - Place text immediately after each opening tag without leading newlines or indentation
-- Only use thought and answer tags
+- Use only <thought> and <answer> tags
 - Properly close all XML tags
 - Do not use markdown formatting inside XML
 - Do not mention tools or actions since you don't have access to any

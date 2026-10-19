@@ -13,6 +13,7 @@ from dynamiq.nodes.knowledgebases.knowledgebase_vector import (
 )
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types import Document
+from dynamiq.utils.user_agent import USER_AGENT
 
 
 @pytest.fixture
@@ -88,7 +89,7 @@ def test_execute_builds_request_and_parses_documents(retriever):
     _, kwargs = retriever.client.request.call_args
     assert kwargs["method"] == "POST"
     assert kwargs["url"] == "https://api.example.ai/v1/knowledgebases/kb-123/vector-search"
-    assert kwargs["headers"] == {"Authorization": "Bearer secret-token"}
+    assert kwargs["headers"] == {"Authorization": "Bearer secret-token", "User-Agent": USER_AGENT}
     assert kwargs["json"] == {"query": "hello", "limit": 3, "filters": {"k": "v"}, "alpha": 0.5}
 
     # Response forwarded as retriever-shaped output

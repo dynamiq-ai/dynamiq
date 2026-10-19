@@ -24,6 +24,14 @@ def read_json_arg(value: str):
         raise click.ClickException(f"invalid JSON in {value[:60]}: {e}")
 
 
+def fetch_data(api: ApiClient, path: str) -> dict:
+    """GET a single resource and return its `data`, raising the HTTP error as a ClickException."""
+    response = api.get(path)
+    if not ok(response):
+        raise click.ClickException(f"HTTP {response.status_code}: {response.text.strip()[:2000]}")
+    return response.json().get("data") or {}
+
+
 def echo_response(response, success_message: str | None = None) -> None:
     """Print the JSON body; non-200 exits with the body as the error."""
     body = response.text.strip()
@@ -77,12 +85,22 @@ def compact_items(items: list) -> list:
     return out
 
 
+MAX_PAGES = 200
+
+
 def iter_pages(api: ApiClient, path: str, params: dict | None = None, page_size: int = 500):
     """Yield each page of a list endpoint until the last one.
 
     page_size caps at 500, so a single request is not the catalogue - it is the first 500 of
     it. Anything that reads one page and treats the result as complete reports whatever falls
     beyond it as not existing.
+
+    Termination cannot be left to the server alone. An endpoint that serves a fixed list
+    (/v1/agent-builder/nodes is one) ignores `page` and answers every request with the same
+    full payload and no `pagination` block, so "data is empty" and "page_count reached" both
+    never happen and the walk runs forever. A missing `pagination` block therefore ends it:
+    an endpoint that does not report pages does not have a second one. MAX_PAGES is the last
+    resort, and raises rather than returning a silently truncated list.
     """
     params = dict(params or {})
     seen, current = 0, 1
@@ -97,12 +115,19 @@ def iter_pages(api: ApiClient, path: str, params: dict | None = None, page_size:
         yield batch
         seen += len(batch)
         pagination = body.get("pagination") or {}
+        if not pagination:
+            return
         page_count = pagination.get("page_count")
         total = pagination.get("total_count")
         if page_count and current >= page_count:
             return
         if total is not None and seen >= total:
             return
+        if current >= MAX_PAGES:
+            raise click.ClickException(
+                f"{path} is still paging after {MAX_PAGES} pages ({seen} items); refusing to keep going. "
+                f"Narrow the query, or pass --page/--page-size to read it a page at a time."
+            )
         current += 1
 
 
@@ -612,7 +637,8 @@ def test_workflow(
     """Run a flow with the given input, without saving or releasing.
 
     This endpoint takes a FORM (not a JSON body): `flow` and `input` are sent as
-    JSON-encoded strings. FLOW/INPUT_DATA are inline JSON or @file. No project_id needed.
+    JSON-encoded strings. FLOW/INPUT_DATA are inline JSON or @file. `project_id` is
+    REQUIRED by the endpoint and is filled in automatically from the current project.
 
     `dry_run` is on by default, as it is on the endpoint. It is not a simulation: the flow
     executes and its tools really act, so a Notion tool creates a real page. What it governs is
@@ -620,8 +646,10 @@ def test_workflow(
     are deleted once the run ends. --no-dry-run sends dry_run=false and keeps them; a field left
     out would not, since the runtime's own default is on. Choose an obviously-test input.
     """
+    project_id = require_project(settings)
     form = {
-        "flow": json.dumps(normalize_flow(read_json_arg(flow), settings.project_id)),
+        "project_id": project_id,
+        "flow": json.dumps(normalize_flow(read_json_arg(flow), project_id)),
         "input": json.dumps(read_json_arg(input_data)),
         "stream": "false",
         "dry_run": "true" if dry_run else "false",

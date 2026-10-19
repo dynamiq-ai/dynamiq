@@ -18,21 +18,19 @@ TYPE_MAPPING = {
     dict: "object",
 }
 
+# Kept as a short note: Bedrock's content filter blocks Claude Opus 5.x replies when a prompt
+# demands detailed reasoning before the action.
 THOUGHT_DESCRIPTION_TOOL_CALL = (
-    "Your first-person reasoning for this step, written before you decide the arguments below: "
-    "what you already know, why this specific tool is the right one right now (not a restatement "
-    "of the original task), and what you expect it to return. 1-3 concrete sentences."
+    "A short first-person note (one or two sentences) on why you are calling this tool and what "
+    "you expect back, not a restatement of the original task."
 )
 THOUGHT_DESCRIPTION_FINAL_ANSWER = (
-    "Your first-person reasoning for why you can answer now: which findings or tool results "
-    "support the answer below. 1-3 concrete sentences, not a restatement of the original task."
+    "A short first-person note (one or two sentences) on why you can answer now: which findings "
+    "or tool results support the answer, not a restatement of the original task."
 )
 THOUGHT_DESCRIPTION_PLAN_NEXT_ACTION = (
-    "Your first-person reasoning for this step, written before you decide the action below: "
-    "if picking a tool, what you already know, why this specific tool is the right one right "
-    "now (not a restatement of the original task), and what you expect it to return; if "
-    "finishing, which findings or tool results support the answer you're about to give. "
-    "1-3 concrete sentences."
+    "A short first-person note (one or two sentences): if picking a tool, why this tool and what "
+    "you expect back; if finishing, which findings or tool results support the answer."
 )
 
 FINAL_ANSWER_FUNCTION_SCHEMA = {

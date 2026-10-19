@@ -4,6 +4,7 @@ from dynamiq.cli.client import HTTPError
 from dynamiq.cli.commands.context import DynamiqCtx, pass_dctx
 
 from .app import app
+from .artifact import artifact
 from .config import config
 from .connection import connection
 from .dataset import dataset
@@ -12,6 +13,7 @@ from .evaluation import evaluation
 from .integration import integration
 from .knowledgebase import knowledgebase
 from .memory import memory
+from .memory_store import memory_store
 from .org import org
 from .project import project
 from .resource_profiles import profile
@@ -19,6 +21,7 @@ from .service import service
 from .skill import skill
 from .trigger import trigger
 from .voice import voice
+from .whoami import whoami
 from .workflow import workflow
 
 
@@ -50,10 +53,14 @@ cli.add_command(connection, name="connection")
 cli.add_command(connection, name="connections")
 cli.add_command(memory, name="memory")
 cli.add_command(memory, name="memories")
+cli.add_command(memory_store, name="memory-store")
+cli.add_command(memory_store, name="memory-stores")
 cli.add_command(knowledgebase, name="knowledge-base")
 cli.add_command(knowledgebase, name="knowledge-bases")
 cli.add_command(skill, name="skill")
 cli.add_command(skill, name="skills")
+cli.add_command(artifact, name="artifact")
+cli.add_command(artifact, name="artifacts")
 cli.add_command(finetuning, name="fine-tuning")
 cli.add_command(inference, name="inference")
 cli.add_command(inference, name="inferences")
@@ -66,6 +73,7 @@ cli.add_command(app, name="apps")
 cli.add_command(trigger, name="trigger")
 cli.add_command(trigger, name="triggers")
 cli.add_command(config)
+cli.add_command(whoami)
 
 
 def main() -> None:

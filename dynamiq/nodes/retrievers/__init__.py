@@ -6,6 +6,7 @@ from .pgvector import PGVectorDocumentRetriever
 from .pinecone import PineconeDocumentRetriever
 from .qdrant import QdrantDocumentRetriever
 from .retriever import VectorStoreRetriever
+from .turbopuffer import TurbopufferDocumentRetriever
 from .weaviate import WeaviateDocumentRetriever
 
 # ``GraphRetriever`` resolves via __getattr__ (below), so it is NOT in this module's __dict__.
@@ -20,6 +21,7 @@ __all__ = [
     "PGVectorDocumentRetriever",
     "PineconeDocumentRetriever",
     "QdrantDocumentRetriever",
+    "TurbopufferDocumentRetriever",
     "VectorStoreRetriever",
     "WeaviateDocumentRetriever",
     "GraphRetriever",

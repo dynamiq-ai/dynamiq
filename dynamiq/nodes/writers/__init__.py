@@ -5,5 +5,6 @@ from .opensearch import OpenSearchDocumentWriter
 from .pgvector import PGVectorDocumentWriter
 from .pinecone import PineconeDocumentWriter
 from .qdrant import QdrantDocumentWriter
+from .turbopuffer import TurbopufferDocumentWriter
 from .weaviate import WeaviateDocumentWriter
 from .writer import VectorStoreWriter

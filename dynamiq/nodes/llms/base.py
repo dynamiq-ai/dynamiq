@@ -170,6 +170,10 @@ class LLMCheckpointState(BaseCheckpointState):
     is_fallback_run: bool = Field(default=False, description="Whether LLM is in fallback mode")
 
 
+class LLMContentFilteredError(ValueError):
+    """The provider's content filter blocked the response before it produced any output."""
+
+
 SAMPLING_PARAMS: tuple[str, ...] = ("temperature", "top_p", "top_k")
 
 # Model families where every version rejects sampling params.
@@ -180,6 +184,7 @@ _SAMPLING_UNSUPPORTED_MIN_VERSION: dict[str, tuple[int, int]] = {
     "opus": (4, 7),
     "sonnet": (5, 0),
     "fable": (5, 0),
+    "haiku": (5, 5),
 }
 
 # Matches `claude-<family>-<major>[-<minor>]` anywhere in a model id
@@ -193,7 +198,24 @@ _SAMPLING_UNSUPPORTED_INDICATORS: tuple[str, ...] = (
     "unsupported",
     "unexpected keyword",
     "unrecognized",
+    "deprecated",
 )
+
+# `stop` named as a parameter (also `stop_sequences` / `stopSequences`), not as part of another word.
+_STOP_PARAM_RE = re.compile(r"(?<![a-z_])stop(?:[_ ]?sequences?)?(?![a-z])")
+
+# "only `"auto"` is supported for `tool_choice`": the provider naming the one value it accepts.
+_ONLY_AUTO_TOOL_CHOICE_RE = re.compile(r"only\W*auto\b")
+
+
+def provider_error_text(exc: BaseException) -> str:
+    """The error's text with the backslash escapes a bytes repr adds removed.
+
+    LiteLLM renders the body of a failed streamed call as a bytes repr, so the provider's
+    "doesn't support" arrives as "doesn\\'t support" and phrase matching misses it.
+    """
+    return str(exc).replace("\\'", "'")
+
 
 # Streaming-only endpoints reject `stream: false` with a 400 (no provider exposes this as metadata).
 _STREAMING_REQUIRED_INDICATORS: tuple[str, ...] = (
@@ -641,7 +663,51 @@ class BaseLLM(ConnectionNode):
         usage_data = self.get_usage_data(model=self.model, completion=response).model_dump()
         self.run_on_node_execute_run(callbacks=config.callbacks, usage_data=usage_data, **kwargs)
 
+        # A blocked reply otherwise looks like an empty answer, which agents retry until max_loops.
+        if response.choices[0].finish_reason == "content_filter" and not content and not result.get("tool_calls"):
+            raise LLMContentFilteredError(
+                f"Model '{self.model}' returned no output because the provider's content filter blocked "
+                "the response. Review the system prompt and input for content the provider rejects."
+            )
+
         return result
+
+    @staticmethod
+    def _close_stream(response: Union["ModelResponse", "CustomStreamWrapper"]) -> None:
+        """Release the provider connection of a sync stream, even if it was not fully consumed.
+
+        LiteLLM's stream wrapper has no sync close, so this closes the provider stream beneath it. LiteLLM's line
+        iterators for Anthropic and several other providers have no close either, so the response's line generator
+        they read from is closed as well.
+
+        This must happen here, in the caller's thread. LiteLLM stops reading at the last event, before the end of the
+        response body, so an unclosed stream keeps its connection in use until the garbage collector finalizes it.
+        That finalizer takes the connection pool's lock, which LiteLLM's shared client holds while it starts a
+        request: a collection that runs there deadlocks the thread, and every later request on the client waits.
+
+        A cleanup failure is logged, not raised, so it never replaces the original exception.
+        """
+        stream = getattr(response, "completion_stream", response)
+        for target in (stream, getattr(stream, "response_iterator", None), getattr(stream, "streaming_response", None)):
+            close = getattr(target, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    logger.warning("Could not close the LLM completion stream", exc_info=True)
+
+    @staticmethod
+    async def _aclose_stream(response: Union["ModelResponse", "CustomStreamWrapper"]) -> None:
+        """Release the provider connection of an async stream, even if it was not fully consumed.
+
+        A cleanup failure is logged, not raised, so it never replaces the original exception.
+        """
+        aclose = getattr(response, "aclose", None)
+        if callable(aclose):
+            try:
+                await aclose()
+            except Exception:
+                logger.warning("Could not close the LLM completion stream", exc_info=True)
 
     def _handle_streaming_completion_response(
         self,
@@ -664,16 +730,19 @@ class BaseLLM(ConnectionNode):
         chunks = []
         # A stream forced by a streaming-only model is transport: its chunks are not for clients.
         emit_chunks = self.streaming.enabled
-        for chunk in response:
-            check_cancellation(config)
-            chunks.append(chunk)
+        try:
+            for chunk in response:
+                check_cancellation(config)
+                chunks.append(chunk)
 
-            if emit_chunks:
-                self.run_on_node_execute_stream(
-                    config.callbacks,
-                    chunk.model_dump(),
-                    **kwargs,
-                )
+                if emit_chunks:
+                    self.run_on_node_execute_stream(
+                        config.callbacks,
+                        chunk.model_dump(),
+                        **kwargs,
+                    )
+        finally:
+            self._close_stream(response)
 
         full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
@@ -699,15 +768,18 @@ class BaseLLM(ConnectionNode):
         chunks = []
         # A stream forced by a streaming-only model is transport: its chunks are not for clients.
         emit_chunks = self.streaming.enabled
-        async for chunk in response:
-            check_cancellation(config)
-            chunks.append(chunk)
-            if emit_chunks:
-                self.run_on_node_execute_stream(
-                    config.callbacks,
-                    chunk.model_dump(),
-                    **kwargs,
-                )
+        try:
+            async for chunk in response:
+                check_cancellation(config)
+                chunks.append(chunk)
+                if emit_chunks:
+                    self.run_on_node_execute_stream(
+                        config.callbacks,
+                        chunk.model_dump(),
+                        **kwargs,
+                    )
+        finally:
+            await self._aclose_stream(response)
 
         full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
@@ -760,7 +832,7 @@ class BaseLLM(ConnectionNode):
 
         Recognizes Anthropic models by family and version, so future releases that follow
         the existing naming scheme are handled without a code change (e.g. claude-opus-5 and
-        claude-sonnet-6 reject; claude-haiku-5 does not, matching current Haiku behavior).
+        claude-sonnet-6 reject; claude-haiku-5 does not, but claude-haiku-5-5 does).
         Models not matched here that nonetheless reject are caught at runtime by
         ``_recover_completion_params``.
         """
@@ -1031,9 +1103,11 @@ class BaseLLM(ConnectionNode):
         but are not matched by ``_model_rejects_sampling_params``: returns the params
         with the sampling params stripped. That one only fires when the error both names a present
         sampling param and looks like an unsupported-param error, so genuine validation
-        errors (e.g. out-of-range temperature) still surface.
+        errors (e.g. out-of-range temperature) still surface. ``stop`` gets the same treatment
+        under the same two conditions, and a ``tool_choice`` that forces a call (``"required"`` or a
+        named function) falls back to ``"auto"`` when the error says the forced choice is unsupported.
         """
-        msg = str(exc).lower()
+        msg = provider_error_text(exc).lower()
         if not common_params.get("stream") and any(ind in msg for ind in _STREAMING_REQUIRED_INDICATORS):
             logger.warning(
                 "LLM '%s': model '%s' is served streaming-only; retrying the request as a stream.",
@@ -1057,6 +1131,31 @@ class BaseLLM(ConnectionNode):
             for param in SAMPLING_PARAMS:
                 recovered.pop(param, None)
             return recovered
+
+        # Same backstop for `stop`: some OpenAI-compatible endpoints reject it outright.
+        if common_params.get("stop") and looks_unsupported and _STOP_PARAM_RE.search(msg):
+            logger.warning(
+                "LLM '%s': model '%s' rejected `stop`; retrying without stop sequences.",
+                self.name,
+                self.model,
+            )
+            recovered = dict(common_params)
+            recovered.pop("stop", None)
+            return recovered
+
+        # Some endpoints accept only tool_choice="auto" and say so; a forced or named choice gets a 400.
+        # Limited to a choice that forces a call: "none" rules tool calls out and must never become
+        # "auto", and any other value is a misconfiguration that has to surface.
+        tool_choice = common_params.get("tool_choice")
+        forces_a_call = tool_choice == "required" or isinstance(tool_choice, dict)
+        rejects_forced_choice = looks_unsupported or bool(_ONLY_AUTO_TOOL_CHOICE_RE.search(msg))
+        if forces_a_call and "tool_choice" in msg and rejects_forced_choice:
+            logger.warning(
+                "LLM '%s': model '%s' accepts only tool_choice='auto'; retrying with it.",
+                self.name,
+                self.model,
+            )
+            return common_params | {"tool_choice": "auto"}
         return None
 
     def _persist_completion_recovery(self, common_params: dict, recovered: dict) -> None:
@@ -1069,6 +1168,10 @@ class BaseLLM(ConnectionNode):
         """
         if recovered.get("stream") and not common_params.get("stream"):
             self._force_stream = True
+        if common_params.get("stop") and "stop" not in recovered:
+            self.stop = None
+        if recovered.get("tool_choice") == "auto" and common_params.get("tool_choice") != "auto":
+            self.tool_choice = "auto"
         for param in SAMPLING_PARAMS:
             if param in common_params and param not in recovered:
                 if param in type(self).model_fields:

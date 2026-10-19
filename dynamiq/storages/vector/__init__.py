@@ -5,4 +5,5 @@ from .opensearch import OpenSearchVectorStore
 from .pgvector import PGVectorStore
 from .pinecone import PineconeVectorStore
 from .qdrant import QdrantVectorStore
+from .turbopuffer import TurbopufferVectorStore
 from .weaviate import WeaviateVectorStore
