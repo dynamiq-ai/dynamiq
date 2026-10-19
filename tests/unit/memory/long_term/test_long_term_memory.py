@@ -49,15 +49,20 @@ def test_remember_recovers_when_backend_raises_duplicate_error(backend, user_id,
     """Simulates a cross-process race: another writer wins between our recheck
     and our insert. Backend raises LongTermMemoryDuplicateError; base.remember
     must re-fetch the winner and return UNCHANGED instead of propagating."""
-    from datetime import UTC, datetime
+    from datetime import datetime, timezone
 
     from dynamiq.memory.long_term.base import LongTermMemoryDuplicateError
     from dynamiq.memory.long_term.schemas import Fact
 
     cls = type(backend)
     winner = Fact(
-        id="winner-id", content="User likes pizza", hash="dummy", user_id=user_id,
-        metadata={}, created_at=datetime.now(UTC), updated_at=datetime.now(UTC),
+        id="winner-id",
+        content="User likes pizza",
+        hash="dummy",
+        user_id=user_id,
+        metadata={},
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
     )
     call_count = {"get_by_hash": 0}
 

@@ -1,10 +1,10 @@
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from dynamiq.memory.long_term.schemas import Fact
 
 
 def test_fact_round_trip():
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     fact = Fact(
         id="f1",
         content="User prefers terse responses",
@@ -19,7 +19,7 @@ def test_fact_round_trip():
 
 
 def test_fact_metadata_defaults_to_empty_dict():
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     fact = Fact(id="f1", content="x", hash="h", user_id="u",
                 created_at=now, updated_at=now)
     assert fact.metadata == {}
