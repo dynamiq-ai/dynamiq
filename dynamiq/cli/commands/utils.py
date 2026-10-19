@@ -13,6 +13,7 @@ from .evaluation import evaluation
 from .integration import integration
 from .knowledgebase import knowledgebase
 from .memory import memory
+from .memory_store import memory_store
 from .org import org
 from .project import project
 from .resource_profiles import profile
@@ -52,6 +53,8 @@ cli.add_command(connection, name="connection")
 cli.add_command(connection, name="connections")
 cli.add_command(memory, name="memory")
 cli.add_command(memory, name="memories")
+cli.add_command(memory_store, name="memory-store")
+cli.add_command(memory_store, name="memory-stores")
 cli.add_command(knowledgebase, name="knowledge-base")
 cli.add_command(knowledgebase, name="knowledge-bases")
 cli.add_command(skill, name="skill")
