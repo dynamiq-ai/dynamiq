@@ -1,5 +1,6 @@
 """Memory store backed by the Dynamiq platform API."""
 
+import builtins
 from datetime import datetime
 from typing import Any
 
@@ -139,7 +140,7 @@ class DynamiqMemoryStore(MemoryStore):
             path=memory_path,
         )
 
-    def list(self, prefix: str = "", user_id: str | None = None) -> list[MemoryEntry]:
+    def list(self, prefix: str = "", user_id: str | None = None) -> builtins.list[MemoryEntry]:
         """List memories under ``prefix``."""
         data = self._request(
             HTTPMethod.GET,

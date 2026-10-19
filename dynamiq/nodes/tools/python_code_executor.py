@@ -1,3 +1,4 @@
+import builtins
 import errno
 import importlib
 import inspect
@@ -66,7 +67,7 @@ class PythonCodeExecutorFileWorkspace(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def list(self, directory: str = "", recursive: bool = True) -> list[dict[str, Any]]:
+    def list(self, directory: str = "", recursive: bool = True) -> builtins.list[dict[str, Any]]:
         """Return metadata for files located under directory."""
         files = self.file_store.list_files(directory=directory, recursive=recursive)
         return [self._file_info_to_dict(file_info) for file_info in files]

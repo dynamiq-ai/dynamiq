@@ -5,7 +5,7 @@ Pinecone index that mimics the v3 client API used by the backend
 (`upsert`, `fetch`, `query`, `delete`). No live Pinecone calls are made.
 """
 import math
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -114,7 +114,7 @@ def backend(fake_embedder, fake_pinecone_client):
 
 
 def _fact(fact_id: str, user_id: str, content: str, content_hash: str | None = None) -> Fact:
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     return Fact(
         id=fact_id,
         content=content,

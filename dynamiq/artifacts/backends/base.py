@@ -1,4 +1,5 @@
 import abc
+import builtins
 from datetime import datetime
 from typing import Any, ClassVar
 
@@ -91,7 +92,9 @@ class ArtifactBackend(abc.ABC, BaseModel):
         """
 
     @abc.abstractmethod
-    def list(self, *, kind: ArtifactKind | None = None, limit: int = 50, user_id: str | None = None) -> list[Artifact]:
+    def list(
+        self, *, kind: ArtifactKind | None = None, limit: int = 50, user_id: str | None = None
+    ) -> builtins.list[Artifact]:
         """List the artifacts the backend reaches, most recently updated first."""
 
     @abc.abstractmethod

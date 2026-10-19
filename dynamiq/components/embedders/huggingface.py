@@ -118,7 +118,7 @@ class HuggingFaceEmbedder(BaseEmbedder):
         text_to_embed = f"{self.prefix}{text}{self.suffix}"
         text_to_embed = text_to_embed.replace("\n", " ")
 
-        response = await self._aembedding(model=self.model, input=text_to_embed, **self.embed_params)
+        response = await self._aembedding(model=self.model, input=text_to_embed, **self.embed_params_async)
 
         meta = {"model": response.model, "usage": dict(response.usage)}
         embedding = response.data[0]["embedding"]
@@ -137,7 +137,7 @@ class HuggingFaceEmbedder(BaseEmbedder):
         """Async mirror of :meth:`_embed_texts_batch` — non-batched HF API."""
         all_embeddings: list[list[float]] = []
         meta: dict[str, Any] = {}
-        embed_params = self.embed_params
+        embed_params = self.embed_params_async
 
         for i in range(0, len(texts_to_embed), batch_size):
             batch = texts_to_embed[i : i + batch_size]
