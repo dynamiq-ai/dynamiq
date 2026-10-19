@@ -122,7 +122,7 @@ class ImageGeneration(ConnectionNode):
     Attributes:
         FILE_PREFIX (str): Prefix for new file names. Default to "generated".
         name (str): The name of the node.
-        model (str): The model to use for image generation (e.g., 'dall-e-3', 'gpt-image-1',
+        model (str): The model to use for image generation (e.g., 'dall-e-3', 'gpt-image-2',
             'bedrock/stability.stable-diffusion-xl-v0').
         connection (OpenAIConnection | GeminiConnection | VertexAIConnection | AWSConnection | AzureAIConnection):
         The connection to the API.
@@ -164,7 +164,7 @@ Examples:
 - {"prompt": "A serene mountain landscape at sunset, photorealistic"}
 - {"prompt": "Modern minimalist logo for tech startup, blue and white", "n": 3}
 - {"prompt": "Abstract art with vibrant colors", "size": "1792x1024", "quality": "hd"}"""
-    model: str = "gpt-image-1"
+    model: str = "gpt-image-2"
     connection: (
         OpenAIConnection
         | GeminiConnection
