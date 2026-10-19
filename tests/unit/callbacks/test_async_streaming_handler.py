@@ -1,17 +1,24 @@
 import asyncio
+import subprocess  # nosec B404
+import sys
+import textwrap
 import threading
-import warnings
-
-import pytest
+from pathlib import Path
 
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 
+REPO_ROOT = Path(__file__).parents[3]
 
-@pytest.fixture
-def no_current_loop():
-    asyncio.set_event_loop(None)
-    yield
-    asyncio.set_event_loop(None)
+
+def run_in_fresh_interpreter(code: str) -> subprocess.CompletedProcess:
+    """Run `code` in a new interpreter, whose main thread has no event loop set, without touching this process's."""
+    return subprocess.run(  # nosec B603
+        [sys.executable, "-W", "ignore::DeprecationWarning", "-c", textwrap.dedent(code)],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        timeout=60,
+    )
 
 
 def test_a_handler_built_inside_a_running_loop_uses_that_loop():
@@ -31,19 +38,22 @@ def test_a_handler_given_a_loop_uses_it():
         loop.close()
 
 
-def test_a_handler_built_in_the_main_thread_before_any_loop_gets_one_and_sets_it(no_current_loop):
-    with warnings.catch_warnings():
-        # Before 3.14, asyncio.get_event_loop() warns while creating the loop.
-        warnings.simplefilter("ignore", DeprecationWarning)
+def test_a_handler_built_in_the_main_thread_before_any_loop_gets_one_and_sets_it():
+    done = run_in_fresh_interpreter(
+        """
+        import asyncio
+        from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
+
         handler = AsyncStreamingIteratorCallbackHandler()
-    try:
         assert not handler.loop.is_closed()
         assert asyncio.get_event_loop() is handler.loop
-    finally:
-        handler.loop.close()
+        """
+    )
+
+    assert done.returncode == 0, done.stderr
 
 
-def test_a_handler_built_in_another_thread_without_a_loop_still_fails(no_current_loop):
+def test_a_handler_built_in_another_thread_without_a_loop_still_fails():
     errors = []
 
     def build():
