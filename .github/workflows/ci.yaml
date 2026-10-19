@@ -44,6 +44,32 @@ jobs:
             *.cache-to=type=gha,mode=max
           targets: dynamiq-app
 
+  # The jobs above build the image on the Dockerfile's default Python (3.13). This builds it on 3.14 too, so the
+  # PYTHON_VERSION build argument is exercised there. Its own cache scope keeps it from evicting the 3.13 layers.
+  build-python-3-14:
+    name: build (Python 3.14)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # docker-compose.yaml names .env as an env_file, so bake needs the file to exist; building needs no secrets.
+      - name: Create an empty .env file
+        run: touch .env
+
+      - name: Build
+        uses: docker/bake-action@v5
+        with:
+          set: |
+            *.args.PYTHON_VERSION=3.14.8
+            *.cache-from=type=gha,scope=python-3.14
+            *.cache-to=type=gha,mode=max,scope=python-3.14
+          targets: dynamiq-app
+
   lint:
     runs-on: ubuntu-latest
     steps:
