@@ -62,6 +62,18 @@ def test_a_handler_built_before_asyncio_run_delivers_to_the_loop_that_consumes_i
     assert done.returncode == 0, done.stderr
 
 
+def test_a_handler_built_between_two_asyncio_runs_delivers_to_the_second():
+    # asyncio.run() clears the current loop when it returns, so the handler is built with no loop to take.
+    asyncio.run(asyncio.sleep(0))
+    handler = AsyncStreamingIteratorCallbackHandler()
+
+    async def consume():
+        handler.send_to_queue("event")
+        return await asyncio.wait_for(handler.queue.get(), timeout=5)
+
+    assert asyncio.run(consume()) == "event"
+
+
 def test_a_handler_built_before_its_loop_delivers_to_a_consumer_reading_the_queue():
     handler = AsyncStreamingIteratorCallbackHandler()
 
