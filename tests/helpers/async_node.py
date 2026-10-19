@@ -4,6 +4,7 @@ Reused by every PR in the native-async node effort (embedders, HTTP tools,
 retrievers, writers). First introduced in the embedders PR.
 """
 import asyncio
+import gc
 import time
 from typing import Any
 
@@ -31,11 +32,17 @@ async def assert_concurrent_execution(
     Returns:
         List of results from the concurrent calls, in payload order.
     """
-    start = time.perf_counter()
-    results = await asyncio.gather(
-        *(node.run_async(input_data=payload) for payload in payloads)
-    )
-    elapsed = time.perf_counter() - start
+    # A full garbage collection of the test process's heap takes over 100 ms, about the whole allowance at the default
+    # tolerance, so one landing inside the window failed the check with nothing serialized. Keep it out of the window.
+    gc_was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        start = time.perf_counter()
+        results = await asyncio.gather(*(node.run_async(input_data=payload) for payload in payloads))
+        elapsed = time.perf_counter() - start
+    finally:
+        if gc_was_enabled:
+            gc.enable()
 
     max_allowed = expected_single_call_s * tolerance_factor
     assert elapsed < max_allowed, (
