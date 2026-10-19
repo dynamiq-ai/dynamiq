@@ -2233,7 +2233,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
             final_answer = llm_final_attempt
             self._requested_output_files = []
 
-        return f"{final_answer}"
+        if final_answer is None or not str(final_answer).strip():
+            logger.warning(
+                f"Agent {self.name} - {self.id}: max-loops fallback produced no answer "
+                f"(LLM content: {llm_final_attempt!r}). Returning an empty answer."
+            )
+            return ""
+
+        return str(final_answer)
 
     def _refresh_agent_state(self, loop_num: int) -> None:
         """
@@ -2330,6 +2337,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             inference_mode=self.inference_mode,
             has_tools=bool(tools)
             or (self.skills.enabled and self.skills.source is not None)
+            or any(server.discover_per_run for server in self._mcp_servers)
             or ltm_enabled
             or bool(self.memory_store_backend)
             or bool(self.artifacts_backend),
