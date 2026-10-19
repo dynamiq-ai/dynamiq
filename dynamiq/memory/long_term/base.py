@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, nullcontext
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from functools import cached_property
 from hashlib import md5
 from typing import Any
@@ -106,7 +106,7 @@ class LongTermMemoryBackend(ABC, BaseModel):
             existing = self.get_by_hash(user_id=user_id, content_hash=content_hash)
             if existing is not None:
                 if metadata is not None and metadata != existing.metadata:
-                    now = datetime.now(UTC)
+                    now = datetime.now(timezone.utc)
                     embedding = self._embed(normalised)
                     self.update(
                         existing.id,
@@ -131,7 +131,7 @@ class LongTermMemoryBackend(ABC, BaseModel):
             nearest = self.search(query_embedding=embedding, scope={"user_id": user_id}, limit=1)
             if nearest and nearest[0][1] >= self.upsert_threshold:
                 old_fact, score = nearest[0]
-                now = datetime.now(UTC)
+                now = datetime.now(timezone.utc)
                 new_metadata = metadata if metadata is not None else old_fact.metadata
                 self.update(
                     old_fact.id,
@@ -154,7 +154,7 @@ class LongTermMemoryBackend(ABC, BaseModel):
                 )
                 return updated, RememberOutcome.UPDATED
 
-            now = datetime.now(UTC)
+            now = datetime.now(timezone.utc)
             fact = Fact(
                 id=str(uuid4()),
                 content=normalised,

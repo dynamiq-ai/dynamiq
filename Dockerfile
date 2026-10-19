@@ -1,4 +1,6 @@
-FROM python:3.13.10-slim AS runtime
+ARG PYTHON_VERSION=3.13.10
+
+FROM python:${PYTHON_VERSION}-slim AS runtime
 
 ENV PYTHONPATH=/app/
 ENV UV_PROJECT_ENVIRONMENT=/usr/local
