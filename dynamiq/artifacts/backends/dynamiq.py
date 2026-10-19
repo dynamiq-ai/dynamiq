@@ -1,5 +1,6 @@
 """Artifact backend served by the Dynamiq platform API."""
 
+import builtins
 import json as jsonlib
 from datetime import datetime, timezone
 from typing import Any
@@ -177,7 +178,9 @@ class Dynamiq(ArtifactBackend):
             content = content.decode("utf-8", errors="replace")
         return artifact, content
 
-    def list(self, *, kind: ArtifactKind | None = None, limit: int = 50, user_id: str | None = None) -> list[Artifact]:
+    def list(
+        self, *, kind: ArtifactKind | None = None, limit: int = 50, user_id: str | None = None
+    ) -> builtins.list[Artifact]:
         """List the store's artifacts, or the token user's own, most recently updated first."""
         # The platform pages between 10 and 500 items.
         params: dict[str, Any] = {**self._owner(user_id), "page_size": min(max(limit, 10), 500), "sort": "-updated_at"}
