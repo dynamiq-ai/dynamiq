@@ -2,7 +2,7 @@ import asyncio
 import threading
 from enum import Enum
 from queue import Queue
-from typing import TYPE_CHECKING, Any, AsyncIterator, Iterator
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Iterator
 
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.callbacks.base import get_run_id
@@ -286,6 +286,18 @@ class StreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
         yield from self._iterator
 
 
+class _ConsumerBoundQueue(asyncio.Queue):
+    """An asyncio.Queue that reports the loop of its first reader, so a handler built outside a loop can bind to it."""
+
+    def __init__(self, on_read: Callable[[], None]) -> None:
+        super().__init__()
+        self._on_read = on_read
+
+    async def get(self):
+        self._on_read()
+        return await super().get()
+
+
 class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
     """Callback handler for streaming events using an async iterator."""
 
@@ -300,36 +312,50 @@ class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
         Args:
             queue (asyncio.Queue | None): Queue for streaming events.
             done_event (asyncio.Event | None): Event to signal completion.
-            loop (asyncio.AbstractEventLoop | None): Event loop.
+            loop (asyncio.AbstractEventLoop | None): Event loop the consumer runs in. Defaults to the running loop;
+                built outside one, the handler binds to the loop that first reads from it.
         """
+        self._loop_lock = threading.Lock()
+        self._pending: list[StreamingEventMessage] = []
         if queue is None:
-            queue = asyncio.Queue()
+            queue = _ConsumerBoundQueue(on_read=self._bind_to_consumer_loop)
         if done_event is None:
             done_event = asyncio.Event()
         super().__init__(queue, done_event)
         self._iterator = self._iter_queue_events()
-        self.loop = loop or self._current_event_loop()
+        self.loop = loop or self._running_loop()
 
     @staticmethod
-    def _current_event_loop() -> asyncio.AbstractEventLoop:
-        """The running or set event loop, creating one in the main thread when there is none.
-
-        Python 3.14 made `asyncio.get_event_loop()` raise in the main thread when no loop is set, where earlier versions
-        created and set one. This keeps the earlier behavior so a handler built before its loop starts works the same on
-        every version.
-        """
+    def _running_loop() -> asyncio.AbstractEventLoop | None:
         try:
-            return asyncio.get_event_loop()
+            return asyncio.get_running_loop()
         except RuntimeError:
-            if threading.current_thread() is not threading.main_thread():
-                raise
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            return loop
+            return None
+
+    def _bind_to_consumer_loop(self) -> None:
+        """Bind to the loop reading the handler, if none was known at construction, and deliver what was held.
+
+        A handler built before its loop starts, `handler = ...; asyncio.run(consume(handler))`, used to take whatever
+        `asyncio.get_event_loop()` returned there: a fresh loop that never runs, so every event went to it and the
+        consumer waited forever.
+        """
+        if self.loop is not None:
+            return
+        with self._loop_lock:
+            if self.loop is None:
+                self.loop = asyncio.get_running_loop()
+                for event in self._pending:
+                    self.queue.put_nowait(event)
+                self._pending.clear()
 
     def send_to_queue(self, event: StreamingEventMessage):
-        """Send the event to the queue."""
-        asyncio.run_coroutine_threadsafe(self.queue.put(event), self.loop)
+        """Send the event to the queue, holding it until a consumer binds the handler to its loop."""
+        with self._loop_lock:
+            if self.loop is None:
+                self._pending.append(event)
+                return
+            loop = self.loop
+        asyncio.run_coroutine_threadsafe(self.queue.put(event), loop)
 
     async def _iter_queue_events(self) -> AsyncIterator[StreamingEventMessage]:
         """Async iterate over queue events.
@@ -337,6 +363,7 @@ class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
         Returns:
             AsyncIterator[StreamingEventMessage]: Async iterator for streaming events.
         """
+        self._bind_to_consumer_loop()
         try:
             while not self.queue.empty() or not self.done_event.is_set():
                 event = await self.queue.get()

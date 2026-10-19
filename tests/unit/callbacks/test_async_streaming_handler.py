@@ -38,35 +38,52 @@ def test_a_handler_given_a_loop_uses_it():
         loop.close()
 
 
-def test_a_handler_built_in_the_main_thread_before_any_loop_gets_one_and_sets_it():
+def test_a_handler_built_before_asyncio_run_delivers_to_the_loop_that_consumes_it():
     done = run_in_fresh_interpreter(
         """
-        import asyncio
+        import asyncio, threading
         from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 
         handler = AsyncStreamingIteratorCallbackHandler()
-        assert not handler.loop.is_closed()
-        assert asyncio.get_event_loop() is handler.loop
+        assert handler.loop is None
+        handler.send_to_queue("sent before the loop started")
+
+        async def consume():
+            first = await asyncio.wait_for(handler.__anext__(), timeout=5)
+            assert handler.loop is asyncio.get_running_loop()
+            threading.Thread(target=handler.send_to_queue, args=("sent from a worker",)).start()
+            second = await asyncio.wait_for(handler.__anext__(), timeout=5)
+            return [first, second]
+
+        assert asyncio.run(consume()) == ["sent before the loop started", "sent from a worker"]
         """
     )
 
     assert done.returncode == 0, done.stderr
 
 
-def test_a_handler_built_in_another_thread_without_a_loop_still_fails():
-    errors = []
+def test_a_handler_built_before_its_loop_delivers_to_a_consumer_reading_the_queue():
+    handler = AsyncStreamingIteratorCallbackHandler()
 
-    def build():
-        try:
-            AsyncStreamingIteratorCallbackHandler()
-        except RuntimeError as error:
-            errors.append(error)
+    async def consume():
+        threading.Thread(target=handler.send_to_queue, args=("event",)).start()
+        return await asyncio.wait_for(handler.queue.get(), timeout=5)
 
-    worker = threading.Thread(target=build)
+    assert asyncio.run(consume()) == "event"
+
+
+def test_a_handler_built_in_a_worker_thread_binds_to_the_loop_that_consumes_it():
+    built = []
+    worker = threading.Thread(target=lambda: built.append(AsyncStreamingIteratorCallbackHandler()))
     worker.start()
     worker.join()
+    handler = built[0]
+    handler.send_to_queue("event")
 
-    assert len(errors) == 1
+    async def consume():
+        return await asyncio.wait_for(handler.__anext__(), timeout=5), handler.loop is asyncio.get_running_loop()
+
+    assert asyncio.run(consume()) == ("event", True)
 
 
 def test_events_sent_from_a_worker_thread_reach_the_async_consumer():
