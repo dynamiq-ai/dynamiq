@@ -39,6 +39,9 @@ class TestResolveDefaultReasoningEffort:
             "gpt-5.1-codex-mini",
             "gpt-5.2-pro",
             "gpt-5.4-pro",
+            "gpt-5.5-pro",
+            "gpt-6-astra",
+            "gpt-6.1-sol",
             "o3",
             "o3-mini",
             "o4-mini",
@@ -47,6 +50,24 @@ class TestResolveDefaultReasoningEffort:
     )
     def test_unknown_or_non_none_models_fall_back_to_medium(self, model):
         assert _resolve_default_reasoning_effort(model) == ReasoningEffort.MEDIUM
+
+
+class TestLuna:
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "gpt-6-luna",
+            "gpt-5.6-luna",
+            "gpt-6-sol",
+            "gpt-5.6-sol",
+            "gpt-5.6",
+            "gpt-5.6-terra",
+            "gpt-5.5",
+            "openai/gpt-6-luna",
+        ],
+    )
+    def test_auto_sends_none_for_luna(self, model):
+        assert _build(_llm(model))["reasoning_effort"] == ReasoningEffort.NONE
 
 
 class TestAutoResolutionInCompletionParams:
@@ -142,7 +163,7 @@ class TestGpt6Family:
         assert params["max_completion_tokens"] == llm.max_tokens
         assert "stop" not in params
 
-    @pytest.mark.parametrize("model", ["gpt-6-sol", "gpt-6-astra", "gpt-6-luna"])
+    @pytest.mark.parametrize("model", ["gpt-6-astra"])
     def test_reasoning_effort_and_verbosity_applied(self, model):
         params = _build(_llm(model))
         assert params["reasoning_effort"] == ReasoningEffort.MEDIUM
