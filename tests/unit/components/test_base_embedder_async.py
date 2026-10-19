@@ -262,3 +262,16 @@ class TestMockAembeddingExecutorFixture:
 
         mock_aembedding_executor.assert_awaited_once()
         assert "embedding" in result
+
+
+class TestClientOnlyEmbedParams:
+    def test_embed_params_returns_client_without_connection(self):
+        client = MagicMock()
+        embedder = OpenAIEmbedder(client=client)
+
+        assert embedder.embed_params == {"client": client}
+
+    def test_embed_params_async_works_without_connection(self):
+        embedder = OpenAIEmbedder(client=MagicMock())
+
+        assert embedder.embed_params_async == {}

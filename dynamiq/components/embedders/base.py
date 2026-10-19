@@ -127,10 +127,9 @@ class BaseEmbedder(BaseModel):
 
     @property
     def embed_params(self) -> dict:
-        params = self.connection.conn_params
         if self.client:
-            params = {"client": self.client}
-        return params
+            return {"client": self.client}
+        return self.connection.conn_params
 
     @property
     def embed_params_async(self) -> dict:
@@ -139,7 +138,7 @@ class BaseEmbedder(BaseModel):
 
         client = params.pop("client", None)
 
-        if self.client is not None and client is self.client:
+        if self.client is not None and client is self.client and self.connection is not None:
             params.update(self.connection.conn_params)
 
         return params
