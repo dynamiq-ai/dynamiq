@@ -13,14 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Create .env file on push or internal PR
         if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
-        uses: SpicyPizza/create-envfile@v2.0
+        uses: SpicyPizza/create-envfile@v2
         with:
           envkey_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           envkey_UNSTRUCTURED_API_KEY: ${{ secrets.UNSTRUCTURED_API_KEY }}
@@ -34,11 +34,12 @@ jobs:
 
       - name: Create .env file on fork PR
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-        uses: SpicyPizza/create-envfile@v2.0
+        uses: SpicyPizza/create-envfile@v2
 
       - name: Build
-        uses: docker/bake-action@v5
+        uses: docker/bake-action@v7
         with:
+          source: .
           set: |
             *.cache-from=type=gha
             *.cache-to=type=gha,mode=max
@@ -75,10 +76,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -93,7 +94,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Loading the test image back into the daemon costs ~50s of tarball export/import against the
       # legacy overlay2 store. The containerd store takes the layers directly. Must precede buildx,
@@ -104,11 +105,11 @@ jobs:
           sudo systemctl restart docker
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Create .env file on push or internal PR
         if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
-        uses: SpicyPizza/create-envfile@v2.0
+        uses: SpicyPizza/create-envfile@v2
         with:
           envkey_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           envkey_UNSTRUCTURED_API_KEY: ${{ secrets.UNSTRUCTURED_API_KEY }}
@@ -123,11 +124,12 @@ jobs:
 
       - name: Create .env file on fork PR
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-        uses: SpicyPizza/create-envfile@v2.0
+        uses: SpicyPizza/create-envfile@v2
 
       - name: Load Image
-        uses: docker/bake-action@v5
+        uses: docker/bake-action@v7
         with:
+          source: .
           load: true
           set: |
             *.cache-from=type=gha
@@ -142,7 +144,7 @@ jobs:
         if: ${{ github.event_name == 'pull_request' }}
         run: docker compose up dynamiq-app-test-cov-exclude-integration-with-creds --exit-code-from dynamiq-app-test-cov-exclude-integration-with-creds
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage_report
           path: ./reports
@@ -157,13 +159,13 @@ jobs:
       checks: write
       pull-requests: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: coverage_report
           path: reports
 
       - name: Produce the coverage report on push or internal PR
-        uses: MishaKav/pytest-coverage-comment@main
+        uses: MishaKav/pytest-coverage-comment@v1
         with:
           pytest-xml-coverage-path: ./reports/coverage.xml
           junitxml-path: ./reports/test-results.xml
@@ -186,10 +188,10 @@ jobs:
       UV_PYTHON: ${{ matrix.python-version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "0.11.24"
 
@@ -205,15 +207,15 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "0.11.24"
 
@@ -231,15 +233,15 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "0.11.24"
 
