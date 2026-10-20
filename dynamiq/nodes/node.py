@@ -130,6 +130,18 @@ def stream_serialization_scope() -> Iterator[None]:
         _stream_serializations.reset(token)
 
 
+def _copy_serialized(value: Any) -> Any:
+    """A copy of a `to_dict()` result sharing no dict or list with it. Its leaves (scalars, enums) are immutable.
+
+    `copy.deepcopy` would cost more than serializing the node again; this walk costs a fraction of it.
+    """
+    if type(value) is dict:
+        return {key: _copy_serialized(item) for key, item in value.items()}
+    if type(value) is list:
+        return [_copy_serialized(item) for item in value]
+    return value
+
+
 # retry waits are spread by this fraction so nodes failing together do not all wake at once
 RETRY_JITTER_RATIO = 0.1
 
@@ -2302,8 +2314,9 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         if (entry := serializations.get(key)) is None:
             # The entry holds the node too, so its id cannot be reused by another node while the scope lives.
             entry = serializations[key] = (self, self.to_dict(**dict_kwargs))
-        # A top-level copy per event: a callback that edits its dict cannot change what the next one receives.
-        return dict(entry[1])
+        # A copy per event, as fresh as a new `to_dict()`: a callback editing its dict at any depth cannot change what
+        # the next callback or event receives.
+        return _copy_serialized(entry[1])
 
     @abstractmethod
     def execute(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs) -> Any:
