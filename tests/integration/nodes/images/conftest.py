@@ -83,35 +83,6 @@ def mock_image_edit_executor(mocker, mock_image_url, mock_image_b64):
 
 
 @pytest.fixture
-def mock_image_variation_executor(mocker, mock_image_url, mock_image_b64):
-    """Mock for litellm.image_variation with URL and b64_json support."""
-
-    def response(*args, **kwargs):
-        from types import SimpleNamespace
-
-        response_format = kwargs.get("response_format", "url")
-        n = kwargs.get("n") or 1
-        data = []
-        for _ in range(n):
-            if response_format == "b64_json":
-                img_data = SimpleNamespace(b64_json=mock_image_b64, url=None)
-            else:
-                img_data = SimpleNamespace(url=mock_image_url, b64_json=None)
-            data.append(img_data)
-
-        return SimpleNamespace(
-            data=data,
-            created=CREATION_TIMESTAMP,
-        )
-
-    mock_var = mocker.patch(
-        "dynamiq.nodes.images.variation.ImageVariation._image_variation",
-        side_effect=response,
-    )
-    yield mock_var
-
-
-@pytest.fixture
 def mock_requests_get(mocker, mock_image_bytes):
     """Mock requests.get for downloading images from URLs."""
     from types import SimpleNamespace
