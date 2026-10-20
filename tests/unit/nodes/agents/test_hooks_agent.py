@@ -526,8 +526,8 @@ def test_a_tool_name_that_matches_nothing_is_reported_with_a_warning(monkeypatch
 def test_hooks_are_dumped_with_all_their_fields():
     agent = build_agent([RegexHook(patterns=["a"], on=["input"]), PIIHook(restore_in_tools=["send-email"])])
     dumped = agent.model_dump()["hooks"]
-    assert dumped[0]["type"] == "regex" and dumped[0]["patterns"] == ["a"]
-    assert dumped[1]["type"] == "pii" and dumped[1]["restore_in_tools"] == ["send-email"]
+    assert dumped[0]["type"] == "dynamiq.nodes.agents.hooks.RegexHook" and dumped[0]["patterns"] == ["a"]
+    assert dumped[1]["type"] == "dynamiq.nodes.agents.hooks.PIIHook" and dumped[1]["restore_in_tools"] == ["send-email"]
 
 
 def test_the_hook_state_survives_a_checkpoint_and_a_resume():
@@ -657,8 +657,10 @@ def test_every_builtin_hook_publishes_a_json_schema_for_ui_forms():
     from dynamiq.nodes.agents.hooks import hook_json_schemas
 
     schemas = hook_json_schemas()
-    assert set(schemas) == {"pii", "prompt_injection", "tool_policy", "call_limit", "regex", "transform"}
-    assert "restore_in_tools" in schemas["pii"]["properties"] and "max_per_run" in schemas["call_limit"]["properties"]
+    names = ["PIIHook", "PromptInjectionHook", "ToolPolicyHook", "CallLimitHook", "RegexHook", "TransformHook"]
+    assert set(schemas) == {f"dynamiq.nodes.agents.hooks.{name}" for name in names}
+    assert "restore_in_tools" in schemas["dynamiq.nodes.agents.hooks.PIIHook"]["properties"]
+    assert "max_per_run" in schemas["dynamiq.nodes.agents.hooks.CallLimitHook"]["properties"]
     assert all(s.get("additionalProperties") is False for s in schemas.values())  # unknown fields are rejected
 
 
