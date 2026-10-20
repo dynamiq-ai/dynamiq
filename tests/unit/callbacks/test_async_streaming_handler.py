@@ -75,3 +75,36 @@ def test_events_sent_from_a_worker_thread_reach_the_async_consumer():
         return received
 
     assert asyncio.run(consume()) == ["first", "second"]
+
+
+def test_an_event_sent_on_the_loop_thread_is_queued_at_once():
+    async def send():
+        handler = AsyncStreamingIteratorCallbackHandler()
+        handler.send_to_queue("event")
+        return handler.queue.qsize()
+
+    assert asyncio.run(send()) == 1
+
+
+def test_events_sent_from_another_thread_arrive_in_order():
+    events = list(range(200))
+
+    async def consume():
+        handler = AsyncStreamingIteratorCallbackHandler()
+        worker = threading.Thread(target=lambda: [handler.send_to_queue(e) for e in events])
+        worker.start()
+        received = [await handler.queue.get() for _ in events]
+        worker.join()
+        return received
+
+    assert asyncio.run(consume()) == events
+
+
+def test_a_bounded_queue_waits_for_room_instead_of_dropping_events():
+    async def consume():
+        handler = AsyncStreamingIteratorCallbackHandler(queue=asyncio.Queue(maxsize=1))
+        for event in ("first", "second", "third"):
+            handler.send_to_queue(event)
+        return [await handler.queue.get() for _ in range(3)]
+
+    assert asyncio.run(consume()) == ["first", "second", "third"]

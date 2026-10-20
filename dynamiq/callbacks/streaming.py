@@ -328,8 +328,24 @@ class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
             return loop
 
     def send_to_queue(self, event: StreamingEventMessage):
-        """Send the event to the queue."""
-        asyncio.run_coroutine_threadsafe(self.queue.put(event), self.loop)
+        """Send the event to the queue.
+
+        An unbounded queue never blocks a put, so the event goes in directly from the loop's own thread, and through
+        `call_soon_threadsafe` from any other. A coroutine handed to `run_coroutine_threadsafe` costs a task, a
+        future and a loop wakeup per event, which at one event per streamed token is much of a stream's CPU time.
+        A bounded queue keeps that path, since its `put` waits for room.
+        """
+        if self.queue.maxsize > 0:
+            asyncio.run_coroutine_threadsafe(self.queue.put(event), self.loop)
+            return
+        try:
+            on_loop_thread = asyncio.get_running_loop() is self.loop
+        except RuntimeError:
+            on_loop_thread = False
+        if on_loop_thread:
+            self.queue.put_nowait(event)
+        else:
+            self.loop.call_soon_threadsafe(self.queue.put_nowait, event)
 
     async def _iter_queue_events(self) -> AsyncIterator[StreamingEventMessage]:
         """Async iterate over queue events.
