@@ -40,6 +40,21 @@ def test_convert_filters_to_query_with_contains_any():
     assert params == ("tags", "tags", ["ai", "ml"])
 
 
+def test_convert_filters_to_query_not_in_is_parenthesized_inside_and():
+    filters = {
+        "operator": "AND",
+        "conditions": [
+            {"field": "file_id", "operator": "==", "value": "a"},
+            {"field": "status", "operator": "not in", "value": ["x"]},
+        ],
+    }
+    where_clause, params = _convert_filters_to_query(filters)
+    assert "AND ((metadata->>'status')::text IS NULL OR (metadata->>'status')::text != ALL(%s::text[]))" in (
+        where_clause.as_string(None)
+    )
+    assert params == ("a", ["x"])
+
+
 @pytest.mark.parametrize(
     "operator, value, expected",
     [
