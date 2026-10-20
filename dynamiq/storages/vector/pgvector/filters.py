@@ -388,6 +388,21 @@ def _less_than_equal(field: str, value: Any) -> tuple[str, Any]:
     return _comparison_operator(field, value, "<=")
 
 
+def _array_type(field: str, value: list) -> str:
+    """
+    Returns the SQL type the `in` / `not in` array must be cast to so it matches the (possibly cast) field.
+
+    Args:
+        field (str): The field to compare, already cast by `_parse_metadata_fields_in_metadata` if needed.
+        value (list): The list of values to compare against.
+
+    Returns:
+        str: The type name of the array elements.
+    """
+    type_value = PYTHON_TO_PGVECTOR_DATA_TYPE.get(type(value[0])) if value else None
+    return type_value if type_value and field.endswith(f")::{type_value}") else "text"
+
+
 def _not_in(field: str, value: Any) -> tuple[str, list]:
     """
     Creates a `not in` comparison filter.
@@ -403,7 +418,7 @@ def _not_in(field: str, value: Any) -> tuple[str, list]:
         VectorStoreFilterException: If the value is not a list or contains unsupported types.
     """
     _validate_list_value(field, value, "not in")
-    return f"({field} IS NULL OR {field} != ALL(%s::text[]))", value
+    return f"({field} IS NULL OR {field} != ALL(%s::{_array_type(field, value)}[]))", value
 
 
 def _in(field: str, value: Any) -> tuple[str, list]:
@@ -421,7 +436,7 @@ def _in(field: str, value: Any) -> tuple[str, list]:
         VectorStoreFilterException: If the value is not a list or contains unsupported types.
     """
     _validate_list_value(field, value, "in")
-    return f"{field} = ANY(%s::text[])", value
+    return f"{field} = ANY(%s::{_array_type(field, value)}[])", value
 
 
 def _contains_any(field: str, value: Any) -> tuple[str, list]:

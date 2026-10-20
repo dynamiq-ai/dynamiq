@@ -74,6 +74,8 @@ dependencies = [
     "pdfplumber>=0.11.8,<0.12.0",
     "matplotlib>=3.10.7,<4.0.0",
     "seaborn>=0.13.2,<0.14.0",
+    # Imported directly by ExcelToList and the file tools; also what seaborn and databricks-sql-connector bring in.
+    "pandas>=2.2.3,<4.0.0",
     "pyyaml==6.0.3",
     "e2b>=2.26.0,<3.0.0",
     "tiktoken==0.12.0",
@@ -154,11 +156,6 @@ examples = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.uv]
-# pandas arrives through seaborn, pymilvus and databricks-sql-connector. Without this, the per-version numpy split
-# above lets the lock pick pandas 3 for some Python versions and 2.x for others.
-constraint-dependencies = ["pandas<3.0.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["dynamiq"]
