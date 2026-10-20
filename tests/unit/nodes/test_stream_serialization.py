@@ -10,6 +10,7 @@ from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.node import Node, stream_serialization_scope
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingConfig
+from dynamiq.utils.utils import UntruncatedList
 
 
 class StreamRecorder(BaseCallbackHandler):
@@ -142,3 +143,29 @@ def test_an_llm_stream_serializes_the_node_independently_of_its_length(node, to_
 
     assert len(recorder.events) == n_chunks
     assert to_dict_calls == Counter({False: 1})
+
+
+@pytest.mark.parametrize(
+    "mapped",
+    [({"nested": "before"},), [{"nested": "before"}], UntruncatedList([{"nested": "before"}])],
+    ids=["tuple", "list", "list-subclass"],
+)
+def test_containers_inside_the_serialization_are_copied_too(mapped):
+    node = OpenAI(model="gpt-4o-mini", connection=OpenAIConnection(api_key="k"), input_mapping={"x": mapped})
+
+    class Editor(BaseCallbackHandler):
+        def __init__(self):
+            self.seen = []
+
+        def on_node_execute_stream(self, serialized, chunk=None, **kwargs):
+            value = serialized["input_mapping"]["x"]
+            self.seen.append(value[0]["nested"])
+            value[0]["nested"] = "after"
+
+    editor = Editor()
+
+    with stream_serialization_scope():
+        node.run_on_node_execute_stream([editor], {})
+        node.run_on_node_execute_stream([editor], {})
+
+    assert editor.seen == ["before", "before"]
