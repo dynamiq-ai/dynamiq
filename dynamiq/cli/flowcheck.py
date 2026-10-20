@@ -45,6 +45,12 @@ RULES_TYPE = "dynamiq.nodes.operators.Rules"
 EXPRESSION_TYPE = "dynamiq.nodes.operators.Expression"
 SUB_WORKFLOW_TYPE = "dynamiq.nodes.operators.SubWorkflow"
 JUDGEMENT_TYPE = "dynamiq.nodes.tools.Judgement"
+HOOK_TYPE_PREFIX = "dynamiq.nodes.agents.hooks."
+
+# The values the platform accepts for the settings every node shares.
+STREAMING_MODES = ("all", "final")
+ERROR_BEHAVIORS = ("raise", "return")
+FEEDBACK_METHODS = ("console", "stream")
 
 CHOICE_HIT_POLICIES = ("first", "all")
 TABLE_HIT_POLICIES = ("first", "unique", "collect")
@@ -411,6 +417,22 @@ def validate(flow, known_types: set | None = None):
                     "Human-readable text belongs in `role`/`description`."
                 )
 
+        errors.extend(check_node_settings(node, f"node {label!r}"))
+        # A node defined inside this one is a node to the platform too: it is refused for the
+        # same settings, and for a missing `id` or `name`, which `save` fills in only partly.
+        # `save` gives an id only to the node's own `llm` and `tools`.
+        given_an_id = {id(part) for _, part in named_parts(node)}
+        for nested_label, nested in nested_nodes(node, label):
+            if not nested["type"].startswith("dynamiq.nodes."):
+                continue  # a memory backend or a connection, not a node
+            if nested["type"].startswith(HOOK_TYPE_PREFIX):
+                continue  # a hook config forbids `id`; the nodes inside it, like a detector, are still checked
+            if id(nested) not in given_an_id and not str(nested.get("id") or "").strip():
+                errors.append(f"{nested_label}: needs an `id` (lowercase letters, digits, single hyphens).")
+            if not str(nested.get("name") or "").strip():
+                errors.append(f"{nested_label}: needs a `name` (lowercase letters, digits, single hyphens).")
+            errors.extend(check_node_settings(nested, nested_label))
+
         if node_type.startswith("dynamiq.nodes.agents."):
             llm = node.get("llm")
             if not isinstance(llm, dict):
@@ -422,6 +444,8 @@ def validate(flow, known_types: set | None = None):
                     f"agent {label!r}: llm.connection {llm.get('connection')!r} is not a connection UUID. "
                     "Run `dynamiq connection list --type dynamiq.connections.OpenAI`."
                 )
+            if isinstance(llm, dict) and not str(llm.get("model") or "").strip():
+                errors.append(f'agent {label!r}: llm needs `model` (e.g. "gpt-4o").')
             if not str(node.get("role") or "").strip():
                 warnings.append(f"agent {label!r} has no `role`, so it has no instructions.")
             if not node.get("tools"):
@@ -597,6 +621,80 @@ def nested_nodes(node: dict, label):
                 item_label = f"{label} > {item.get('id') or item.get('name') or place}"
                 yield item_label, item
                 yield from nested_nodes(item, item_label)
+
+
+def _number_below(value, minimum) -> bool:
+    """True when `value` is set and is not a number of at least `minimum`."""
+    return value is not None and (not _is_number(value) or value < minimum)
+
+
+def check_node_settings(node: dict, where: str) -> list:
+    """The settings every node shares, held to the bounds the platform holds them to on save.
+
+    The API reports a breach as `streaming.event cannot be blank` and the like, naming no node,
+    and only once the flow is sent; the SDK alone accepts several of them, so a flow that loads
+    locally can still be refused.
+    """
+    errors = []
+
+    streaming = node.get("streaming")
+    if isinstance(streaming, dict):
+        event = streaming.get("event")
+        # Left out, the runtime streams under "streaming"; set to an empty name, nothing can
+        # subscribe to it, and the platform refuses it.
+        if event is not None and (not isinstance(event, str) or not event.strip()):
+            errors.append(
+                f"{where}: streaming.event is blank. Leave it out to stream under the default "
+                '"streaming", or name the event consumers subscribe to.'
+            )
+        mode = streaming.get("mode")
+        if mode is not None and mode not in STREAMING_MODES:
+            errors.append(f"{where}: streaming.mode {mode!r} is not valid. Use one of: {', '.join(STREAMING_MODES)}.")
+        if _number_below(streaming.get("timeout"), 1):
+            errors.append(f"{where}: streaming.timeout {streaming.get('timeout')!r} must be at least 1 second.")
+
+    handling = node.get("error_handling")
+    if isinstance(handling, dict):
+        for key in ("timeout_seconds", "retry_interval_seconds", "backoff_rate"):
+            if _number_below(handling.get(key), 1):
+                errors.append(f"{where}: error_handling.{key} {handling.get(key)!r} must be at least 1.")
+        if _number_below(handling.get("max_retries"), 0):
+            errors.append(f"{where}: error_handling.max_retries {handling.get('max_retries')!r} must be 0 or more.")
+        behavior = handling.get("behavior")
+        if behavior is not None and behavior not in ERROR_BEHAVIORS:
+            errors.append(
+                f"{where}: error_handling.behavior {behavior!r} is not valid. Use one of: {', '.join(ERROR_BEHAVIORS)}."
+            )
+
+    approval = node.get("approval")
+    if isinstance(approval, dict):
+        method = approval.get("feedback_method")
+        if method is not None and method not in FEEDBACK_METHODS:
+            errors.append(
+                f"{where}: approval.feedback_method {method!r} is not valid. Use one of: {', '.join(FEEDBACK_METHODS)}."
+            )
+
+    mock = node.get("mock")
+    if isinstance(mock, dict):
+        output = mock.get("output")
+        if output == "" or (output is not None and not isinstance(output, str | dict)):
+            errors.append(f"{where}: mock.output must be non-empty text or an object.")
+        if mock.get("error") is not None and not str(mock.get("error")).strip():
+            errors.append(f"{where}: mock.error is blank. Leave it out, or give the error the mock fails with.")
+        if _number_below(mock.get("latency_seconds"), 0):
+            errors.append(f"{where}: mock.latency_seconds {mock.get('latency_seconds')!r} must be 0 or more.")
+
+    if str(node.get("type") or "").startswith("dynamiq.nodes.agents."):
+        if _number_below(node.get("max_loops"), 1):
+            errors.append(f"{where}: max_loops {node.get('max_loops')!r} must be at least 1.")
+        behaviour = node.get("behaviour_on_max_loops")
+        if behaviour is not None and behaviour not in ERROR_BEHAVIORS:
+            errors.append(
+                f"{where}: behaviour_on_max_loops {behaviour!r} is not valid. Use one of: "
+                f"{', '.join(ERROR_BEHAVIORS)}."
+            )
+
+    return errors
 
 
 def check_branch(source, source_id, option, label) -> list:
