@@ -16,6 +16,7 @@ from dynamiq.storages.vector.exceptions import (
 )
 from dynamiq.storages.vector.policies import DuplicatePolicy
 from dynamiq.storages.vector.turbopuffer import TurbopufferVectorStore
+from dynamiq.storages.vector.turbopuffer.turbopuffer import MAX_ATTRIBUTES
 from dynamiq.types import Document
 
 SCHEMA = {
@@ -112,6 +113,7 @@ def test_write_documents_builds_rows_and_declares_new_attributes(store, namespac
     }
     assert params["distance_metric"] == "cosine_distance"
     assert params["schema"] == {
+        "page_number": {"type": "int", "filterable": True},
         "score": {"type": "float"},
         "info": {"type": "string"},
         "filename": {
@@ -456,3 +458,41 @@ def test_write_documents_declares_new_numbers_as_floats(store, namespace):
     assert params["schema"]["ids"] == {"type": "[]float"}
     assert [row["rating"] for row in params["upsert_rows"]] == [4.0, 4.5]
     assert [row["ids"] for row in params["upsert_rows"]] == [[1.0, 2.0], [3.5]]
+
+
+def test_write_documents_declares_numbers_the_schema_already_lists(store, namespace):
+    # The schema lists an attribute before the write declaring it commits, and until then Turbopuffer
+    # types an undeclared number as int, so it rejects floats in a write that does not declare them.
+    namespace.schema.return_value = {
+        **SCHEMA,
+        "start_index": SimpleNamespace(model_dump=lambda exclude_none: {"type": "float", "filterable": True}),
+    }
+
+    def write(**params):
+        if "start_index" not in params.get("schema", {}):
+            raise _error(turbopuffer.BadRequestError, 400)
+        return SimpleNamespace(rows_affected=len(params["upsert_rows"]))
+
+    namespace.write.side_effect = write
+    document = Document(id="d1", content="c", metadata={"file_id": "f1", "start_index": 0, "page_number": 2})
+
+    assert store.write_documents([document]) == 1
+
+    params = namespace.write.call_args.kwargs
+    assert namespace.write.call_count == 1
+    assert params["schema"] == {
+        "start_index": {"type": "float", "filterable": True},
+        "page_number": {"type": "int", "filterable": True},
+    }
+    assert params["upsert_rows"][0]["start_index"] == 0.0
+
+
+def test_write_documents_counts_redeclared_numbers_once_toward_the_attribute_limit(store, namespace):
+    schema = {f"a{i}": SCHEMA["file_id"] for i in range(MAX_ATTRIBUTES - 3)}
+    namespace.schema.return_value = {**schema, "content": SCHEMA["content"], "page_number": SCHEMA["page_number"]}
+
+    store.write_documents([Document(id="d1", content="c", metadata={"page_number": 2, "added": "x"})])
+
+    params = namespace.write.call_args.kwargs
+    assert params["upsert_rows"][0]["added"] == "x"
+    assert params["schema"]["added"] == {"type": "string"}

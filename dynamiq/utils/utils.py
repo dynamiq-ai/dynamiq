@@ -571,6 +571,24 @@ def is_called_from_async_context() -> bool:
         return False
 
 
+def is_coroutine_function(func: Any) -> bool:
+    """
+    Whether calling ``func`` returns a coroutine, answered as ``asyncio.iscoroutinefunction`` did.
+
+    ``inspect.iscoroutinefunction`` misses callables marked only with asyncio's ``_is_coroutine`` flag, such as
+    Cython-compiled ``async def`` methods. ``asyncio.iscoroutinefunction`` also accepts those, but it is deprecated
+    from Python 3.14, so this keeps its answer without calling it.
+
+    Args:
+        func (Any): Callable to check.
+
+    Returns:
+        bool: True if calling ``func`` returns a coroutine.
+    """
+    marker = getattr(asyncio.coroutines, "_is_coroutine", None)
+    return inspect.iscoroutinefunction(func) or (marker is not None and getattr(func, "_is_coroutine", None) is marker)
+
+
 def clear_annotation(annotation: Any) -> Any:
     """
     Returns the first non-None type if the annotation allows multiple types;
