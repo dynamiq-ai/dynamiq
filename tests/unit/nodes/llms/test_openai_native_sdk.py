@@ -66,10 +66,11 @@ TOOL_CHUNKS = [
 class FakeOpenAI:
     """An OpenAI API on an httpx MockTransport: streams `chunks`, adding usage only when asked, like the API."""
 
-    def __init__(self, chunks=TEXT_CHUNKS, status_code=200, error_message="boom"):
+    def __init__(self, chunks=TEXT_CHUNKS, status_code=200, error_message="boom", usage=USAGE):
         self.chunks = chunks
         self.status_code = status_code
         self.error_message = error_message
+        self.usage = usage
         self.requests: list[dict] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -87,15 +88,14 @@ class FakeOpenAI:
                     "created": 1,
                     "model": "gpt-4o-mini",
                     "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
-                    "usage": USAGE,
+                    "usage": self.usage,
                 },
             )
         return self.stream(body, self.chunks)
 
-    @staticmethod
-    def stream(body: dict, chunks: list[dict]) -> httpx.Response:
+    def stream(self, body: dict, chunks: list[dict]) -> httpx.Response:
         if (body.get("stream_options") or {}).get("include_usage"):
-            chunks = chunks + [_chunk(usage=USAGE)]
+            chunks = chunks + [_chunk(usage=self.usage)]
         sse = b"".join(b"data: " + json.dumps(c).encode() + b"\n\n" for c in chunks) + b"data: [DONE]\n\n"
         return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=sse)
 
@@ -125,9 +125,9 @@ class Collector(BaseStreamingCallbackHandler):
             self.usage = kwargs["usage_data"]
 
 
-def make_node(fake: FakeOpenAI, native: bool = True, **kwargs) -> OpenAI:
+def make_node(fake: FakeOpenAI, native: bool = True, model: str = "gpt-4o-mini", **kwargs) -> OpenAI:
     node = OpenAI(
-        model="gpt-4o-mini",
+        model=model,
         connection=OpenAIConnection(api_key="k", url=BASE_URL),
         prompt=Prompt(messages=[{"role": "user", "content": "hi"}]),
         use_native_sdk=native,
@@ -473,3 +473,45 @@ def test_an_agent_turn_sends_the_same_requests_and_streams_the_same_events_on_bo
     assert events[True] == events[False]
     if streaming:
         assert events[True], "the agent streamed nothing"
+
+
+class TestCostReporting:
+    """Cost is computed by the node from the reported usage, with LiteLLM's price table, on either transport."""
+
+    BILLED = {
+        "prompt_tokens": 1800,
+        "completion_tokens": 900,
+        "total_tokens": 2700,
+        "prompt_tokens_details": {"cached_tokens": 1536},
+        "completion_tokens_details": {"reasoning_tokens": 800},
+    }
+
+    def usage_data(self, native: bool, streaming: StreamingConfig) -> dict:
+        fake = FakeOpenAI(usage=self.BILLED)
+        node = make_node(fake, native=native, model="gpt-5-mini", streaming=streaming)
+        collector = Collector()
+        result = node.run_sync(input_data={}, config=RunnableConfig(callbacks=[collector]))
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        return collector.usage
+
+    @pytest.mark.parametrize(
+        "streaming",
+        [StreamingConfig(enabled=False), StreamingConfig(enabled=True, include_usage=True)],
+        ids=["unstreamed", "streamed-with-usage"],
+    )
+    def test_matches_the_litellm_path_whenever_it_has_the_api_usage(self, streaming):
+        assert self.usage_data(native=True, streaming=streaming) == self.usage_data(native=False, streaming=streaming)
+
+    def test_a_default_stream_is_priced_from_what_the_api_billed(self):
+        usage = self.usage_data(native=True, streaming=StreamingConfig(enabled=True))
+
+        prompt_cost, completion_cost = litellm.cost_per_token(
+            model="gpt-5-mini", prompt_tokens=1800, completion_tokens=900, cache_read_input_tokens=1536
+        )
+        assert (usage["prompt_tokens"], usage["completion_tokens"], usage["cache_read_input_tokens"]) == (
+            1800,
+            900,
+            1536,
+        )
+        assert usage["total_tokens_cost_usd"] == pytest.approx(prompt_cost + completion_cost)
+        assert usage["total_tokens_cost_usd"] > 0
