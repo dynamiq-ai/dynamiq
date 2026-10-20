@@ -1,4 +1,27 @@
-# Parallel Search MCP
+# MCP tool examples
+
+## Local code lookup with Sem
+
+With [Sem](https://github.com/Ataraxy-Labs/sem) installed on `PATH` (`sem --version`),
+use the stdio adapter to look up a symbol in a trusted local checkout:
+
+```sh
+uv sync --python 3.12 --no-install-project --no-default-groups
+uv run --python 3.12 --no-default-groups python -m examples.components.tools.mcp_server_as_tool.use_sem \
+  --repo /absolute/path/to/checkout --query parse_config
+```
+
+This example was tested with Sem 0.27.0. It discovers tools through `MCPServer`,
+selects `sem_find` and `sem_grep`, and invokes `sem_find` as a normal Dynamiq node.
+The printed result contains code context, not an LLM-generated answer. No model
+or API key is required. Existing examples and provider defaults are unchanged.
+
+`SEM_REPO` selects the checkout; it is not a sandbox. Sem may write its local
+index. The full server also exposes validation capabilities that can execute
+commands, so retain the tool selection when adding this server to an agent.
+If an agent uses the results, source content goes to its configured model.
+
+## Parallel Search MCP
 
 This separate example discovers `web_search` and `web_fetch` through Dynamiq's
 `MCPServer` and runs them using `MCPStreamableHTTP`. It prints web search results
