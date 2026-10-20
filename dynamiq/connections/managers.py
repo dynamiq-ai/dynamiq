@@ -2,7 +2,6 @@ import asyncio
 import enum
 import hashlib
 import importlib
-import inspect
 import threading
 import weakref
 from contextlib import asynccontextmanager, contextmanager
@@ -10,6 +9,7 @@ from typing import Any
 
 from dynamiq.components.serializers import JsonPickleSerializer
 from dynamiq.connections import BaseConnection
+from dynamiq.utils import is_coroutine_function
 from dynamiq.utils.logger import logger
 
 
@@ -266,7 +266,7 @@ class ConnectionManager:
             conn_clients, self.connection_clients = list(self.connection_clients.values()), {}
         for conn_client in conn_clients:
             close_method = getattr(conn_client, "close", None)
-            if callable(close_method) and not inspect.iscoroutinefunction(close_method):
+            if callable(close_method) and not is_coroutine_function(close_method):
                 close_method()
 
     async def aclose(self):
@@ -284,7 +284,7 @@ class ConnectionManager:
                     logger.warning(f"Error closing async connection client: {exc}")
                 continue
             close_method = getattr(conn_client, "close", None)
-            if callable(close_method) and not inspect.iscoroutinefunction(close_method):
+            if callable(close_method) and not is_coroutine_function(close_method):
                 close_method()
 
     @staticmethod
