@@ -17,7 +17,7 @@ from functools import cache
 from typing import Any
 
 import httpx
-from openai import AsyncOpenAI, OpenAI, OpenAIError
+from openai import AsyncOpenAI, BadRequestError, OpenAI, OpenAIError, UnprocessableEntityError
 from openai.resources.chat.completions import Completions
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 from openai.types.chat.chat_completion_chunk import Choice as ChunkChoice
@@ -124,17 +124,26 @@ def build_request(params: dict[str, Any], model_prefix: str | None) -> dict[str,
     return request
 
 
-def _ask_for_usage(request: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-    """Make a streamed request report usage, and say whether the caller asked to have it streamed.
+# Endpoints that rejected the `stream_options` this transport adds: their streams go out as asked, and usage is counted.
+_ENDPOINTS_WITHOUT_STREAM_OPTIONS: set[str] = set()
 
-    Usage arrives only on request, in a last chunk with no choices. LiteLLM otherwise counts it with a tokenizer.
+
+def _ask_for_usage(request: dict[str, Any], endpoint: str) -> tuple[dict[str, Any], bool]:
+    """`request` asking its stream to report usage, and whether the caller asked to have usage streamed.
+
+    Usage arrives only on request, in a last chunk with no choices; LiteLLM otherwise counts it with a tokenizer. The
+    request comes back unchanged (the same object) when it needs no option added or its endpoint rejected the option.
     """
     stream_options = request.get("stream_options") or {}
-    if not request.get("stream"):
-        return request, False
-    return request | {"stream_options": stream_options | {"include_usage": True}}, bool(
-        stream_options.get("include_usage")
-    )
+    emit_usage = bool(stream_options.get("include_usage"))
+    if not request.get("stream") or emit_usage or endpoint in _ENDPOINTS_WITHOUT_STREAM_OPTIONS:
+        return request, emit_usage
+    return request | {"stream_options": stream_options | {"include_usage": True}}, emit_usage
+
+
+def _rejects_stream_options(exc: Exception) -> bool:
+    """Whether an endpoint refused the request over `stream_options`, which some OpenAI-compatible servers lack."""
+    return isinstance(exc, (BadRequestError, UnprocessableEntityError)) and "stream_options" in str(exc).lower()
 
 
 def _as_litellm_error(exc: Exception, model: str) -> Exception:
@@ -207,22 +216,39 @@ class AsyncStream(_ChunkShaper):
 
 
 def create(client: OpenAI, request: dict[str, Any]) -> ChatCompletion | Stream:
-    """Send `request` (from `build_request`) and return the response, or the stream of a streamed request."""
-    request, emit_usage = _ask_for_usage(request)
+    """Send `request` (from `build_request`) and return the response, or the stream of a streamed request.
+
+    A stream whose endpoint rejects the usage option added to it is sent again as asked, once per endpoint.
+    """
+    endpoint = str(client.base_url)
+    sent, emit_usage = _ask_for_usage(request, endpoint)
     try:
-        response = client.chat.completions.create(**request)
+        response = client.chat.completions.create(**sent)
     except _TRANSPORT_ERRORS as e:
-        raise _as_litellm_error(e, request["model"]) from e
+        if sent is request or not _rejects_stream_options(e):
+            raise _as_litellm_error(e, request["model"]) from e
+        _ENDPOINTS_WITHOUT_STREAM_OPTIONS.add(endpoint)
+        try:
+            response = client.chat.completions.create(**request)
+        except _TRANSPORT_ERRORS as retry_error:
+            raise _as_litellm_error(retry_error, request["model"]) from retry_error
     return Stream(response, request["model"], emit_usage) if request.get("stream") else response
 
 
 async def acreate(client: AsyncOpenAI, request: dict[str, Any]) -> ChatCompletion | AsyncStream:
     """Async `create`."""
-    request, emit_usage = _ask_for_usage(request)
+    endpoint = str(client.base_url)
+    sent, emit_usage = _ask_for_usage(request, endpoint)
     try:
-        response = await client.chat.completions.create(**request)
+        response = await client.chat.completions.create(**sent)
     except _TRANSPORT_ERRORS as e:
-        raise _as_litellm_error(e, request["model"]) from e
+        if sent is request or not _rejects_stream_options(e):
+            raise _as_litellm_error(e, request["model"]) from e
+        _ENDPOINTS_WITHOUT_STREAM_OPTIONS.add(endpoint)
+        try:
+            response = await client.chat.completions.create(**request)
+        except _TRANSPORT_ERRORS as retry_error:
+            raise _as_litellm_error(retry_error, request["model"]) from retry_error
     return AsyncStream(response, request["model"], emit_usage) if request.get("stream") else response
 
 
