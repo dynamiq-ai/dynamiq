@@ -10,6 +10,7 @@ from .utils import (
     format_value_for_log,
     generate_uuid,
     is_called_from_async_context,
+    is_coroutine_function,
     merge,
     serialize,
     serialize_file,

@@ -206,3 +206,42 @@ def test_close_closes_every_client_while_the_cache_is_hit():
 
     assert closed == ["first", "second"]
     assert cm.connection_clients == {}
+
+
+class MarkedCoroutineCloseClient:
+    """A client whose close() is a plain function returning a coroutine, marked with asyncio's _is_coroutine flag the
+    way legacy coroutine wrappers and Cython-compiled `async def` methods are."""
+
+    def __init__(self):
+        self.calls = []
+
+        def close():
+            self.calls.append("close")
+            return asyncio.sleep(0)
+
+        close._is_coroutine = asyncio.coroutines._is_coroutine
+        self.close = close
+
+
+def test_close_skips_a_close_method_marked_as_a_coroutine():
+    cm = ConnectionManager()
+    client = MarkedCoroutineCloseClient()
+    cm.connection_clients["marked"] = client
+
+    cm.close()
+
+    assert client.calls == []
+    assert cm.connection_clients == {}
+
+
+@pytest.mark.asyncio
+async def test_aclose_awaits_a_close_method_marked_as_a_coroutine():
+    """aclose() awaits a coroutine close() when there is no aclose(), recognizing the marked kind too."""
+    cm = ConnectionManager()
+    client = MarkedCoroutineCloseClient()
+    cm.connection_clients["marked"] = client
+
+    await cm.aclose()
+
+    assert client.calls == ["close"]
+    assert cm.connection_clients == {}
