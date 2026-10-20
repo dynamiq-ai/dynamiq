@@ -26,6 +26,10 @@ CHARS_PER_TOKEN = 4
 TRACING_REDACTED_KEYS = frozenset({"mcp_http_headers"})
 TRACING_REDACTED_PLACEHOLDER = "***"
 
+# Exact types `format_value` returns unchanged. Its generic tail (a pydantic RootModel round trip) gives the same
+# value for them, but costs a model build per leaf, and every streamed chunk is a tree of such leaves.
+_JSON_SCALAR_TYPES = frozenset({str, int, float, bool, NoneType})
+
 
 def redact_tracing_keys(value: Any) -> Any:
     """Replace the values of ``TRACING_REDACTED_KEYS`` at any depth, leaving the rest untouched.
@@ -423,14 +427,8 @@ def format_value(
     Returns:
         Any: Formatted value.
     """
-    from dynamiq.runnables import RunnableResult
-
-    try:
-        from dynamiq.nodes.tools.python import PythonInputSchema
-    except ImportError:
-        python_input_schema_types = ()
-    else:
-        python_input_schema_types = (PythonInputSchema,)
+    if type(value) in _JSON_SCALAR_TYPES:
+        return value
 
     if skip_format_types is None:
         skip_format_types = set()
@@ -490,6 +488,15 @@ def format_value(
             formatted_list.append(formatted_v)
 
         return type(value)(formatted_list)
+
+    from dynamiq.runnables import RunnableResult
+
+    try:
+        from dynamiq.nodes.tools.python import PythonInputSchema
+    except ImportError:
+        python_input_schema_types = ()
+    else:
+        python_input_schema_types = (PythonInputSchema,)
 
     if isinstance(value, (RunnableResult, *python_input_schema_types)):
         formatted = value.to_dict(skip_format_types=skip_format_types, force_format_types=force_format_types)
