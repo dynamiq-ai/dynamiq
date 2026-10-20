@@ -1,7 +1,9 @@
 from typing import Any
+from urllib.parse import urlsplit
 
 from dynamiq.connections import HttpApiKey
 from dynamiq.nodes.llms.base import BaseLLM
+from dynamiq.nodes.llms.registry import _sync_to_litellm_enabled, model_registry
 
 
 class CustomLLM(BaseLLM):
@@ -43,5 +45,21 @@ class CustomLLM(BaseLLM):
 
         if self.provider_prefix and not params["model"].startswith(self.provider_prefix + "/"):
             params["model"] = f"{self.provider_prefix}/{params['model']}"
+
+        endpoint = urlsplit(self.connection.url)
+        if (
+            self.provider_prefix == "anthropic"
+            and _sync_to_litellm_enabled()
+            and endpoint.hostname in {"api.minimax.io", "api.minimax.cn"}
+            and endpoint.path.rstrip("/") == "/anthropic"
+            and params["model"] in {"anthropic/MiniMax-M3.1-Flash", "anthropic/MiniMax-M3"}
+        ):
+            # LiteLLM resolves thinking capabilities under the routed provider, not
+            # the native MiniMax registry key. Keep the alias out of ordinary listings.
+            import litellm
+
+            info = model_registry.get_model_info(params["model"])
+            if info is not None:
+                litellm.register_model({params["model"]: {**info, "litellm_provider": "anthropic"}})
 
         return params

@@ -69,6 +69,7 @@
         "output_cost_per_token": 0.0000032
     },
     "accounts/fireworks/models/minimax-m2p5": {
+        "is_legacy": true,
         "max_input_tokens": 192000,
         "max_output_tokens": 128000,
         "max_tokens": 128000,
@@ -98,7 +99,30 @@
         "input_cost_per_token": 0.000001,
         "output_cost_per_token": 0.0000032
     },
+    "minimax/MiniMax-M3.1-Flash": {
+        "max_input_tokens": 1000000,
+        "max_output_tokens": 524288,
+        "max_tokens": 524288,
+        "mode": "chat",
+        "litellm_provider": "minimax",
+        "supports_vision": true,
+        "supports_pdf_input": false,
+        "supports_video_input": true,
+        "supports_function_calling": true,
+        "supports_parallel_function_calling": true,
+        "supports_response_schema": true,
+        "supports_system_messages": true,
+        "supports_tool_choice": true,
+        "supports_prompt_caching": true,
+        "supports_reasoning": true,
+        "supports_adaptive_thinking": true,
+        "supports_xhigh_reasoning_effort": true,
+        "input_cost_per_token": 0.00000015,
+        "output_cost_per_token": 0.0000006,
+        "cache_read_input_token_cost": 0.000000015
+    },
     "MiniMaxAI/MiniMax-M2.5": {
+        "is_legacy": true,
         "max_input_tokens": 228700,
         "max_output_tokens": 128000,
         "max_tokens": 128000,
@@ -114,6 +138,7 @@
         "output_cost_per_token": 0.0000012
     },
     "minimax/MiniMax-M2.7": {
+        "is_legacy": true,
         "max_input_tokens": 204800,
         "max_output_tokens": 131072,
         "max_tokens": 131072,
