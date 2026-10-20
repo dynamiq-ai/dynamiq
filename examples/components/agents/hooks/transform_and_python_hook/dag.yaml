@@ -49,7 +49,7 @@ nodes:
           def run(input_data):
               return "deleted"
     hooks:
-      - type: regex
+      - type: dynamiq.nodes.agents.hooks.RegexHook
         name: input-guard
         presets: [injection_basic]
         on: [input]
@@ -58,7 +58,7 @@ nodes:
       - type: custom_hooks.RequireNumericCustomerId
         name: numeric-id
         tools: [lookup-customer]
-      - type: transform
+      - type: dynamiq.nodes.agents.hooks.TransformHook
         name: public-profile-only
         tools: [lookup-customer]
         input_transformer:
@@ -67,12 +67,12 @@ nodes:
         output_transformer:
           selector:
             content: $.content.public
-      - type: tool_policy
+      - type: dynamiq.nodes.agents.hooks.ToolPolicyHook
         name: no-delete
         tools: [delete-customer]
         deny: true
         message: "Deleting customers is disabled. Tell the user to contact an administrator."
-      - type: regex
+      - type: dynamiq.nodes.agents.hooks.RegexHook
         name: mask-emails
         patterns: ['[\w.+-]+@[\w-]+(?:\.[\w-]+)+']
         on: [output]
