@@ -577,6 +577,20 @@ def test_streaming_without_an_event_passes_as_the_runtime_defaults_it():
     assert errors_of(flow_with(node)) == []
 
 
+def test_an_agent_hook_is_not_held_to_node_rules_but_its_detector_is():
+    hook = {
+        "type": "dynamiq.nodes.agents.hooks.PromptInjectionHook",
+        "on": ["input"],
+        "detector": {"type": "dynamiq.nodes.detectors.PromptInjectionDetector", "streaming": {"event": ""}},
+    }
+
+    errors = "\n".join(errors_of(flow_with(agent(hooks=[hook]))))
+
+    assert "hooks[0]: needs" not in errors
+    assert "hooks[0] > detector: needs an `id`" in errors
+    assert "hooks[0] > detector: streaming.event is blank" in errors
+
+
 def test_node_settings_the_platform_refuses_are_caught_on_every_node():
     node = agent(
         streaming={"enabled": True, "event": "", "mode": "answer", "timeout": 0.5},

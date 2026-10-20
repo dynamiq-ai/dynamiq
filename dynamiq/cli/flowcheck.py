@@ -45,6 +45,7 @@ RULES_TYPE = "dynamiq.nodes.operators.Rules"
 EXPRESSION_TYPE = "dynamiq.nodes.operators.Expression"
 SUB_WORKFLOW_TYPE = "dynamiq.nodes.operators.SubWorkflow"
 JUDGEMENT_TYPE = "dynamiq.nodes.tools.Judgement"
+HOOK_TYPE_PREFIX = "dynamiq.nodes.agents.hooks."
 
 # The values the platform accepts for the settings every node shares.
 STREAMING_MODES = ("all", "final")
@@ -424,6 +425,8 @@ def validate(flow, known_types: set | None = None):
         for nested_label, nested in nested_nodes(node, label):
             if not nested["type"].startswith("dynamiq.nodes."):
                 continue  # a memory backend or a connection, not a node
+            if nested["type"].startswith(HOOK_TYPE_PREFIX):
+                continue  # a hook config forbids `id`; the nodes inside it, like a detector, are still checked
             if id(nested) not in given_an_id and not str(nested.get("id") or "").strip():
                 errors.append(f"{nested_label}: needs an `id` (lowercase letters, digits, single hyphens).")
             if not str(nested.get("name") or "").strip():
