@@ -178,8 +178,14 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
         return new_params
 
     def _native_request(self, params: dict[str, Any]) -> dict[str, Any] | None:
-        """The OpenAI SDK request for `params`, or None to send them through LiteLLM."""
-        if not self.use_native_sdk:
+        """The OpenAI SDK request for `params`, or None to send them through LiteLLM.
+
+        The SDK clients are the connection's, so a call whose endpoint or key differs from it (an `api_base` or
+        `api_key` set on the node) goes through LiteLLM, which sends it where it asks.
+        """
+        if not self.use_native_sdk or self.connection is None:
+            return None
+        if (params.get("api_base"), params.get("api_key")) != (self.connection.url, self.connection.api_key):
             return None
         return _openai_sdk.build_request(params, self.MODEL_PREFIX)
 
@@ -191,7 +197,7 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
 
     async def _acall_completion(self, params: dict[str, Any]) -> Any:
         request = self._native_request(params)
-        if request is None or self.connection is None:
+        if request is None:
             return await super()._acall_completion(params)
         return await _openai_sdk.acreate(await self.get_async_client(), request)
 

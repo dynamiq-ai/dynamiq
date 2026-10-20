@@ -515,3 +515,61 @@ class TestCostReporting:
         )
         assert usage["total_tokens_cost_usd"] == pytest.approx(prompt_cost + completion_cost)
         assert usage["total_tokens_cost_usd"] > 0
+
+
+class TestRequestShapeFallbacks:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("override", [{"api_base": "https://other.test/v1"}, {"api_key": "other-key"}])
+    async def test_a_per_call_endpoint_or_key_goes_through_litellm(self, async_sdk_client, override):
+        fake = FakeOpenAI()
+        node = make_node(fake, **override)
+        node._acompletion = AsyncMock(
+            return_value=litellm.ModelResponse(choices=[{"message": {"role": "assistant", "content": "ok"}}])
+        )
+
+        with async_sdk_client(fake):
+            await node.execute_async(input_data=MagicMock(), config=RunnableConfig(callbacks=[]))
+
+        assert fake.requests == []
+        ((key, value),) = override.items()
+        assert node._acompletion.call_args.kwargs[key] == value
+
+    class RejectsStreamOptions(FakeOpenAI):
+        def handler(self, request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            if "stream_options" not in body:
+                return super().handler(request)
+            self.requests.append(body)
+            error = {
+                "message": "Unrecognized request argument supplied: stream_options",
+                "type": "invalid_request_error",
+            }
+            return httpx.Response(400, json={"error": error})
+
+    @pytest.mark.asyncio
+    async def test_an_endpoint_rejecting_stream_options_gets_streams_as_asked(self, async_sdk_client, monkeypatch):
+        monkeypatch.setattr(_openai_sdk, "_ENDPOINTS_WITHOUT_STREAM_OPTIONS", set())
+        fake = self.RejectsStreamOptions()
+        collector = Collector()
+
+        with async_sdk_client(fake):
+            for _ in range(2):
+                node = make_node(fake, streaming=StreamingConfig(enabled=True))
+                result = await node.run_async(input_data={}, config=RunnableConfig(callbacks=[collector]))
+                assert result.status == RunnableStatus.SUCCESS, result.error
+                assert result.output["content"] == "Hello"
+
+        # Rejected once, sent again as asked, and remembered for the endpoint's later streams.
+        assert ["stream_options" in r for r in fake.requests] == [True, False, False]
+        assert collector.usage["prompt_tokens"] > 0 and collector.usage["completion_tokens"] > 0
+
+    @pytest.mark.asyncio
+    async def test_an_endpoint_rejecting_stream_options_the_caller_asked_for_fails(self, async_sdk_client, monkeypatch):
+        monkeypatch.setattr(_openai_sdk, "_ENDPOINTS_WITHOUT_STREAM_OPTIONS", set())
+        fake = self.RejectsStreamOptions()
+        node = make_node(fake, streaming=StreamingConfig(enabled=True, include_usage=True))
+
+        with async_sdk_client(fake), pytest.raises(litellm.BadRequestError):
+            await node.execute_async(input_data=MagicMock(), config=RunnableConfig(callbacks=[Collector()]))
+
+        assert len(fake.requests) == 1
