@@ -57,6 +57,28 @@ def test_streaming_turned_on_without_an_event_is_sent_with_the_runtime_default()
     assert named["streaming"]["event"] == "data"
 
 
+def test_streaming_on_a_deeper_nested_node_is_sent_with_the_runtime_default():
+    from dynamiq.cli.commands.workflow import normalize_flow
+
+    agent_tool = {
+        "id": "sub-agent",
+        "type": "dynamiq.nodes.agents.Agent",
+        "llm": {"id": "sub-llm", "type": "dynamiq.nodes.llms.OpenAI", "streaming": {"enabled": True}},
+    }
+    mapped = {"id": "mapped", "type": "dynamiq.nodes.llms.OpenAI", "streaming": {"enabled": True}}
+    flow = {
+        "nodes": [
+            {"id": "helper", "type": "dynamiq.nodes.agents.Agent", "tools": [agent_tool]},
+            {"id": "map", "type": "dynamiq.nodes.operators.Map", "node": mapped},
+        ]
+    }
+
+    normalize_flow(flow)
+
+    assert agent_tool["llm"]["streaming"]["event"] == "streaming"
+    assert mapped["streaming"]["event"] == "streaming"
+
+
 def test_the_current_project_is_sent_as_project_id():
     assert form_sent_by()["project_id"] == (None, "00000000-0000-4000-8000-000000000001")
 

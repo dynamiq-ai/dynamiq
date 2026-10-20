@@ -296,6 +296,9 @@ def normalize_flow(flow, project_id: str | None = None):
         for tool in node.get("tools") or []:
             if isinstance(tool, dict):
                 fill_streaming_event(tool, note, f"node {label!r}: tool {tool.get('id') or tool.get('type', '?')}")
+        # validate checks every node nested at any depth (a Map's node, an agent tool's llm), so fill those too
+        for nested_label, nested in flowcheck.nested_nodes(node, label):
+            fill_streaming_event(nested, note, f"node {nested_label!r}")
 
     warn_tool_chained_after_agent(flow)
     return flow
