@@ -12,6 +12,7 @@ from .exa_search import ExaTool
 from .file_tools import FileListTool, FileReadTool, FileWriteTool
 from .firecrawl import FirecrawlTool
 from .firecrawl_search import FirecrawlSearchTool
+from .fxmacrodata import FXMacroDataTool
 from .http_api_call import HttpApiCall, ResponseType
 from .human_feedback import HumanFeedbackTool
 from .jina import JinaResponseFormat, JinaScrapeTool, JinaSearchTool
