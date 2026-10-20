@@ -69,13 +69,15 @@ __all__ = [
 
 
 def hook_json_schemas() -> dict[str, dict]:
-    """JSON schema of every built-in hook, keyed by its ``type``: lets a UI render a form per hook type.
+    """JSON schema of every built-in hook, keyed by its ``type`` (its import path): lets a UI render a form per hook
+    type.
 
-    Each schema describes the hook as it is written in a config, so it has the ``type`` property too."""
+    Each schema describes the hook as it is written in a config, so it has the ``type`` property too, written as a
+    node's is."""
     schemas = {}
-    for name, hook_class in sorted(HOOK_REGISTRY.items()):
+    for hook_type, hook_class in sorted({cls.import_path(): cls for cls in HOOK_REGISTRY.values()}.items()):
         schema = hook_class.model_json_schema()
-        schema["properties"] = {"type": {"const": name, "type": "string"}, **schema.get("properties", {})}
+        schema["properties"] = {"type": {"type": "string", "enum": [hook_type]}, **schema.get("properties", {})}
         schema["required"] = ["type", *schema.get("required", [])]
-        schemas[name] = schema
+        schemas[hook_type] = schema
     return schemas
