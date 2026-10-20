@@ -270,21 +270,26 @@ class ConnectionManager:
                 close_method()
 
     async def aclose(self):
-        """Close every cached connection client, awaiting async clients."""
+        """Close every cached connection client, awaiting async clients.
+
+        An async client closes through `aclose`, or through a coroutine `close` (SDK clients such as AsyncOpenAI).
+        """
         logger.debug("Async-close connection clients")
         # Closed from a snapshot: a cache hit while closing reorders the cache, which breaks iterating it.
         with self._connection_locks_guard:
             conn_clients, self.connection_clients = list(self.connection_clients.values()), {}
         for conn_client in conn_clients:
             aclose = getattr(conn_client, "aclose", None)
+            close_method = getattr(conn_client, "close", None)
+            if not callable(aclose) and inspect.iscoroutinefunction(close_method):
+                aclose = close_method
             if callable(aclose):
                 try:
                     await aclose()
                 except Exception as exc:
                     logger.warning(f"Error closing async connection client: {exc}")
                 continue
-            close_method = getattr(conn_client, "close", None)
-            if callable(close_method) and not inspect.iscoroutinefunction(close_method):
+            if callable(close_method):
                 close_method()
 
     @staticmethod

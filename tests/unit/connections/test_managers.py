@@ -3,8 +3,9 @@ import asyncio
 import httpx
 import pytest
 
-from dynamiq.connections.connections import HTTPMethod
 from dynamiq.connections.connections import Http as HttpConnection
+from dynamiq.connections.connections import HTTPMethod
+from dynamiq.connections.connections import OpenAI as OpenAIConnection
 from dynamiq.connections.connections import Whisper
 from dynamiq.connections.managers import (
     ConnectionClientInitType,
@@ -126,6 +127,17 @@ async def test_async_connection_manager_context_closes_clients():
         assert len(cm.connection_clients) == 1
 
     assert len(cm.connection_clients) == 0
+
+
+@pytest.mark.asyncio
+async def test_async_close_awaits_a_client_whose_close_is_a_coroutine():
+    """SDK clients such as AsyncOpenAI close with `async def close()` and have no `aclose`."""
+    connection = OpenAIConnection(api_key="k", url="https://api.openai.test/v1")
+
+    async with get_async_connection_manager() as cm:
+        client = await cm.get_async_connection_client(connection)
+
+    assert client.is_closed()
 
 
 @pytest.mark.asyncio
