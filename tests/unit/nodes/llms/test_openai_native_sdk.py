@@ -157,7 +157,7 @@ class TestBuildRequest:
             LOW = "low"
 
         params = {
-            "model": "openai/gpt-4o-mini",
+            "model": "openai/o3-mini",
             "messages": [{"role": "user", "content": "hi"}],
             "stream": True,
             "temperature": None,
@@ -171,11 +171,34 @@ class TestBuildRequest:
         request = _openai_sdk.build_request(params, "openai/")
 
         assert request == {
-            "model": "gpt-4o-mini",
+            "model": "o3-mini",
             "messages": [{"role": "user", "content": "hi"}],
             "stream": True,
             "reasoning_effort": "low",
         }
+
+    @pytest.mark.parametrize(
+        "model, kept",
+        [
+            ("gpt-4o-mini", {"temperature", "top_p", "presence_penalty", "frequency_penalty", "logprobs", "seed"}),
+            ("gpt-5-mini", {"seed", "reasoning_effort"}),
+            ("o3-mini", {"seed", "reasoning_effort"}),
+        ],
+    )
+    def test_drops_the_params_the_model_rejects_as_litellm_does(self, model, kept):
+        sampling = {"temperature": 0.3, "top_p": 0.9, "presence_penalty": 0.5, "frequency_penalty": 0.2}
+        params = {"model": model, "messages": [], "logprobs": True, "seed": 7, "reasoning_effort": "low"} | sampling
+
+        request = _openai_sdk.build_request(params, "openai/")
+
+        assert set(request) - {"model", "messages"} == kept
+
+    def test_keeps_request_options_out_of_the_body(self):
+        params = {"model": "gpt-4o-mini", "messages": [], "timeout": 30, "extra_headers": {"X-Trace": "1"}}
+
+        request = _openai_sdk.build_request(params, "openai/")
+
+        assert request == {"model": "gpt-4o-mini", "messages": [], "timeout": 30, "extra_headers": {"X-Trace": "1"}}
 
     @pytest.mark.parametrize(
         "extra",
@@ -573,3 +596,29 @@ class TestRequestShapeFallbacks:
             await node.execute_async(input_data=MagicMock(), config=RunnableConfig(callbacks=[Collector()]))
 
         assert len(fake.requests) == 1
+
+
+@pytest.mark.parametrize("model", ["gpt-4o-mini", "gpt-4.1", "gpt-5-mini", "o3-mini"])
+def test_sends_the_params_litellm_sends(model):
+    """With drop_params, LiteLLM drops or rewrites what a model rejects; the SDK transport must send the same body."""
+    settings = {
+        "temperature": 0.3,
+        "top_p": 0.9,
+        "presence_penalty": 0.5,
+        "frequency_penalty": 0.2,
+        "max_tokens": 50,
+        "seed": 7,
+        "stop": ["END"],
+        "logprobs": True,
+        "top_logprobs": 2,
+        "user": "u1",
+    }
+    bodies = {}
+    for native in (False, True):
+        fake = FakeOpenAI()
+        node = make_node(fake, native=native, model=model, **settings)
+        result = node.run_sync(input_data={}, config=RunnableConfig(callbacks=[]))
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        bodies[native] = fake.requests[0]
+
+    assert bodies[True] == bodies[False]
