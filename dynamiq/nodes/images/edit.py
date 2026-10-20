@@ -97,7 +97,7 @@ class ImageEdit(ConnectionNode):
     Attributes:
         FILE_PREFIX (str): Prefix for new file names. Default to "edited".
         name (str): The name of the node.
-        model (str): The model to use for image editing (e.g., 'dall-e-2', 'gpt-image-1').
+        model (str): The model to use for image editing (e.g., 'dall-e-2', 'gpt-image-2').
         connection (OpenAIConnection): The connection to the API.
         n (int): Number of edited images to generate.
         size (ImageSize | str): Size of the output images.
@@ -135,7 +135,7 @@ Examples:
 - {"prompt": "Add a sunset background behind the subject", "files": <source_image>}
 - {"prompt": "Change the shirt color to blue", "files": <source_image>, "mask": <mask_image>}
 - {"prompt": "Make the image more vibrant and colorful", "n": 3, "files": <source_image>}"""
-    model: str = "gpt-image-1"
+    model: str = "gpt-image-2"
     connection: OpenAIConnection | OpenRouterConnection | None = None
     n: int | None = None
     size: ImageSize | str = ImageSize.SIZE_1024x1024
