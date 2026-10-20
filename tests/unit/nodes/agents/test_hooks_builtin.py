@@ -1,11 +1,13 @@
 """Built-in hooks, tested directly (no agent loop)."""
 
 import time
+from typing import ClassVar
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
-from dynamiq.connections import HuggingFace, Replicate
+from dynamiq.connections import HuggingFace, Lakera, Replicate
+from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import HookAnswerException, HookStopException, ToolBlockedException
 from dynamiq.nodes.agents.hooks import (
     BlockAs,
@@ -21,6 +23,7 @@ from dynamiq.nodes.agents.hooks import (
     TransformHook,
     resolve_hook,
 )
+from dynamiq.nodes.detectors import LlamaGuardDetector, PromptInjectionDetector
 
 CTX_KEY = "0:pii"
 
@@ -260,7 +263,7 @@ class FakeDetector(PromptInjectionHook):
 
 def make_detector_hook(**kwargs):
     FakeDetector.flagged, FakeDetector.seen = ["EVIL"], []
-    return FakeDetector(detector={"connection": HuggingFace(api_key="k")}, **kwargs)
+    return FakeDetector(detector=PromptInjectionDetector(connection=HuggingFace(api_key="k")), **kwargs)
 
 
 def test_prompt_injection_checks_input_and_tool_results_including_errors():
@@ -288,16 +291,59 @@ def test_prompt_injection_detector_failure_fails_closed():
 
 def test_prompt_injection_points_and_detector_validation():
     assert make_detector_hook(on=["input"]).points() == {HookPoint.ON_INPUT}
-    with pytest.raises(ValidationError, match="llama_guard.*Replicate"):
-        PromptInjectionHook(detector={"kind": "llama_guard", "connection": HuggingFace(api_key="k")})
-    assert PromptInjectionHook(detector={"kind": "llama_guard", "connection": Replicate(api_key="k")})
-    with pytest.raises(ValidationError):
-        PromptInjectionHook(detector={"connection": HuggingFace(api_key="k"), "api_key": "k"})  # no keys in the hook
     with pytest.raises(ValidationError):
         PromptInjectionHook()
 
 
-def test_builtin_types_resolve_from_dicts():
+def test_the_earlier_kind_form_of_the_detector_still_builds_the_detector_node():
+    hook = PromptInjectionHook(detector={"kind": "llama_guard", "connection": Replicate(api_key="k")})
+    assert isinstance(hook.detector, LlamaGuardDetector)
+    hook = PromptInjectionHook(detector={"connection": HuggingFace(api_key="k"), "model": "m", "timeout": 5})
+    assert isinstance(hook.detector, PromptInjectionDetector)
+    assert (hook.detector.model, hook.detector.timeout) == ("m", 5)
+    with pytest.raises(ValidationError, match="llama_guard.*Replicate"):
+        PromptInjectionHook(detector={"kind": "llama_guard", "connection": HuggingFace(api_key="k")})
+    with pytest.raises(ValidationError):
+        PromptInjectionHook(detector={"connection": HuggingFace(api_key="k"), "api_key": "k"})  # no keys in the hook
+
+
+def test_the_detector_is_a_node_config_like_an_agents_llm():
+    hook = PromptInjectionHook(
+        detector={"type": "dynamiq.nodes.detectors.LlamaGuardDetector", "connection": Replicate(api_key="k")}
+    )
+    assert isinstance(hook.detector, LlamaGuardDetector) and not hook.detector.is_postponed_component_init
+    inline = {"type": "dynamiq.connections.Lakera", "api_key": "k"}
+    hook = PromptInjectionHook(
+        detector={"type": "dynamiq.nodes.detectors.PromptInjectionDetector", "connection": inline, "timeout": 7}
+    )
+    assert isinstance(hook.detector.connection, Lakera) and hook.detector.timeout == 7
+
+    dumped = hook.model_dump(mode="json")
+    assert dumped["type"] == "dynamiq.nodes.agents.hooks.PromptInjectionHook"
+    assert dumped["detector"]["type"] == "dynamiq.nodes.detectors.PromptInjectionDetector"
+    assert dumped["detector"]["connection"]["type"] == "dynamiq.connections.Lakera"
+    rebuilt = resolve_hook(dumped)
+    assert isinstance(rebuilt.detector, PromptInjectionDetector) and rebuilt.detector.timeout == 7
+
+
+class NoMessage(BaseModel):
+    state: str = ""
+
+
+class StateJudge(Node):
+    group: NodeGroup = NodeGroup.DETECTORS
+    input_schema: ClassVar[type[BaseModel]] = NoMessage
+
+    def execute(self, input_data, config=None, **kwargs):
+        return {"is_safe": True}
+
+
+def test_a_detector_node_has_to_take_a_message():
+    with pytest.raises(ValidationError, match="does not take a `message`"):
+        PromptInjectionHook(detector=StateJudge())
+
+
+def test_builtin_types_resolve_from_their_short_name_and_dump_their_import_path():
     for item in (
         {"type": "pii", "on": ["input"]},
         {"type": "regex", "presets": ["secrets"]},
@@ -305,7 +351,10 @@ def test_builtin_types_resolve_from_dicts():
         {"type": "call_limit", "max_per_run": 1},
         {"type": "transform", "output_transformer": {"selector": {"content": "$.content.a"}}},
     ):
-        assert resolve_hook(item).model_dump()["type"] == item["type"]
+        hook = resolve_hook(item)
+        dumped = hook.model_dump()
+        assert dumped["type"] == f"dynamiq.nodes.agents.hooks.{type(hook).__name__}"
+        assert type(resolve_hook(dumped)) is type(hook)
 
 
 class FakeResponse:
@@ -328,7 +377,8 @@ def test_prompt_injection_through_the_real_huggingface_detector_node(monkeypatch
         return FakeResponse([scores])
 
     monkeypatch.setattr(requests, "post", post)
-    hook = PromptInjectionHook(detector={"connection": HuggingFace(api_key="k")}, on_violation=BlockAs.ANSWER)
+    detector = {"type": "dynamiq.nodes.detectors.PromptInjectionDetector", "connection": HuggingFace(api_key="k")}
+    hook = PromptInjectionHook(detector=detector, on_violation=BlockAs.ANSWER)
     runner = HookRunner([hook])
     assert runner.run(HookPoint.ON_INPUT, HookContext(), "hello").value == "hello"
     with pytest.raises(HookAnswerException):
@@ -346,12 +396,29 @@ def test_prompt_injection_through_the_real_llama_guard_node(monkeypatch):
         ),
     )
     hook = PromptInjectionHook(
-        detector={"kind": "llama_guard", "connection": Replicate(api_key="k")}, on_violation=BlockAs.ANSWER
+        detector=LlamaGuardDetector(connection=Replicate(api_key="k")), on_violation=BlockAs.ANSWER
     )
     runner = HookRunner([hook])
     assert runner.run(HookPoint.ON_INPUT, HookContext(), "hello").value == "hello"
     with pytest.raises(HookAnswerException):
         runner.run(HookPoint.ON_INPUT, HookContext(), "EVIL")
+
+
+def test_the_pii_detector_node_plugs_in_as_a_detector(monkeypatch):
+    import requests
+
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda url, headers=None, json=None, timeout=None: FakeResponse(
+            [{"entity_group": "EMAIL"}] if "@" in json["inputs"] else []
+        ),
+    )
+    detector = {"type": "dynamiq.nodes.detectors.PIIDetector", "connection": HuggingFace(api_key="k")}
+    runner = HookRunner([PromptInjectionHook(detector=detector, on_violation=BlockAs.ANSWER)])
+    assert runner.run(HookPoint.ON_INPUT, HookContext(), "hello").value == "hello"
+    with pytest.raises(HookAnswerException):
+        runner.run(HookPoint.ON_INPUT, HookContext(), "mail ann@x.com")
 
 
 def test_a_detector_http_error_fails_closed(monkeypatch):
@@ -361,6 +428,19 @@ def test_a_detector_http_error_fails_closed(monkeypatch):
     hook = PromptInjectionHook(detector={"connection": HuggingFace(api_key="k")})
     with pytest.raises(HookStopException):
         HookRunner([hook]).run(HookPoint.ON_INPUT, HookContext(), "hello")
+
+
+class Shrug(Node):
+    group: NodeGroup = NodeGroup.DETECTORS
+    input_schema: ClassVar[type[BaseModel]] = PromptInjectionDetector.input_schema
+
+    def execute(self, input_data, config=None, **kwargs):
+        return {"score": 0.5}
+
+
+def test_a_detector_output_without_a_verdict_fails_closed():
+    with pytest.raises(HookStopException):
+        HookRunner([PromptInjectionHook(detector=Shrug())]).run(HookPoint.ON_INPUT, HookContext(), "hello")
 
 
 def test_transform_sets_arguments_from_the_run_context_overriding_the_model():
@@ -402,13 +482,27 @@ def test_hook_schemas_describe_the_hook_as_written_in_a_config():
     from dynamiq.nodes.agents.hooks import hook_json_schemas
 
     schemas = hook_json_schemas()
-    jsonschema.validate({"type": "pii", "entities": ["email"]}, schemas["pii"])
+    pii = "dynamiq.nodes.agents.hooks.PIIHook"
+    jsonschema.validate({"type": pii, "entities": ["email"]}, schemas[pii])
     with pytest.raises(jsonschema.ValidationError):
-        jsonschema.validate({"entities": ["email"]}, schemas["pii"])  # `type` is required
+        jsonschema.validate({"entities": ["email"]}, schemas[pii])  # `type` is required
     agent_schema = Agent._generate_json_schema(llms={}, tools=[])
-    listed = [item["properties"]["type"]["const"] for item in agent_schema["properties"]["hooks"]["items"]["anyOf"]]
-    assert listed == sorted(schemas)
-    assert "DetectorConfig" in agent_schema["$defs"]  # the shared definitions are reachable from the root
+    listed = [item["properties"]["type"]["enum"] for item in agent_schema["properties"]["hooks"]["items"]["anyOf"]]
+    assert listed == [[hook_type] for hook_type in sorted(schemas)]
+
+    detector_hook = "dynamiq.nodes.agents.hooks.PromptInjectionHook"
+    detectors = schemas[detector_hook]["properties"]["detector"]["anyOf"]
+    assert [item["properties"]["type"]["enum"] for item in detectors] == [
+        ["dynamiq.nodes.detectors.PromptInjectionDetector"],
+        ["dynamiq.nodes.detectors.LlamaGuardDetector"],
+        ["dynamiq.nodes.detectors.PIIDetector"],
+    ]
+    config = {
+        "type": detector_hook,
+        "detector": {"type": "dynamiq.nodes.detectors.PromptInjectionDetector", "model": "m", "timeout": 5},
+    }
+    hooks_schema = {"$defs": agent_schema.get("$defs", {}), **agent_schema["properties"]["hooks"]}
+    jsonschema.validate([config], hooks_schema)  # every $ref resolves from the agent schema's root
 
 
 def test_a_detector_is_called_once_per_text_with_the_whole_tool_result():

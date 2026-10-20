@@ -1,11 +1,12 @@
-"""Built-in hooks, registered under short names for YAML and UI use.
+"""Built-in hooks. A config names one by its import path (``type: dynamiq.nodes.agents.hooks.PIIHook``) or by the
+short name it is registered under (``type: pii``).
 
-transform         JSONPath rewrite of tool input (merged into the model's arguments) and of tool output.
-tool_policy       deny a tool, allow it only for matching users, or ask a human to approve each call.
-call_limit        at most N calls per run.
-regex             block or mask regex matches, with presets.
-pii               detect, mask and restore PII with numbered placeholders.
-prompt_injection  prompt-injection check of the user input and of tool results through a detector connection.
+TransformHook        transform         JSONPath rewrite of tool input (merged into the model's arguments) and output.
+ToolPolicyHook       tool_policy       deny a tool, allow it only for matching users, or have a human approve each call.
+CallLimitHook        call_limit        at most N calls per run.
+RegexHook            regex             block or mask regex matches, with presets.
+PIIHook              pii               detect, mask and restore PII with numbered placeholders.
+PromptInjectionHook  prompt_injection  check the user input and tool results with a detector node.
 """
 
 import copy
@@ -17,13 +18,13 @@ import threading
 from collections import OrderedDict
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 import regex
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_serializer, field_validator, model_validator
 
-from dynamiq.connections import HuggingFace, Lakera, Replicate
+from dynamiq.connections import BaseConnection, HuggingFace, Lakera, Replicate
 from dynamiq.nodes.agents.hooks.core import (
     ALLOW,
     Ask,
@@ -40,7 +41,7 @@ from dynamiq.nodes.agents.hooks.core import (
     sanitize_tool_name,
 )
 from dynamiq.nodes.agents.utils import decode_text_payload
-from dynamiq.nodes.detectors import LlamaGuardDetector, PromptInjectionDetector
+from dynamiq.nodes.detectors import LlamaGuardDetector, PIIDetector, PromptInjectionDetector
 from dynamiq.nodes.node import InputTransformer, Node, OutputTransformer
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -708,8 +709,12 @@ class PIIHook(TextGuardHook):
         return Modify(value) if value != answer else ALLOW
 
 
+DETECTOR_NODES = (PromptInjectionDetector, LlamaGuardDetector, PIIDetector)
+
+
 class DetectorConfig(BaseModel):
-    """The detector node to use and the workflow connection it talks through (no API key in the hook)."""
+    """The earlier way to write a ``detector``: a ``kind`` and the connection, still accepted and built into the
+    detector node (``prompt_injection``: ``PromptInjectionDetector``, ``llama_guard``: ``LlamaGuardDetector``)."""
 
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
@@ -740,46 +745,110 @@ class DetectorConfig(BaseModel):
             )
         return self
 
+    def node(self) -> LlamaGuardDetector | PromptInjectionDetector:
+        node_class = LlamaGuardDetector if self.kind == "llama_guard" else PromptInjectionDetector
+        options = self.model_dump(include={"model", "timeout"}, exclude_none=True)
+        return node_class(connection=self.connection, **options)
+
+
+def _inline_defs(schema: dict) -> dict:
+    """``schema`` with the ``$ref``s to its own ``$defs`` replaced by the definitions, so it can be nested anywhere."""
+    definitions = schema.pop("$defs", {})
+
+    def inline(value):
+        if isinstance(value, dict):
+            if (ref := value.get("$ref", "")).startswith("#/$defs/"):
+                siblings = {key: item for key, item in value.items() if key != "$ref"}
+                return {**inline(definitions[ref.rpartition("/")[2]]), **siblings}
+            return {key: inline(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [inline(item) for item in value]
+        return value
+
+    return inline(schema)
+
+
+class _DetectorNodeSchema:
+    """JSON schema of ``detector``: one of ``DETECTOR_NODES``, written as a node config, like an agent's ``llm``."""
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, core_schema, handler) -> dict:
+        nodes = [_inline_defs(node._generate_json_schema(fields=["model", "timeout"])) for node in DETECTOR_NODES]
+        return {"anyOf": [{"type": "object", **schema} for schema in nodes]}
+
+
+def build_detector_node(data: dict) -> Node:
+    """A detector node from its config, built as the YAML loader builds a node. ``connection`` is an inline config
+    or a connection instance."""
+    from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
+
+    data, connections = dict(data), {}
+    if isinstance(connection := data.get("connection"), BaseConnection):
+        connections[connection.id], data["connection"] = connection, connection.id
+    return WorkflowYAMLLoader.get_updated_node_init_data_with_initialized_nodes(
+        {"detector": data}, nodes={}, flows={}, connections=connections, prompts={}, registry={}, init_components=True
+    )["detector"]
+
 
 @register_hook("prompt_injection")
 class PromptInjectionHook(GuardHook):
-    """Check the user's input and tool results (failed calls included) with a hosted detector.
+    """Check the user's input and tool results (failed calls included) with a detector node.
 
-    ``detector.connection`` references a connection of the workflow (``connection: lakera-conn``). A detector that
-    errors fails per ``on_error`` (closed by default). Each message and each tool result is checked once, as one text
-    (several detector calls only when it is longer than ``max_chars``). The detector sees the text after the masking
-    hooks (``pii``) ran, whatever the order of the list.
+    ``detector`` is written as a node config, like an agent's ``llm``: ``type`` is the node
+    (``dynamiq.nodes.detectors.PromptInjectionDetector``, ``LlamaGuardDetector`` or ``PIIDetector``, or any node that
+    takes a ``message``) and ``connection`` references a connection of the workflow (``connection: lakera-conn``).
+    The earlier ``kind``/``connection`` form still loads. A detector that errors fails per ``on_error`` (closed by
+    default). Each message and each tool result is checked once, as one text (several detector calls only when it is
+    longer than ``max_chars``). The detector sees the text after the masking hooks (``pii``) ran, whatever the order
+    of the list.
     """
 
     message: str = "Potential prompt injection detected; the content was withheld."
-    detector: DetectorConfig
+    detector: Annotated[Node, _DetectorNodeSchema]
     on: list[Literal["input", "tool_result"]] = Field(default_factory=lambda: ["input", "tool_result"], min_length=1)
     max_chars: int = Field(default=20000, gt=0, description="The longest text sent to the detector in one call.")
 
-    _node: LlamaGuardDetector | PromptInjectionDetector | None = PrivateAttr(default=None)
+    @field_validator("detector", mode="before")
+    @classmethod
+    def _build_detector(cls, value):
+        if isinstance(value, DetectorConfig):
+            return value.node()
+        if isinstance(value, dict):
+            return build_detector_node(value) if value.get("type") else DetectorConfig.model_validate(value).node()
+        return value
+
+    @field_validator("detector")
+    @classmethod
+    def _detector_takes_a_message(cls, value: Node):
+        input_schema = getattr(value, "input_schema", None)
+        if input_schema is None or "message" not in input_schema.model_fields:
+            raise ValueError(f"detector {value.type} does not take a `message`; use a detector node")
+        return value
+
+    @field_serializer("detector")
+    def _dump_detector(self, detector: Node) -> dict:
+        return detector.to_dict()
 
     def points(self) -> set[HookPoint]:
         return {_RUN_POINTS[name] for name in self.on}
-
-    def _detector_node(self) -> LlamaGuardDetector | PromptInjectionDetector:
-        if self._node is None:
-            node_class = LlamaGuardDetector if self.detector.kind == "llama_guard" else PromptInjectionDetector
-            options = self.detector.model_dump(include={"model", "timeout"}, exclude_none=True)
-            self._node = node_class(connection=self.detector.connection, **options)
-        return self._node
 
     def order(self, point: HookPoint) -> int:
         return 1
 
     def detect(self, ctx: HookContext, text: str) -> bool:
-        """Whether the detector flags ``text``. Override to plug another detector."""
+        """Whether the detector flags ``text``. Override to plug in a detector that is not a node."""
         config = ctx.config or RunnableConfig(callbacks=[])
         options = {"parent_run_id": ctx.run_id} if ctx.run_id else {}
-        result = self._detector_node().run_sync(input_data={"message": text}, config=config, **options)
+        result = self.detector.run_sync(input_data={"message": text}, config=config, **options)
         if result.status != RunnableStatus.SUCCESS:
             raise RuntimeError(f"detector failed: {result.error.message if result.error else result.status}")
         output = result.output or {}
-        return bool(output["prompt_detected"]) if "prompt_detected" in output else output.get("is_safe") is False
+        for flag in ("prompt_detected", "is_detected"):
+            if flag in output:
+                return bool(output[flag])
+        if "is_safe" in output:
+            return output["is_safe"] is False
+        raise ValueError(f"detector output has no verdict (prompt_detected, is_detected or is_safe): {sorted(output)}")
 
     def _batches(self, value: Any) -> Iterator[str]:
         """All the text of ``value`` joined, cut into pieces of at most ``max_chars``."""
