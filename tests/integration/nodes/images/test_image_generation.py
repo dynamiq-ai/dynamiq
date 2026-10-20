@@ -270,3 +270,24 @@ def test_image_generation_optimized_for_agents_with_tracing(
     assert "## Generated Images" in content
     assert "Created:" in content
     assert "Files Generated" in content
+
+
+def test_image_generation_default_model(mock_image_generation_executor, mock_requests_get):
+    """Test that the default model is one OpenAI still serves (gpt-image-1 shuts down on 2026-10-23)."""
+    openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")
+
+    image_node = ImageGeneration(connection=openai_connection)
+
+    wf = Workflow(
+        id=str(uuid.uuid4()),
+        flow=Flow(nodes=[image_node]),
+    )
+
+    response = wf.run(
+        input_data={"prompt": "A beautiful sunset over mountains"},
+        config=RunnableConfig(callbacks=[]),
+    )
+
+    assert response.status == RunnableStatus.SUCCESS
+    call_kwargs = mock_image_generation_executor.call_args[1]
+    assert call_kwargs["model"] == "gpt-image-2"
