@@ -912,7 +912,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         self._prompt.messages.append(
                             Message(
                                 role=MessageRole.ASSISTANT,
-                                content=f"Calling: {called_names}",
+                                content=llm_generated_output or f"Calling: {called_names}",
+                                reasoning_content=llm_result.output.get("reasoning_content"),
+                                thinking_blocks=llm_result.output.get("thinking_blocks"),
                                 tool_calls=payload,
                                 static=True,
                             )

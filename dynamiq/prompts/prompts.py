@@ -76,6 +76,8 @@ class Message(BaseModel):
     """
 
     content: str
+    reasoning_content: str | None = None
+    thinking_blocks: list[dict[str, Any]] | None = None
     role: MessageRole = MessageRole.USER
     metadata: dict | None = None
     static: bool = Field(default=False, exclude=True)
@@ -97,16 +99,18 @@ class Message(BaseModel):
             role=self.role,
             content=self._Template(self.content).render(**kwargs),
             tool_calls=self.tool_calls,
+            reasoning_content=self.reasoning_content,
+            thinking_blocks=self.thinking_blocks,
             tool_call_id=self.tool_call_id,
             name=self.name,
         )
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler):
-        # FC-only fields stay out of the dump shape unless explicitly set,
-        # so non-FC consumers see the same dict shape as before these fields existed.
+        # Optional protocol fields stay out of the dump shape unless set,
+        # so ordinary messages retain their existing serialized shape.
         data = handler(self)
-        for key in ("tool_calls", "tool_call_id", "name"):
+        for key in ("tool_calls", "tool_call_id", "name", "reasoning_content", "thinking_blocks"):
             if data.get(key) is None:
                 data.pop(key, None)
         return data
@@ -120,6 +124,10 @@ class Message(BaseModel):
         }
         if self.tool_calls is not None:
             data["tool_calls"] = self.tool_calls
+        if self.reasoning_content is not None:
+            data["reasoning_content"] = self.reasoning_content
+        if self.thinking_blocks is not None:
+            data["thinking_blocks"] = self.thinking_blocks
         if self.tool_call_id is not None:
             data["tool_call_id"] = self.tool_call_id
         if self.name is not None:
@@ -137,6 +145,8 @@ class Message(BaseModel):
             role=MessageRole(data["role"]),
             static=data.get("static", False),
             tool_calls=data.get("tool_calls"),
+            reasoning_content=data.get("reasoning_content"),
+            thinking_blocks=data.get("thinking_blocks"),
             tool_call_id=data.get("tool_call_id"),
             name=data.get("name"),
             metadata=data.get("metadata"),
