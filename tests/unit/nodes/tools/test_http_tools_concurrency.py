@@ -15,12 +15,12 @@ from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
 from dynamiq.nodes.tools.firecrawl_search import FirecrawlSearchTool
 from dynamiq.nodes.tools.jina import JinaScrapeTool, JinaSearchTool
+from dynamiq.nodes.tools.linkup_search import LinkupTool
 from dynamiq.nodes.tools.pipedream import Pipedream
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.nodes.tools.tavily import TavilyTool
 from dynamiq.nodes.tools.zenrows import ZenRowsTool
 from tests.helpers.async_node import assert_concurrent_execution
-
 
 SLEEP_S = 0.05
 N_CALLS = 10
@@ -68,6 +68,12 @@ def _make_slow_async_client(json_payload):
         (
             lambda: ExaTool(connection=connections.Exa(api_key="k")),
             ExaTool,
+            {"query": "q"},
+            {"results": []},
+        ),
+        (
+            lambda: LinkupTool(connection=connections.Linkup(api_key="k")),
+            LinkupTool,
             {"query": "q"},
             {"results": []},
         ),
@@ -124,6 +130,7 @@ def _make_slow_async_client(json_payload):
         "http_api_call",
         "tavily",
         "exa_search",
+        "linkup_search",
         "scale_serp",
         "zenrows",
         "firecrawl",
