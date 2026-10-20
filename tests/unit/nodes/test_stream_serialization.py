@@ -78,21 +78,24 @@ def test_a_scope_serializes_once_per_node_and_tracing_mode(node, to_dict_calls):
     assert tracing.events[0] == node.to_dict(for_tracing=True)
 
 
-def test_a_callback_editing_its_dict_does_not_change_the_next_event(node):
-    class Popper(BaseCallbackHandler):
+def test_a_callback_editing_its_dict_at_any_depth_does_not_change_what_others_receive(node):
+    class Editor(BaseCallbackHandler):
         def __init__(self):
-            self.ids = []
+            self.seen = []
 
         def on_node_execute_stream(self, serialized, chunk=None, **kwargs):
-            self.ids.append(serialized.pop("id"))
+            self.seen.append((serialized.pop("id"), serialized["streaming"]["event"], len(serialized["depends"])))
+            serialized["streaming"]["event"] = "edited"
+            serialized["depends"].append({"node": "edited"})
 
-    popper = Popper()
+    first, second = Editor(), Editor()
 
     with stream_serialization_scope():
-        node.run_on_node_execute_stream([popper], {})
-        node.run_on_node_execute_stream([popper], {})
+        node.run_on_node_execute_stream([first, second], {})
+        node.run_on_node_execute_stream([first, second], {})
 
-    assert popper.ids == [node.id, node.id]
+    fresh = (node.id, node.streaming.event, len(node.depends))
+    assert first.seen == second.seen == [fresh, fresh]
 
 
 @pytest.mark.asyncio
