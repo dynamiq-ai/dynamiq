@@ -25,7 +25,7 @@ from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.llms._fc_sanitization import sanitize_fc_messages
 from dynamiq.nodes.llms.registry import model_registry
 from dynamiq.nodes.llms.utils import litellm_video_input_flag
-from dynamiq.nodes.node import ConnectionNode, NodeDependency, ensure_config
+from dynamiq.nodes.node import ConnectionNode, NodeDependency, ensure_config, stream_serialization_scope
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
@@ -731,16 +731,17 @@ class BaseLLM(ConnectionNode):
         # A stream forced by a streaming-only model is transport: its chunks are not for clients.
         emit_chunks = self.streaming.enabled
         try:
-            for chunk in response:
-                check_cancellation(config)
-                chunks.append(chunk)
+            with stream_serialization_scope():
+                for chunk in response:
+                    check_cancellation(config)
+                    chunks.append(chunk)
 
-                if emit_chunks:
-                    self.run_on_node_execute_stream(
-                        config.callbacks,
-                        chunk.model_dump(),
-                        **kwargs,
-                    )
+                    if emit_chunks:
+                        self.run_on_node_execute_stream(
+                            config.callbacks,
+                            chunk.model_dump(),
+                            **kwargs,
+                        )
         finally:
             self._close_stream(response)
 
@@ -769,15 +770,16 @@ class BaseLLM(ConnectionNode):
         # A stream forced by a streaming-only model is transport: its chunks are not for clients.
         emit_chunks = self.streaming.enabled
         try:
-            async for chunk in response:
-                check_cancellation(config)
-                chunks.append(chunk)
-                if emit_chunks:
-                    self.run_on_node_execute_stream(
-                        config.callbacks,
-                        chunk.model_dump(),
-                        **kwargs,
-                    )
+            with stream_serialization_scope():
+                async for chunk in response:
+                    check_cancellation(config)
+                    chunks.append(chunk)
+                    if emit_chunks:
+                        self.run_on_node_execute_stream(
+                            config.callbacks,
+                            chunk.model_dump(),
+                            **kwargs,
+                        )
         finally:
             await self._aclose_stream(response)
 

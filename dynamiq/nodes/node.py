@@ -108,6 +108,28 @@ def ensure_config(config: RunnableConfig = None) -> RunnableConfig:
     return config
 
 
+# Node serializations reused by `run_on_node_execute_stream` inside `stream_serialization_scope`, keyed by
+# (id(node), for_tracing). A context variable, so concurrent streams on other tasks or threads never share one.
+_stream_serializations: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "dynamiq_stream_serializations", default=None
+)
+
+
+@contextmanager
+def stream_serialization_scope() -> Iterator[None]:
+    """Serialize each node once for all the stream events emitted inside the block.
+
+    Every stream event hands its callbacks the emitting node's `to_dict()`, and a token stream emits one event per
+    token. Inside this block the first event's serialization is reused for the rest. Wrap only stretches in which no
+    emitting node changes a serialized field, such as one LLM response stream.
+    """
+    token = _stream_serializations.set({})
+    try:
+        yield
+    finally:
+        _stream_serializations.reset(token)
+
+
 # retry waits are spread by this fraction so nodes failing together do not all wake at once
 RETRY_JITTER_RATIO = 0.1
 
@@ -2249,20 +2271,39 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         """
         Run callbacks on node execute stream.
 
+        Callbacks that keep the no-op `on_node_execute_stream` of `BaseCallbackHandler` (tracing, for one) are
+        skipped, so the node is not serialized for them. Inside `stream_serialization_scope` the node is serialized
+        once for the whole scope rather than once per event.
+
         Args:
             callbacks (list[BaseCallbackHandler]): List of callback handlers.
             chunk (dict[str, Any]): Chunk of streaming data.
             **kwargs: Additional keyword arguments.
         """
+        serializations = _stream_serializations.get()
         for callback in callbacks + self.callbacks:
+            if getattr(type(callback), "on_node_execute_stream", None) is BaseCallbackHandler.on_node_execute_stream:
+                continue
             try:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                if for_tracing:
                     chunk = chunk.to_dict(for_tracing=True) if hasattr(chunk, "to_dict") else chunk
-                callback.on_node_execute_stream(self.to_dict(**dict_kwargs), chunk, **kwargs)
+                serialized = self._stream_serialization(serializations, for_tracing)
+                callback.on_node_execute_stream(serialized, chunk, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
+
+    def _stream_serialization(self, serializations: dict | None, for_tracing: bool) -> dict:
+        """The node's `to_dict()` for a stream event, reused from `serializations` when a scope provides it."""
+        dict_kwargs = {"for_tracing": True} if for_tracing else {}
+        if serializations is None:
+            return self.to_dict(**dict_kwargs)
+        key = (id(self), for_tracing)
+        if (entry := serializations.get(key)) is None:
+            # The entry holds the node too, so its id cannot be reused by another node while the scope lives.
+            entry = serializations[key] = (self, self.to_dict(**dict_kwargs))
+        # A top-level copy per event: a callback that edits its dict cannot change what the next one receives.
+        return dict(entry[1])
 
     @abstractmethod
     def execute(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs) -> Any:
