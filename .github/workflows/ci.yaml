@@ -13,14 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Create .env file on push or internal PR
         if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
-        uses: SpicyPizza/create-envfile@v2.0
+        uses: SpicyPizza/create-envfile@v2
         with:
           envkey_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           envkey_UNSTRUCTURED_API_KEY: ${{ secrets.UNSTRUCTURED_API_KEY }}
@@ -34,24 +34,52 @@ jobs:
 
       - name: Create .env file on fork PR
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-        uses: SpicyPizza/create-envfile@v2.0
+        uses: SpicyPizza/create-envfile@v2
 
       - name: Build
-        uses: docker/bake-action@v5
+        uses: docker/bake-action@v7
         with:
+          source: .
           set: |
             *.cache-from=type=gha
             *.cache-to=type=gha,mode=max
+          targets: dynamiq-app
+
+  # The jobs above build the image on the Dockerfile's default Python (3.13). This builds it on 3.14 too, so the
+  # PYTHON_VERSION build argument is exercised there. Its own cache scope keeps it from evicting the 3.13 layers.
+  build-python-3-14:
+    name: build (Python 3.14)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # docker-compose.yaml names .env as an env_file, so bake needs the file to exist; building needs no secrets.
+      - name: Create an empty .env file
+        run: touch .env
+
+      - name: Build
+        uses: docker/bake-action@v7
+        with:
+          source: .
+          set: |
+            *.args.PYTHON_VERSION=3.14.8
+            *.cache-from=type=gha,scope=python-3.14
+            *.cache-to=type=gha,mode=max,scope=python-3.14
           targets: dynamiq-app
 
   lint:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -66,7 +94,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Loading the test image back into the daemon costs ~50s of tarball export/import against the
       # legacy overlay2 store. The containerd store takes the layers directly. Must precede buildx,
@@ -77,11 +105,11 @@ jobs:
           sudo systemctl restart docker
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Create .env file on push or internal PR
         if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
-        uses: SpicyPizza/create-envfile@v2.0
+        uses: SpicyPizza/create-envfile@v2
         with:
           envkey_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           envkey_UNSTRUCTURED_API_KEY: ${{ secrets.UNSTRUCTURED_API_KEY }}
@@ -96,11 +124,12 @@ jobs:
 
       - name: Create .env file on fork PR
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-        uses: SpicyPizza/create-envfile@v2.0
+        uses: SpicyPizza/create-envfile@v2
 
       - name: Load Image
-        uses: docker/bake-action@v5
+        uses: docker/bake-action@v7
         with:
+          source: .
           load: true
           set: |
             *.cache-from=type=gha
@@ -115,7 +144,7 @@ jobs:
         if: ${{ github.event_name == 'pull_request' }}
         run: docker compose up dynamiq-app-test-cov-exclude-integration-with-creds --exit-code-from dynamiq-app-test-cov-exclude-integration-with-creds
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage_report
           path: ./reports
@@ -130,13 +159,13 @@ jobs:
       checks: write
       pull-requests: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: coverage_report
           path: reports
 
       - name: Produce the coverage report on push or internal PR
-        uses: MishaKav/pytest-coverage-comment@main
+        uses: MishaKav/pytest-coverage-comment@v1
         with:
           pytest-xml-coverage-path: ./reports/coverage.xml
           junitxml-path: ./reports/test-results.xml
@@ -144,21 +173,49 @@ jobs:
           xml-skip-covered: true
           remove-links-to-lines: true
 
+  # The test job runs the suite in the Docker image, on the image's Python (3.13), and reports coverage. This runs the
+  # same tests, minus the ones needing credentials, on every other supported Python.
+  test-python-versions:
+    name: test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.14"]
+    env:
+      # Wins over the repository's .python-version (3.13) for every uv command below.
+      UV_PYTHON: ${{ matrix.python-version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: "0.11.24"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run tests
+        run: uv run --frozen pytest tests --ignore=tests/integration_with_creds -m "not smoke" -n auto --dist worksteal
+
   build-mkdocs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "0.11.24"
 
@@ -176,15 +233,15 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "0.11.24"
 

@@ -41,6 +41,7 @@ from dynamiq.nodes.types import DerivedValue, NamedField, Rule, RuleMissingPolic
 from dynamiq.nodes.utils import Input, Output
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
+from tests.integration.nodes.operators.conftest import calendar_reason
 
 LENDING = ("loan", "appraisal", "limits", "rates")
 LIMIT = ("limit", "limits[loan.program]")
@@ -536,7 +537,7 @@ HELD = {
     "impossible-date-beside-missing-data": Held(
         lambda **policy: screening("date(doc.issued) <= date(doc.due)", inputs=("doc",), **policy),
         {"doc": {"issued": "2026-02-30"}},
-        "check could not be evaluated: not a date: '2026-02-30' (day is out of range for month)",
+        f"check could not be evaluated: not a date: '2026-02-30' ({calendar_reason(2026, 2, 30)})",
     ),
     "unreadable-date-in-days-between": Held(
         lambda **policy: screening("days_between(doc.opened, doc.closed) <= 30", inputs=("doc",), **policy),

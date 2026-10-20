@@ -126,7 +126,8 @@ _agent_hook_contexts: ContextVar[dict[int, HookContext]] = ContextVar("agent_hoo
 _hold_answer_stream: ContextVar[bool] = ContextVar("dynamiq_agent_hold_answer_stream", default=False)
 
 
-def _approval_lock_for(approver: "Node", config: RunnableConfig | None) -> threading.Lock | None:
+# Quoted: before Python 3.13 `threading.Lock` is a function, and `threading.Lock | None` raises when evaluated.
+def _approval_lock_for(approver: "Node", config: RunnableConfig | None) -> "threading.Lock | None":
     """The lock of the input stream the approvals go through, shared by every run that uses the stream (Map items,
     sub-agents); ``None`` for a run without one (the console: each run keeps its own lock)."""
     streaming = getattr(getattr(config, "nodes_override", {}).get(approver.id), "streaming", None) or approver.streaming

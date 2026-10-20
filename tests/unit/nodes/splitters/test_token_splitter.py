@@ -99,3 +99,31 @@ def test_token_splitter_node_accepts_special_token_sets():
 
     assert kwargs["allowed_special"] == {"<|endoftext|>"}
     assert kwargs["disallowed_special"] == {"<|fim_prefix|>"}
+
+
+@pytest.mark.parametrize("chunk_size", [1, 3, 5, 7])
+@pytest.mark.parametrize("chunk_overlap", [0, 1, 2])
+def test_token_splitter_chunks_never_contain_replacement_character(chunk_size, chunk_overlap):
+    text = "你好世界，这是一个测试句子。😀😀😀😀 émoji"
+    splitter = TokenSplitterComponent(chunk_size=chunk_size, chunk_overlap=min(chunk_overlap, chunk_size - 1))
+
+    spans = splitter._split_text_with_offsets(text)
+
+    assert spans
+    for chunk, start_index, end_index in spans:
+        assert "\ufffd" not in chunk
+        assert chunk == text[start_index:end_index]
+    assert spans[0][1] == 0
+    assert spans[-1][2] == len(text)
+    assert set().union(*(range(start, end) for _, start, end in spans)) == set(range(len(text)))
+
+
+def test_token_splitter_keeps_replacement_character_from_source():
+    text = "a\ufffdb 😀😀 c\ufffdd"
+    splitter = TokenSplitterComponent(chunk_size=3, chunk_overlap=1)
+
+    spans = splitter._split_text_with_offsets(text)
+
+    assert "\ufffd" in "".join(chunk for chunk, _, _ in spans)
+    for chunk, start_index, end_index in spans:
+        assert chunk == text[start_index:end_index]

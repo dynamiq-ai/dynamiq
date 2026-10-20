@@ -1,5 +1,6 @@
 """Composite memory store: several memories behind one interface, routed by path prefix."""
 
+import builtins
 import os
 import posixpath
 from typing import Any
@@ -131,11 +132,11 @@ class CompositeMemoryStore(MemoryStore):
         return self.routes[match], normalized[len(match) :], match
 
     @staticmethod
-    def _mounted(route: str, entries: list[MemoryEntry]) -> list[MemoryEntry]:
+    def _mounted(route: str, entries: builtins.list[MemoryEntry]) -> builtins.list[MemoryEntry]:
         """Put the mount point back on paths coming out of a store."""
         return [entry.model_copy(update={"path": f"{route}{entry.path}"}) for entry in entries]
 
-    def list(self, prefix: str = "", user_id: str | None = None) -> list[MemoryEntry]:
+    def list(self, prefix: str = "", user_id: str | None = None) -> builtins.list[MemoryEntry]:
         """List memories under ``prefix``: the route it falls inside, plus every route at or below it.
 
         Both must answer, or a nested route's memories are missing from a listing of their own

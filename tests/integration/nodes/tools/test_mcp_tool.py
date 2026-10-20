@@ -29,6 +29,11 @@ from dynamiq.nodes.tools.mcp import (
 )
 from dynamiq.nodes.types import InputParamMode
 
+try:  # Python 3.11+ exposes ExceptionGroup as a builtin
+    from builtins import ExceptionGroup
+except ImportError:  # Python 3.10 relies on the backport (a transitive dependency of anyio/mcp)
+    from exceptiongroup import ExceptionGroup
+
 
 def assert_tool_matches(tool, expected, connection):
     assert tool.name == expected["name"]
