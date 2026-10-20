@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 import io
 import threading
 from typing import Any, ClassVar, Coroutine, Literal
@@ -45,6 +44,7 @@ from dynamiq.nodes.tools.cua_desktop.types import (
 from dynamiq.nodes.tools.utils import sanitize_filename
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
+from dynamiq.utils import is_coroutine_function
 from dynamiq.utils.logger import logger
 
 ACTION_SCHEMA_MAP: dict[CuaAction, type] = {
@@ -824,7 +824,7 @@ class CuaDesktopTool(ConnectionNode):
                 try:
                     if hasattr(self._computer, "stop"):
                         stop_method = getattr(self._computer, "stop")
-                        if inspect.iscoroutinefunction(stop_method):
+                        if is_coroutine_function(stop_method):
                             # Method is async, run it in the event loop
                             if self._loop and not self._loop.is_closed():
                                 future = asyncio.run_coroutine_threadsafe(stop_method(), self._loop)
