@@ -432,3 +432,24 @@ def test_image_edit_preserves_original_filename(
     output_file = node_output["output"]["files"][0]
     assert hasattr(output_file, "name")
     assert "edited_image.png" in output_file.name
+
+
+def test_image_edit_default_model(mock_image_file, mock_image_edit_executor, mock_requests_get):
+    """Test that the default model is one OpenAI still serves (gpt-image-1 shuts down on 2026-10-23)."""
+    openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")
+
+    node = ImageEdit(connection=openai_connection)
+
+    wf = Workflow(
+        id=str(uuid.uuid4()),
+        flow=Flow(nodes=[node]),
+    )
+
+    response = wf.run(
+        input_data={"prompt": "Add a sunset background", "files": mock_image_file},
+        config=RunnableConfig(callbacks=[]),
+    )
+
+    assert response.status == RunnableStatus.SUCCESS
+    call_kwargs = mock_image_edit_executor.call_args[1]
+    assert call_kwargs["model"] == "gpt-image-2"

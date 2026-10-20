@@ -25,6 +25,7 @@ DATETIME = "datetime"
 UUID = "uuid"
 
 _SCALAR_TYPES = {STRING, INT, UINT, FLOAT, BOOL, DATETIME, UUID}
+_NUMERIC_TYPES = {INT, UINT, FLOAT}
 
 
 def is_array_type(attribute_type: str | None) -> bool:
@@ -33,6 +34,13 @@ def is_array_type(attribute_type: str | None) -> bool:
 
 def element_type(attribute_type: str) -> str:
     return attribute_type[2:]
+
+
+def is_numeric_type(attribute_type: str | None) -> bool:
+    """Return whether an attribute holds numbers, which Turbopuffer types as int unless declared."""
+    if is_array_type(attribute_type):
+        attribute_type = element_type(attribute_type)
+    return attribute_type in _NUMERIC_TYPES
 
 
 def _json_dumps(value: Any) -> str:

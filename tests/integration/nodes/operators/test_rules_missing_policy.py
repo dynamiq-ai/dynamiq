@@ -26,7 +26,6 @@ import textwrap
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import date
 from typing import Callable, NamedTuple
 
 import pytest
@@ -42,20 +41,12 @@ from dynamiq.nodes.types import DerivedValue, NamedField, Rule, RuleMissingPolic
 from dynamiq.nodes.utils import Input, Output
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
+from tests.integration.nodes.operators.conftest import calendar_reason
 
 LENDING = ("loan", "appraisal", "limits", "rates")
 LIMIT = ("limit", "limits[loan.program]")
 LTV = ("ltv", "loan.amount / appraisal.value")
 LIMITS = {"standard": 500000}
-
-
-def calendar_reason(year: int, month: int, day: int) -> str:
-    """Python's reason for refusing a day the calendar lacks, which Python 3.14 reworded."""
-    try:
-        date(year, month, day)
-    except ValueError as e:
-        return str(e)
-    raise AssertionError(f"{year}-{month}-{day} is a day of the calendar")
 
 
 def run(node: Rules, data: dict) -> dict:
