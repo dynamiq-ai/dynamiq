@@ -65,15 +65,28 @@ class CustomLLM(BaseLLM):
         if self.provider_prefix == "anthropic" and self._is_official_minimax_route(
             urlsplit(self.connection.url), self.provider_prefix, model
         ):
-            # LiteLLM 1.103 emits complete signed snapshots as well as text deltas.
-            # Its builder concatenates both, invalidating signed thinking on replay.
-            blocks = [
-                deepcopy(block)
-                for chunk in chunks
-                for choice in chunk.choices
-                for block in (getattr(choice.delta, "thinking_blocks", None) or [])
-                if block.get("signature") or block.get("type") == "redacted_thinking"
-            ]
+            # LiteLLM 1.103 repeats the completed thought on each signature
+            # fragment. Join consecutive signature fragments, not their snapshots.
+            # A new thinking delta starts a distinct block, even with identical text.
+            blocks = []
+            signed_block = None
+            for chunk in chunks:
+                for choice in chunk.choices:
+                    delta = choice.delta
+                    if delta.content or delta.tool_calls:
+                        signed_block = None
+                    for block in getattr(delta, "thinking_blocks", None) or []:
+                        if block.get("type") == "redacted_thinking":
+                            blocks.append(deepcopy(block))
+                            signed_block = None
+                        elif block.get("signature"):
+                            if signed_block is None:
+                                signed_block = deepcopy(block)
+                                blocks.append(signed_block)
+                            else:
+                                signed_block["signature"] += block["signature"]
+                        else:
+                            signed_block = None
             if blocks:
                 response.choices[0].message.thinking_blocks = blocks
         return response

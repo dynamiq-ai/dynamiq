@@ -1,5 +1,6 @@
 """Real SDK parsing, agent history and subsequent HTTP serialization, without network."""
 
+import asyncio
 import json
 from copy import deepcopy
 
@@ -67,16 +68,22 @@ def response_body(body, tools):
     }
 
 
-def stream_body(response, protocol):
+def stream_body(response, protocol, split_signature=False):
     if protocol == "anthropic":
         events = [{"type": "message_start", "message": {**response, "content": [], "stop_reason": None}}]
         for index, block in enumerate(response["content"]):
             if block["type"] == "thinking":
                 start = {"type": "thinking", "thinking": "", "signature": ""}
                 deltas = [
-                    {"type": "thinking_delta", "thinking": REASONING},
-                    {"type": "signature_delta", "signature": SIGNATURE},
+                    {"type": "thinking_delta", "thinking": block["thinking"][:8]},
+                    {"type": "thinking_delta", "thinking": block["thinking"][8:]},
                 ]
+                signature = block["signature"]
+                parts = [signature[:3], signature[3:7], signature[7:]] if split_signature else [signature]
+                deltas.extend({"type": "signature_delta", "signature": part} for part in parts)
+            elif block["type"] == "redacted_thinking":
+                start = deepcopy(block)
+                deltas = []
             elif block["type"] == "tool_use":
                 start = {**block, "input": {}}
                 deltas = [{"type": "input_json_delta", "partial_json": json.dumps(block["input"])}]
@@ -134,10 +141,12 @@ def wire(monkeypatch):
         captured.append((str(request.url), body))
         protocol = "anthropic" if request.url.path.endswith("/messages") else "openai"
         response = response_body({**body, "_protocol": protocol}, state["tools"])
+        if protocol == "anthropic" and state.get("blocks") is not None:
+            response["content"] = deepcopy(state["blocks"])
         if body.get("stream"):
             return httpx.Response(
                 200,
-                content=stream_body(response, protocol),
+                content=stream_body(response, protocol, state.get("split_signature", False)),
                 headers={"content-type": "text/event-stream"},
                 request=request,
             )
@@ -203,6 +212,64 @@ def test_reasoning_survives_agent_tool_continuation(wire, protocol, stream, mode
     else:
         assert history["reasoning_content"] == REASONING
         assert history["tool_calls"][0]["id"] == CALL["id"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("optout", [False, True])
+@pytest.mark.parametrize("redacted", [False, True])
+@pytest.mark.parametrize("split_signature", [False, True])
+@pytest.mark.parametrize("model", ["MiniMax-M3.1-Flash", "MiniMax-M3"])
+async def test_signature_fragments_preserve_distinct_blocks_on_replay(
+    wire, monkeypatch, asynchronous, optout, redacted, split_signature, model
+):
+    captured, state = wire
+    monkeypatch.setenv("DYNAMIQ_SYNC_MODEL_REGISTRY_TO_LITELLM", str(not optout).lower())
+    # Equal text in adjacent blocks must not be used as a block identity heuristic.
+    expected = [
+        {"type": "thinking", "thinking": REASONING, "signature": "first-signature-123"},
+        {"type": "thinking", "thinking": REASONING, "signature": "second-signature-456"},
+    ]
+    if redacted:
+        expected.extend(
+            [
+                {"type": "redacted_thinking", "data": "opaque-redacted-data"},
+                {"type": "thinking", "thinking": "After redaction", "signature": "third-signature-789"},
+            ]
+        )
+    state.update(
+        tools=True,
+        split_signature=split_signature,
+        blocks=[
+            *expected,
+            {"type": "tool_use", "id": CALL["id"], "name": "lookup", "input": {"q": "test"}},
+        ],
+    )
+    node = make_node("anthropic", model=model, thinking={"type": "adaptive"}, streaming={"enabled": True})
+    config = RunnableConfig(callbacks=[StreamingIteratorCallbackHandler()])
+
+    async def run():
+        if asynchronous:
+            return await node.run_async(input_data={}, config=config)
+        return await asyncio.to_thread(node.run, input_data={}, config=config)
+
+    result = await run()
+    assert result.status == RunnableStatus.SUCCESS, result.error
+    assert captured[-1][1]["stream"] is True
+    assert result.output["thinking_blocks"] == expected
+    assert result.output["reasoning_content"] == "".join(block.get("thinking", "") for block in expected)
+    agent = Agent(llm=node, inference_mode=InferenceMode.FUNCTION_CALLING)
+    agent._prompt = node.prompt.model_copy(deep=True)
+    agent._append_assistant_message(result, result.output["content"])
+    agent._prompt.messages[-1] = Message.from_dict(agent._prompt.messages[-1].to_dict())
+    agent._prompt.messages.append(Message(role="tool", content="Found", tool_call_id=CALL["id"], static=True))
+    node.prompt = agent._prompt
+    state.update(tools=False, blocks=None)
+    result = await run()
+    assert result.status == RunnableStatus.SUCCESS, result.error
+    assistant = next(message for message in captured[-1][1]["messages"] if message["role"] == "assistant")
+    assert assistant["content"][: len(expected)] == expected
+    assert any(block.get("id") == CALL["id"] for block in assistant["content"])
 
 
 @pytest.mark.parametrize("optout", [False, True])
