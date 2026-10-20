@@ -19,7 +19,15 @@ from dynamiq.types import Document
 from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils.logger import logger
 
-from .attributes import MAX_FILTERABLE_BYTES, STRING, coerce_value, infer_type, longest_string_bytes, normalize_value
+from .attributes import (
+    MAX_FILTERABLE_BYTES,
+    STRING,
+    coerce_value,
+    infer_type,
+    is_numeric_type,
+    longest_string_bytes,
+    normalize_value,
+)
 from .filters import MATCH_ALL, MATCH_NONE, combine_and, convert_filters, referenced_fields, to_turbopuffer_filter
 
 if TYPE_CHECKING:
@@ -177,14 +185,14 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
         declarations: dict[str, dict],
         content_key: str,
     ) -> tuple[Any, bool]:
-        """Fit a value to the attribute's type, declaring the attribute when it is new.
+        """Fit a value to the attribute's type, declaring the attribute when it is new or numeric.
 
         Returns the value to store and whether to store it.
         """
         config = declarations.get(name) or schema.get(name)
 
         if config is None:
-            if len(schema) + len(declarations) >= MAX_ATTRIBUTES:
+            if len(schema.keys() | declarations.keys()) >= MAX_ATTRIBUTES:
                 logger.warning(
                     f"Namespace '{self.index_name}' reached {MAX_ATTRIBUTES} attributes, so '{name}' is not stored."
                 )
@@ -201,6 +209,12 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
         if value is None:
             logger.warning(f"Value of '{name}' does not fit type '{config['type']}' and is not stored.")
             return None, False
+
+        if is_numeric_type(config["type"]):
+            # Turbopuffer lists an attribute in the schema before the write declaring it commits, and until
+            # then it types an undeclared number as int and rejects floats. New namespaces hit this while
+            # their first writes commit, so every write declares its numbers.
+            declarations.setdefault(name, config)
 
         if self._is_filterable(config) and longest_string_bytes(value) > MAX_FILTERABLE_BYTES:
             # Turbopuffer rejects filterable values over 4 KiB, so the attribute stops being filterable.

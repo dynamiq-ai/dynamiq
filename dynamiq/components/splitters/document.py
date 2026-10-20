@@ -98,12 +98,12 @@ class DocumentSplitter(BaseModel):
             return [char for char in text]
         else:
             units = text.split(split_at)
+        if split_by == DocumentSplitBy.TITLE:
+            # Restore the heading marker in front of every unit except the first one
+            return units[:1] + [split_at + unit for unit in units[1:]]
         # Add the delimiter back to all units except the last one
         for i in range(len(units) - 1):
-            if split_at == "\n#":
-                units[i] = "\n# " + units[i]
-            else:
-                units[i] += split_at
+            units[i] += split_at
         return units
 
     def _concatenate_units(
