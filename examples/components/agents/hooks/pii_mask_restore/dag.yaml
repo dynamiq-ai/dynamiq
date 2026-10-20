@@ -49,7 +49,7 @@ nodes:
               # Real code would call a mail API. This shows what the tool actually receives.
               return "EMAIL SENT to=%s" % input_data.get("to")
     hooks:
-      - type: pii
+      - type: dynamiq.nodes.agents.hooks.PIIHook
         name: pii
         entities: [email, phone, credit_card, ssn]
         on: [input, tool_result, output]

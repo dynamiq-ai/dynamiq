@@ -69,7 +69,7 @@ nodes:
                 def run(input_data):
                     return "record for %s in tenant %s" % (input_data.get("query"), input_data.get("tenant"))
     hooks:
-      - type: pii
+      - type: dynamiq.nodes.agents.hooks.PIIHook
         name: pii
         scope: request
         entities: [email, phone]
@@ -79,12 +79,12 @@ nodes:
         live_stream: true
         stream_lookback: 48
         inherit: true
-      - type: transform
+      - type: dynamiq.nodes.agents.hooks.TransformHook
         name: tenant-from-caller
         tools: [crm-lookup]
         from_context:
           tenant: metadata.tenant
-      - type: call_limit
+      - type: dynamiq.nodes.agents.hooks.CallLimitHook
         name: crm-budget
         tools: [crm-lookup]
         max_per_run: 2
