@@ -131,14 +131,21 @@ def stream_serialization_scope() -> Iterator[None]:
 
 
 def _copy_serialized(value: Any) -> Any:
-    """A copy of a `to_dict()` result sharing no dict or list with it. Its leaves (scalars, enums) are immutable.
+    """A copy of a `to_dict()` result sharing no mutable value with it.
 
-    `copy.deepcopy` would cost more than serializing the node again; this walk costs a fraction of it.
+    `copy.deepcopy` costs more than serializing the node again, so the plain dicts, lists and tuples a serialization
+    is made of are walked here, at a fraction of that. Any other container (a subclass, a set), rare in one, goes to
+    `copy.deepcopy`; what is left (scalars, enums) is immutable.
     """
-    if type(value) is dict:
+    value_type = type(value)
+    if value_type is dict:
         return {key: _copy_serialized(item) for key, item in value.items()}
-    if type(value) is list:
+    if value_type is list:
         return [_copy_serialized(item) for item in value]
+    if value_type is tuple:
+        return tuple(_copy_serialized(item) for item in value)
+    if isinstance(value, (dict, list, tuple, set)):
+        return copy.deepcopy(value)
     return value
 
 
