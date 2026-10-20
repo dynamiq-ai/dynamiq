@@ -70,9 +70,12 @@ _REQUEST_PARAMS = frozenset(
     }
 )
 
-# LiteLLM's own routing and filtering params. The SDK client already holds the endpoint and key, and the request
-# carries only the params that are set, so none of them has anything to do here.
+# LiteLLM's own routing and filtering params. The SDK client already holds the endpoint and key, and `build_request`
+# applies LiteLLM's per-model param filter itself, so none of them goes into the request.
 _LITELLM_PARAMS = frozenset({"api_base", "api_key", "client", "drop_params", "allowed_openai_params"})
+
+# What travels with the request rather than in the model's params, so LiteLLM's param mapping never sees it.
+_REQUEST_ENVELOPE = frozenset({"model", "messages", "extra_headers", "extra_query", "extra_body", "timeout"})
 
 # What the SDK can raise from a request or mid-stream; anything else is not a transport failure.
 _TRANSPORT_ERRORS = (OpenAIError, httpx.HTTPError)
@@ -97,10 +100,28 @@ def _has_cache_control(messages: Any) -> bool:
     return False
 
 
+def _litellm_model_params(model: str, params: dict[str, Any], allowed_openai_params: list[str] | None) -> dict:
+    """`params` as LiteLLM sends them to `model` with `drop_params`, by LiteLLM's own per-model mapping.
+
+    That mapping drops what the model rejects (penalties, top_p and logprobs on reasoning models, a temperature other
+    than 1 on gpt-5) and renames what it must, so the request carries what the LiteLLM path would.
+    """
+    import litellm
+
+    return litellm.get_optional_params(
+        model=model,
+        custom_llm_provider="openai",
+        drop_params=True,
+        allowed_openai_params=allowed_openai_params,
+        **params,
+    )
+
+
 def build_request(params: dict[str, Any], model_prefix: str | None) -> dict[str, Any] | None:
     """The SDK arguments for LiteLLM completion `params`, or None if this transport does not translate them.
 
-    Params set to None, and `stream` when off, are left out, as LiteLLM leaves them out.
+    Params set to None, and `stream` when off, are left out, as LiteLLM leaves them out, and the model's params go
+    through LiteLLM's per-model filter, as `drop_params` has LiteLLM do.
     """
     request: dict[str, Any] = {}
     for key, value in params.items():
@@ -116,6 +137,15 @@ def build_request(params: dict[str, Any], model_prefix: str | None) -> dict[str,
         return None
     if model_prefix:
         request["model"] = request["model"].removeprefix(model_prefix)
+
+    envelope = {key: value for key, value in request.items() if key in _REQUEST_ENVELOPE}
+    model_params = {key: value for key, value in request.items() if key not in _REQUEST_ENVELOPE}
+    mapped = _litellm_model_params(request["model"], model_params, params.get("allowed_openai_params"))
+    if not mapped.get("stream"):  # the mapping fills in its default, which LiteLLM leaves out of the request
+        mapped.pop("stream", None)
+    if extra_body := (mapped.pop("extra_body", None) or {}) | envelope.get("extra_body", {}):
+        envelope["extra_body"] = extra_body
+    request = envelope | mapped
 
     known = _sdk_create_params() | {"extra_body"}
     unknown = {key: request.pop(key) for key in list(request) if key not in known}
