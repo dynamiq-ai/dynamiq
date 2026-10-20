@@ -7,6 +7,7 @@ import pytest
 from dynamiq.storages.vector.turbopuffer.attributes import (
     coerce_value,
     infer_type,
+    is_numeric_type,
     longest_string_bytes,
     normalize_value,
 )
@@ -97,6 +98,27 @@ def test_infer_type(value, expected):
 )
 def test_coerce_value(value, attribute_type, expected):
     assert coerce_value(value, attribute_type) == expected
+
+
+@pytest.mark.parametrize(
+    "attribute_type, expected",
+    [
+        ("int", True),
+        ("uint", True),
+        ("float", True),
+        ("[]float", True),
+        ("[]int", True),
+        ("string", False),
+        ("[]string", False),
+        ("bool", False),
+        ("datetime", False),
+        ("[]unknown", False),
+        ("[3]f32", False),
+        (None, False),
+    ],
+)
+def test_is_numeric_type(attribute_type, expected):
+    assert is_numeric_type(attribute_type) == expected
 
 
 def test_longest_string_bytes():
