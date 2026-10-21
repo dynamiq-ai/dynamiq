@@ -160,6 +160,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["dynamiq"]
 
+[tool.uv]
+exclude-newer = "7 days"
+
 [tool.bandit]
 exclude_dirs = ["tests"]
 
