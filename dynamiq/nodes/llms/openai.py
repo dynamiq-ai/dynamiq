@@ -201,7 +201,7 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
             return await super()._acall_completion(params)
         return await _openai_sdk.acreate(await self.get_async_client(), request)
 
-    def _build_streamed_response(self, chunks: list, messages: list[dict]) -> Any:
-        if _openai_sdk.is_sdk_stream(chunks):
-            return _openai_sdk.build_response(chunks, messages, self.model)
-        return super()._build_streamed_response(chunks, messages)
+    def _build_streamed_response(self, chunks: list, messages: list[dict], stream: Any = None) -> Any:
+        if isinstance(stream, (_openai_sdk.Stream, _openai_sdk.AsyncStream)):
+            return stream.build_response(messages, self.model)
+        return super()._build_streamed_response(chunks, messages, stream)
