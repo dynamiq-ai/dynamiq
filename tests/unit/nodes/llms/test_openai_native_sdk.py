@@ -308,25 +308,99 @@ class TestNativeStreaming:
         assert collector.usage["total_tokens"] == 18
 
     def test_estimates_usage_when_the_stream_reports_none(self):
-        chunks = [ChunkFactory.text("Hello"), ChunkFactory.finish()]
+        fake = FakeOpenAI(usage=None)
+        node = make_node(fake, streaming=StreamingConfig(enabled=True))
+        collector = Collector()
 
-        response = _openai_sdk.build_response(chunks, [{"role": "user", "content": "hi"}], "openai/gpt-4o-mini")
+        result = node.run_sync(input_data={}, config=RunnableConfig(callbacks=[collector]))
 
-        assert response.usage.prompt_tokens > 0 and response.usage.completion_tokens > 0
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        assert collector.usage["prompt_tokens"] > 0 and collector.usage["completion_tokens"] > 0
 
-
-class ChunkFactory:
-    @staticmethod
-    def text(content):
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            TEXT_CHUNKS[0],
+            _chunk({"content": "x", "reasoning_content": "y"}) | {"obfuscation": "z", "service_tier": "default"},
+            TOOL_CHUNKS[0],
+            TOOL_CHUNKS[1],
+            _chunk(usage=USAGE | {"prompt_tokens_details": {"cached_tokens": 3}, "completion_tokens_details": {}}),
+            _chunk({"content": "x"})
+            | {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": "x"},
+                        "logprobs": {
+                            "content": [
+                                {
+                                    "token": "x",
+                                    "logprob": -0.1,
+                                    "bytes": [120],
+                                    "top_logprobs": [{"token": "x", "logprob": 0}],
+                                }
+                            ]
+                        },
+                    }
+                ]
+            },
+            {"choices": [{"delta": {"content": "x"}}]},
+            _chunk({"content": "x"}) | {"moderation": {"input": {"type": "error", "code": "c", "message": "m"}}},
+        ],
+        ids=["role", "extra-keys", "tool-call", "tool-call-delta", "usage", "logprobs", "missing-fields", "moderation"],
+    )
+    def test_chunks_are_shaped_as_the_sdk_dumps_them(self, raw):
         from openai.types.chat import ChatCompletionChunk
 
-        return ChatCompletionChunk.construct(**_chunk({"content": content}))
+        expected = ChatCompletionChunk.construct(**json.loads(json.dumps(raw))).model_dump()
 
-    @staticmethod
-    def finish():
+        assert json.dumps(_openai_sdk._chunk_dict(json.loads(json.dumps(raw)))) == json.dumps(expected)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("chunks", [TEXT_CHUNKS, TOOL_CHUNKS], ids=["text", "tool-calls"])
+    async def test_streams_without_building_the_sdk_chunk_models(self, async_sdk_client, chunks):
         from openai.types.chat import ChatCompletionChunk
 
-        return ChatCompletionChunk.construct(**_chunk({}, finish_reason="stop"))
+        fake = FakeOpenAI(chunks=chunks)
+        node = make_node(fake, streaming=StreamingConfig(enabled=True))
+        collector = Collector()
+
+        with async_sdk_client(fake), patch.object(ChatCompletionChunk, "construct", side_effect=AssertionError):
+            result = await node.run_async(input_data={}, config=RunnableConfig(callbacks=[collector]))
+
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        assert len(collector.chunks) == len(chunks)
+
+    @pytest.mark.parametrize("chunks", [TEXT_CHUNKS, TOOL_CHUNKS], ids=["text", "tool-calls"])
+    def test_a_callback_editing_its_chunk_does_not_change_the_response(self, chunks):
+        class Editor(BaseStreamingCallbackHandler):
+            def on_node_execute_stream(self, serialized, chunk=None, **kwargs):
+                for choice in chunk["choices"]:
+                    choice["delta"]["content"] = "edited"
+                    for tool_call in choice["delta"]["tool_calls"] or ():
+                        tool_call["id"] = "edited"
+                        tool_call["function"]["arguments"] = "edited"
+                chunk["id"] = "edited"
+
+        outputs = {}
+        for editors in ([], [Editor()]):
+            node = make_node(FakeOpenAI(chunks=chunks), streaming=StreamingConfig(enabled=True))
+            result = node.run_sync(input_data={}, config=RunnableConfig(callbacks=[Collector(), *editors]))
+            assert result.status == RunnableStatus.SUCCESS, result.error
+            outputs[bool(editors)] = result.output
+
+        assert outputs[True] == outputs[False]
+
+    def test_usage_asked_for_only_to_price_the_call_stays_out_of_the_streamed_chunks(self):
+        fake = FakeOpenAI()
+        node = make_node(fake, streaming=StreamingConfig(enabled=True))
+        collector = Collector()
+
+        result = node.run_sync(input_data={}, config=RunnableConfig(callbacks=[collector]))
+
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        assert [c["usage"] for c in collector.chunks] == [None] * len(TEXT_CHUNKS)
+        assert collector.usage["total_tokens"] == 18
 
 
 class TestNativeErrors:
