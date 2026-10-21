@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, 
 
 from dynamiq.cache.utils import cache_wf_entity, cache_wf_entity_async
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler, TracingCallbackHandler
+from dynamiq.callbacks.base import READS_STREAM_SERIALIZATION_ONLY
 from dynamiq.checkpoints.checkpoint import CheckpointNodeMixin
 from dynamiq.checkpoints.types import RunPausedException
 from dynamiq.connections import BaseConnection
@@ -2286,7 +2287,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
         Callbacks that keep the no-op `on_node_execute_stream` of `BaseCallbackHandler` (tracing, for one) are
         skipped, so the node is not serialized for them. Inside `stream_serialization_scope` the node is serialized
-        once for the whole scope rather than once per event.
+        once for the whole scope rather than once per event, and only callbacks not marked with
+        `reads_stream_serialization_only` receive a copy of it.
 
         Args:
             callbacks (list[BaseCallbackHandler]): List of callback handlers.
@@ -2295,18 +2297,20 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         """
         serializations = _stream_serializations.get()
         for callback in callbacks + self.callbacks:
-            if getattr(type(callback), "on_node_execute_stream", None) is BaseCallbackHandler.on_node_execute_stream:
+            on_stream = getattr(type(callback), "on_node_execute_stream", None)
+            if on_stream is BaseCallbackHandler.on_node_execute_stream:
                 continue
             try:
                 for_tracing = isinstance(callback, TracingCallbackHandler)
                 if for_tracing:
                     chunk = chunk.to_dict(for_tracing=True) if hasattr(chunk, "to_dict") else chunk
-                serialized = self._stream_serialization(serializations, for_tracing)
+                read_only = getattr(on_stream, READS_STREAM_SERIALIZATION_ONLY, False)
+                serialized = self._stream_serialization(serializations, for_tracing, read_only)
                 callback.on_node_execute_stream(serialized, chunk, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
-    def _stream_serialization(self, serializations: dict | None, for_tracing: bool) -> dict:
+    def _stream_serialization(self, serializations: dict | None, for_tracing: bool, read_only: bool) -> dict:
         """The node's `to_dict()` for a stream event, reused from `serializations` when a scope provides it."""
         dict_kwargs = {"for_tracing": True} if for_tracing else {}
         if serializations is None:
@@ -2315,6 +2319,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         if (entry := serializations.get(key)) is None:
             # The entry holds the node too, so its id cannot be reused by another node while the scope lives.
             entry = serializations[key] = (self, self.to_dict(**dict_kwargs))
+        if read_only:
+            return entry[1]
         # A copy per event, as fresh as a new `to_dict()`: a callback editing its dict at any depth cannot change what
         # the next callback or event receives.
         return _copy_serialized(entry[1])
