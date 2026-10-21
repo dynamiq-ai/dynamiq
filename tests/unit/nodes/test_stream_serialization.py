@@ -5,6 +5,13 @@ from unittest.mock import patch
 import pytest
 
 from dynamiq.callbacks import BaseCallbackHandler, TracingCallbackHandler
+from dynamiq.callbacks.base import READS_STREAM_SERIALIZATION_ONLY, reads_stream_serialization_only
+from dynamiq.callbacks.streaming import (
+    AgentStreamingParserCallback,
+    AsyncStreamingIteratorCallbackHandler,
+    StreamingIteratorCallbackHandler,
+    StreamingQueueCallbackHandler,
+)
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.node import Node, stream_serialization_scope
@@ -17,6 +24,12 @@ class StreamRecorder(BaseCallbackHandler):
     def __init__(self):
         self.events = []
 
+    def on_node_execute_stream(self, serialized, chunk=None, **kwargs):
+        self.events.append((serialized, chunk))
+
+
+class ReadOnlyRecorder(StreamRecorder):
+    @reads_stream_serialization_only
     def on_node_execute_stream(self, serialized, chunk=None, **kwargs):
         self.events.append((serialized, chunk))
 
@@ -169,3 +182,59 @@ def test_containers_inside_the_serialization_are_copied_too(mapped):
         node.run_on_node_execute_stream([editor], {})
 
     assert editor.seen == ["before", "before"]
+
+
+def test_a_read_only_callback_receives_the_scope_serialization_without_a_copy(node, to_dict_calls):
+    reader = ReadOnlyRecorder()
+
+    with stream_serialization_scope(), patch("dynamiq.nodes.node._copy_serialized") as copy_serialized:
+        for i in range(5):
+            node.run_on_node_execute_stream([reader], {"i": i})
+
+    copy_serialized.assert_not_called()
+    assert to_dict_calls == Counter({False: 1})
+    assert all(serialized is reader.events[0][0] for serialized, _ in reader.events)
+    assert reader.events[0][0] == node.to_dict()
+
+
+def test_a_read_only_callback_does_not_see_what_other_callbacks_edit(node):
+    class Editor(BaseCallbackHandler):
+        def on_node_execute_stream(self, serialized, chunk=None, **kwargs):
+            serialized.pop("id")
+            serialized["streaming"]["event"] = "edited"
+
+    reader = ReadOnlyRecorder()
+
+    with stream_serialization_scope():
+        node.run_on_node_execute_stream([Editor(), reader, Editor()], {})
+        node.run_on_node_execute_stream([reader, Editor()], {})
+
+    assert [(s["id"], s["streaming"]["event"]) for s, _ in reader.events] == [(node.id, node.streaming.event)] * 2
+
+
+def test_an_unmarked_override_of_a_read_only_callback_receives_a_copy(node):
+    class Editor(ReadOnlyRecorder):
+        def on_node_execute_stream(self, serialized, chunk=None, **kwargs):
+            self.events.append(serialized["streaming"]["event"])
+            serialized["streaming"]["event"] = "edited"
+
+    editor = Editor()
+
+    with stream_serialization_scope():
+        node.run_on_node_execute_stream([editor], {})
+        node.run_on_node_execute_stream([editor], {})
+
+    assert editor.events == [node.streaming.event] * 2
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [
+        StreamingQueueCallbackHandler,
+        StreamingIteratorCallbackHandler,
+        AsyncStreamingIteratorCallbackHandler,
+        AgentStreamingParserCallback,
+    ],
+)
+def test_dynamiq_stream_handlers_only_read_the_serialization(handler):
+    assert getattr(handler.on_node_execute_stream, READS_STREAM_SERIALIZATION_ONLY, False)

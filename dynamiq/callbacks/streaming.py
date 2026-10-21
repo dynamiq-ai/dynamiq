@@ -7,7 +7,7 @@ from queue import Queue
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Iterator
 
 from dynamiq.callbacks import BaseCallbackHandler
-from dynamiq.callbacks.base import get_run_id
+from dynamiq.callbacks.base import get_run_id, reads_stream_serialization_only
 from dynamiq.callbacks.inner_thoughts_extractor import JSONInnerThoughtsExtractor
 from dynamiq.callbacks.json_string_decoder import JSONStringDecoder
 from dynamiq.types.streaming import (
@@ -129,6 +129,7 @@ class StreamingQueueCallbackHandler(BaseStreamingCallbackHandler):
         """
         self.done_event.clear()
 
+    @reads_stream_serialization_only
     def on_node_execute_stream(
         self, serialized: dict[str, Any], chunk: dict[str, Any] | None = None, **kwargs: Any
     ) -> None:
@@ -520,6 +521,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
 
         self.mode_name = getattr(self.agent.inference_mode, "name", str(self.agent.inference_mode)).upper()
 
+    @reads_stream_serialization_only
     def on_node_execute_stream(self, serialized: dict[str, Any], chunk: dict[str, Any] | None = None, **kwargs: Any):
         if not chunk or not self.agent.streaming.enabled:
             return
