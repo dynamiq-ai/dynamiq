@@ -4,6 +4,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.callbacks import TracingCallbackHandler
+from dynamiq.callbacks.base import is_noop_hook, serialization_for
 from dynamiq.runnables import Runnable, RunnableConfig
 from dynamiq.utils import generate_uuid
 
@@ -68,10 +69,12 @@ class BaseFlow(BaseModel, Runnable, ABC):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
-                callback.on_flow_start(self.to_dict(**dict_kwargs), input_data, **kwargs)
+                if is_noop_hook(callback, "on_flow_start"):
+                    continue
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                callback.on_flow_start(
+                    serialization_for(self, callback.on_flow_start, for_tracing), input_data, **kwargs
+                )
 
     def run_on_flow_end(
         self, output_data: Any, config: RunnableConfig = None, **kwargs: Any
@@ -86,10 +89,10 @@ class BaseFlow(BaseModel, Runnable, ABC):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
-                callback.on_flow_end(self.to_dict(**dict_kwargs), output_data, **kwargs)
+                if is_noop_hook(callback, "on_flow_end"):
+                    continue
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                callback.on_flow_end(serialization_for(self, callback.on_flow_end, for_tracing), output_data, **kwargs)
 
     def run_on_flow_error(
         self, error: BaseException, config: RunnableConfig = None, **kwargs: Any
@@ -104,10 +107,10 @@ class BaseFlow(BaseModel, Runnable, ABC):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
-                callback.on_flow_error(self.to_dict(**dict_kwargs), error, **kwargs)
+                if is_noop_hook(callback, "on_flow_error"):
+                    continue
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                callback.on_flow_error(serialization_for(self, callback.on_flow_error, for_tracing), error, **kwargs)
 
     def run_on_flow_canceled(self, config: RunnableConfig = None, **kwargs: Any):
         """
@@ -119,7 +122,7 @@ class BaseFlow(BaseModel, Runnable, ABC):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
-                callback.on_flow_canceled(self.to_dict(**dict_kwargs), **kwargs)
+                if is_noop_hook(callback, "on_flow_canceled"):
+                    continue
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                callback.on_flow_canceled(serialization_for(self, callback.on_flow_canceled, for_tracing), **kwargs)

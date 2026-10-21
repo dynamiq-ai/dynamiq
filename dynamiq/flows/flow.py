@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from pydantic import Field, PrivateAttr, computed_field, field_validator
 
+from dynamiq.callbacks.base import in_shared_serialization_scope
 from dynamiq.checkpoints.checkpoint import CheckpointFlowMixin, CheckpointNodeMixin, CheckpointStatus, FlowCheckpoint
 from dynamiq.checkpoints.types import RunPausedException
 from dynamiq.connections.managers import ConnectionManager
@@ -550,6 +551,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         logger.info(f"Flow {self.id}: restored run config from checkpoint: {', '.join(sorted(updates))}")
         return config.model_copy(update=updates)
 
+    @in_shared_serialization_scope
     def run_sync(
         self,
         input_data: Any,
@@ -781,6 +783,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
             if cleanup_dry_run:
                 self._cleanup_dry_run(config)
 
+    @in_shared_serialization_scope
     async def run_async(
         self,
         input_data: Any,

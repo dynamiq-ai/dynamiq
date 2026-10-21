@@ -11,7 +11,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.callbacks import BaseCallbackHandler
-from dynamiq.callbacks.base import get_execution_run_id, get_parent_run_id, get_run_id
+from dynamiq.callbacks.base import get_execution_run_id, get_parent_run_id, get_run_id, reads_serialization_only
 from dynamiq.clients import BaseTracingClient, DynamiqTracingClient
 from dynamiq.utils import JsonWorkflowEncoder, format_value, generate_uuid
 
@@ -204,6 +204,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         )
         return run
 
+    @reads_serialization_only
     def on_workflow_start(
         self, serialized: dict[str, Any], input_data: dict[str, Any], **kwargs: Any
     ):
@@ -232,6 +233,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             tags=self.tags,
         )
 
+    @reads_serialization_only
     def on_workflow_end(
         self, serialized: dict[str, Any], output_data: dict[str, Any], **kwargs: Any
     ):
@@ -249,6 +251,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
 
         self.flush()
 
+    @reads_serialization_only
     def on_workflow_error(
         self, serialized: dict[str, Any], error: BaseException, **kwargs: Any
     ):
@@ -275,6 +278,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
 
         self.flush()
 
+    @reads_serialization_only
     def on_flow_start(
         self, serialized: dict[str, Any], input_data: dict[str, Any], **kwargs: Any
     ):
@@ -302,6 +306,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             tags=self.tags,
         )
 
+    @reads_serialization_only
     def on_flow_end(
         self, serialized: dict[str, Any], output_data: dict[str, Any], **kwargs: Any
     ):
@@ -320,6 +325,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         if run.parent_run_id is None:
             self.flush()
 
+    @reads_serialization_only
     def on_flow_error(
         self, serialized: dict[str, Any], error: BaseException, **kwargs: Any
     ):
@@ -363,6 +369,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         run.input = format_value(input_data, for_tracing=True)
         self.runs[run_id] = run
 
+    @reads_serialization_only
     def on_node_end(
         self, serialized: dict[str, Any], output_data: dict[str, Any], **kwargs: Any
     ):
@@ -443,6 +450,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         if run.parent_run_id is None:
             self.flush()
 
+    @reads_serialization_only
     def on_node_execute_start(
         self, serialized: dict[str, Any], input_data: dict[str, Any], **kwargs: Any
     ):
@@ -462,6 +470,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         )
         run.executions.append(execution)
 
+    @reads_serialization_only
     def on_node_execute_end(
         self, serialized: dict[str, Any], output_data: dict[str, Any], **kwargs: Any
     ):
@@ -477,6 +486,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         execution.end_time = datetime.now(UTC)
         execution.status = RunStatus.SUCCEEDED
 
+    @reads_serialization_only
     def on_node_execute_error(
         self, serialized: dict[str, Any], error: BaseException, **kwargs: Any
     ):
@@ -496,6 +506,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             "traceback": traceback.format_exc(),
         }
 
+    @reads_serialization_only
     def on_node_execute_run(self, serialized: dict[str, Any], **kwargs: Any):
         """Called when the node execute runs.
 
@@ -522,6 +533,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         name = serialized.get("name", serialized.get("id", "?"))
         return f"{kind} '{name}' was canceled during execution"
 
+    @reads_serialization_only
     def on_workflow_canceled(self, serialized: dict[str, Any], **kwargs: Any):
         """Called when the workflow is canceled mid-execution."""
         run = ensure_run(get_run_id(kwargs), self.runs)
@@ -530,6 +542,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         run.error = {"message": self._canceled_message("Workflow", serialized)}
         self.flush()
 
+    @reads_serialization_only
     def on_flow_canceled(self, serialized: dict[str, Any], **kwargs: Any):
         """Called when the flow is canceled mid-execution."""
         run = ensure_run(get_run_id(kwargs), self.runs)

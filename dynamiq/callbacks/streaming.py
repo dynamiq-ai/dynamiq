@@ -7,7 +7,7 @@ from queue import Queue
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Iterator
 
 from dynamiq.callbacks import BaseCallbackHandler
-from dynamiq.callbacks.base import get_run_id
+from dynamiq.callbacks.base import get_run_id, reads_serialization_only
 from dynamiq.callbacks.inner_thoughts_extractor import JSONInnerThoughtsExtractor
 from dynamiq.callbacks.json_string_decoder import JSONStringDecoder
 from dynamiq.types.streaming import (
@@ -117,6 +117,7 @@ class StreamingQueueCallbackHandler(BaseStreamingCallbackHandler):
         self.queue = queue
         self.done_event = done_event
 
+    @reads_serialization_only
     def on_workflow_start(
         self, serialized: dict[str, Any], prompts: list[str], **kwargs: Any
     ) -> None:
@@ -154,6 +155,7 @@ class StreamingQueueCallbackHandler(BaseStreamingCallbackHandler):
         )
         self.send_to_queue(event)
 
+    @reads_serialization_only
     def on_workflow_end(
         self, serialized: dict[str, Any], output_data: dict[str, Any], **kwargs: Any
     ) -> None:
@@ -180,6 +182,7 @@ class StreamingQueueCallbackHandler(BaseStreamingCallbackHandler):
         self.send_to_queue(event)
         self.done_event.set()
 
+    @reads_serialization_only
     def on_workflow_error(
         self, serialized: dict[str, Any], error: BaseException, **kwargs: Any
     ) -> None:
@@ -206,6 +209,7 @@ class StreamingQueueCallbackHandler(BaseStreamingCallbackHandler):
         self.send_to_queue(event)
         self.done_event.set()
 
+    @reads_serialization_only
     def on_workflow_canceled(self, serialized: dict[str, Any], **kwargs: Any) -> None:
         """Called when the workflow is canceled.
 
@@ -586,6 +590,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
 
         self._trim_buffer()
 
+    @reads_serialization_only
     def on_node_execute_end(self, serialized: dict[str, Any], output_data: dict[str, Any], **kwargs: Any):
         # Clear the remaining buffer content when the LLM streaming ends
         if serialized.get("group") != "llms":
