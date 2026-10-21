@@ -6,6 +6,7 @@ from .azureai import AzureAI
 from .base import BaseLLM
 from .bedrock import Bedrock, BedrockCacheControl
 from .cerebras import Cerebras
+from .cheaperinference import CheaperInference
 from .cohere import Cohere
 from .custom_llm import CustomLLM
 from .databricks import Databricks
