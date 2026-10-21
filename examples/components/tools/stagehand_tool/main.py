@@ -6,7 +6,7 @@ from dynamiq.connections.managers import get_connection_manager
 if __name__ == "__main__":
     yaml_file_path = os.path.join(
         os.path.dirname(__file__), "config.yaml"
-    )  # change to either config_steelbrowser.yaml or config_browserbase.yaml
+    )  # change to config_steelbrowser.yaml, config_browseruse.yaml or config_browserbase.yaml
 
     with get_connection_manager() as cm:
         wf = Workflow.from_yaml_file(file_path=yaml_file_path, connection_manager=cm, init_components=True)

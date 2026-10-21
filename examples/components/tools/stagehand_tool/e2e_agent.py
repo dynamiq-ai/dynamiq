@@ -8,13 +8,15 @@ Keys via environment variables:
     ANTHROPIC_API_KEY                        agent LLM + Stagehand model
     BROWSERBASE_API_KEY / BROWSERBASE_PROJECT_ID   for the Browserbase path
     STEEL_API_KEY                            for the Steel path
-    ANTHROPIC_BASE_URL                       leave unset for the Steel path (defaults correctly);
+    BROWSER_USE_API_KEY                      for the Browser Use path
+    ANTHROPIC_BASE_URL                       leave unset for the Steel / Browser Use path (defaults correctly);
                                              if set, it must include the /v1 suffix
 
 Run:
 
     python e2e_agent.py browserbase   # agent + Browserbase-backed browser (default)
     python e2e_agent.py steel         # agent + Steel-backed browser
+    python e2e_agent.py browser-use   # agent + Browser Use Cloud-backed browser
 """
 
 import os
@@ -23,7 +25,7 @@ import sys
 from dynamiq import Workflow
 from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.connections import Browserbase as BrowserbaseConnection
-from dynamiq.connections import SteelBrowser
+from dynamiq.connections import BrowserUse, SteelBrowser
 from dynamiq.connections.managers import get_connection_manager
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
@@ -47,6 +49,8 @@ TASK = (
 def build_tool(target: str) -> Stagehand:
     if target == "steel":
         connection = SteelBrowser(model_api_key=os.environ["ANTHROPIC_API_KEY"])
+    elif target == "browser-use":
+        connection = BrowserUse(model_api_key=os.environ["ANTHROPIC_API_KEY"])
     else:
         connection = BrowserbaseConnection(model_api_key=os.environ["ANTHROPIC_API_KEY"])
     return Stagehand(
