@@ -111,9 +111,15 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
         return any(model_lower.startswith(prefix) for prefix in self.O_SERIES_MODEL_PREFIXES)
 
     def _effective_reasoning_effort(self, model_lower: str) -> ReasoningEffort | None:
-        """Resolve reasoning_effor parameter for the model."""
+        """Resolve reasoning_effort parameter for the model.
+
+        An unset effort ("off") on a model that supports ``none`` is sent as ``NONE``:
+        omitting the param would let litellm treat reasoning as on.
+        """
         if self.reasoning_effort == ReasoningEffort.AUTO:
             return _resolve_default_reasoning_effort(model_lower)
+        if self.reasoning_effort is None and model_lower in _MODELS_DEFAULTING_TO_NONE:
+            return ReasoningEffort.NONE
         return self.reasoning_effort
 
     @staticmethod
