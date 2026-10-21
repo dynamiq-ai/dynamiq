@@ -109,6 +109,8 @@ class FunctionCall(BaseModel):
     @classmethod
     def parse_arguments(cls, v: Any) -> Any:
         if isinstance(v, str):
+            if not v.strip():
+                return {}
             try:
                 return json.loads(v, strict=False)
             except json.JSONDecodeError:
