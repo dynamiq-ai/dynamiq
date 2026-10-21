@@ -2121,6 +2121,26 @@ class AtlasCloud(BaseApiKeyConnection):
         }
 
 
+class CheaperInference(BaseApiKeyConnection):
+    api_key: str = Field(default_factory=partial(get_env_var, "CHEAPER_INFERENCE_API_KEY"))
+    url: str = Field(
+        default_factory=partial(get_env_var, "CHEAPER_INFERENCE_API_BASE", "https://api.cheaperinference.com/v1")
+    )
+
+    def connect(self):
+        pass
+
+    @property
+    def conn_params(self) -> dict:
+        """
+        Returns the parameters required for connection.
+        """
+        return {
+            "api_base": self.url,
+            "api_key": self.api_key,
+        }
+
+
 class TypeSafe(HttpApiKey):
     """A connection to the TypeSafe System One API, the judge behind a Judgement node.
 
