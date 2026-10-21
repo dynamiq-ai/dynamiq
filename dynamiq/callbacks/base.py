@@ -1,6 +1,25 @@
 from abc import ABC
-from typing import Any
+from typing import Any, Callable
 from uuid import UUID
+
+READS_STREAM_SERIALIZATION_ONLY = "_reads_stream_serialization_only"
+
+
+def reads_stream_serialization_only(method: Callable) -> Callable:
+    """Mark an `on_node_execute_stream` that only reads its `serialized` argument.
+
+    Inside `stream_serialization_scope` a marked handler receives the node serialization shared by the whole scope,
+    while an unmarked one receives a copy per event that it may edit. A subclass that overrides a marked method
+    receives copies again unless it marks its override too.
+
+    Args:
+        method (Callable): The `on_node_execute_stream` method.
+
+    Returns:
+        Callable: The same method, marked.
+    """
+    setattr(method, READS_STREAM_SERIALIZATION_ONLY, True)
+    return method
 
 
 class NodeCallbackHandler(ABC):
