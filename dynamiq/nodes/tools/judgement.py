@@ -5,7 +5,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from dynamiq.callbacks.base import BaseCallbackHandler
+from dynamiq.callbacks.base import BaseCallbackHandler, reads_serialization_only
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -780,6 +780,7 @@ class _EvidenceRecorder(BaseCallbackHandler):
     def config_for(self, config: RunnableConfig) -> RunnableConfig:
         return config.model_copy(update={"callbacks": [*config.callbacks, self]})
 
+    @reads_serialization_only
     def on_node_end(self, serialized: dict[str, Any], output_data: dict[str, Any], **kwargs: Any) -> None:
         if serialized.get("group") != NodeGroup.TOOLS:
             return

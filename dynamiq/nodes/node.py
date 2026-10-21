@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, 
 
 from dynamiq.cache.utils import cache_wf_entity, cache_wf_entity_async
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler, TracingCallbackHandler
+from dynamiq.callbacks.base import in_shared_serialization_scope, is_noop_hook, serialization_for
 from dynamiq.checkpoints.checkpoint import CheckpointNodeMixin
 from dynamiq.checkpoints.types import RunPausedException
 from dynamiq.connections import BaseConnection
@@ -1486,6 +1487,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             ),
         )
 
+    @in_shared_serialization_scope
     def run_sync(
         self,
         input_data: dict,
@@ -1644,6 +1646,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         ctx = contextvars.copy_context()
         return await loop.run_in_executor(executor, ctx.run, fn)
 
+    @in_shared_serialization_scope
     async def run_async(
         self,
         input_data: dict,
@@ -2076,12 +2079,15 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         """
 
         for callback in callbacks + self.callbacks:
+            if is_noop_hook(callback, "on_node_start"):
+                continue
             try:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                if for_tracing:
                     input_data = input_data.to_dict(for_tracing=True) if hasattr(input_data, "to_dict") else input_data
-                callback.on_node_start(self.to_dict(**dict_kwargs), input_data, **kwargs)
+                callback.on_node_start(
+                    serialization_for(self, callback.on_node_start, for_tracing), input_data, **kwargs
+                )
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -2100,14 +2106,15 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             **kwargs: Additional keyword arguments.
         """
         for callback in callbacks + self.callbacks:
+            if is_noop_hook(callback, "on_node_end"):
+                continue
             try:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                if for_tracing:
                     output_data = (
                         output_data.to_dict(for_tracing=True) if hasattr(output_data, "to_dict") else output_data
                     )
-                callback.on_node_end(self.to_dict(**dict_kwargs), output_data, **kwargs)
+                callback.on_node_end(serialization_for(self, callback.on_node_end, for_tracing), output_data, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -2126,11 +2133,11 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             **kwargs: Additional keyword arguments.
         """
         for callback in callbacks + self.callbacks:
+            if is_noop_hook(callback, "on_node_error"):
+                continue
             try:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
-                callback.on_node_error(self.to_dict(**dict_kwargs), error, **kwargs)
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                callback.on_node_error(serialization_for(self, callback.on_node_error, for_tracing), error, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -2152,13 +2159,18 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             **kwargs: Additional keyword arguments.
         """
         for callback in callbacks + self.callbacks:
+            if is_noop_hook(callback, "on_node_skip"):
+                continue
             try:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                if for_tracing:
                     input_data = input_data.to_dict(for_tracing=True) if hasattr(input_data, "to_dict") else input_data
                 callback.on_node_skip(
-                    self.to_dict(**dict_kwargs), skip_data, input_data, human_feedback=human_feedback, **kwargs
+                    serialization_for(self, callback.on_node_skip, for_tracing),
+                    skip_data,
+                    input_data,
+                    human_feedback=human_feedback,
+                    **kwargs,
                 )
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
@@ -2176,11 +2188,11 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             **kwargs: Additional keyword arguments.
         """
         for callback in callbacks + self.callbacks:
+            if is_noop_hook(callback, "on_node_canceled"):
+                continue
             try:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
-                callback.on_node_canceled(self.to_dict(**dict_kwargs), **kwargs)
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                callback.on_node_canceled(serialization_for(self, callback.on_node_canceled, for_tracing), **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -2202,12 +2214,15 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             input_data = dict(input_data)
 
         for callback in callbacks + self.callbacks:
+            if is_noop_hook(callback, "on_node_execute_start"):
+                continue
             try:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                if for_tracing:
                     input_data = input_data.to_dict(for_tracing=True) if hasattr(input_data, "to_dict") else input_data
-                callback.on_node_execute_start(self.to_dict(**dict_kwargs), input_data, **kwargs)
+                callback.on_node_execute_start(
+                    serialization_for(self, callback.on_node_execute_start, for_tracing), input_data, **kwargs
+                )
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -2226,14 +2241,17 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             **kwargs: Additional keyword arguments.
         """
         for callback in callbacks + self.callbacks:
+            if is_noop_hook(callback, "on_node_execute_end"):
+                continue
             try:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                if for_tracing:
                     output_data = (
                         output_data.to_dict(for_tracing=True) if hasattr(output_data, "to_dict") else output_data
                     )
-                callback.on_node_execute_end(self.to_dict(**dict_kwargs), output_data, **kwargs)
+                callback.on_node_execute_end(
+                    serialization_for(self, callback.on_node_execute_end, for_tracing), output_data, **kwargs
+                )
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -2252,11 +2270,13 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             **kwargs: Additional keyword arguments.
         """
         for callback in callbacks + self.callbacks:
+            if is_noop_hook(callback, "on_node_execute_error"):
+                continue
             try:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
-                callback.on_node_execute_error(self.to_dict(**dict_kwargs), error, **kwargs)
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                callback.on_node_execute_error(
+                    serialization_for(self, callback.on_node_execute_error, for_tracing), error, **kwargs
+                )
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -2273,11 +2293,13 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             **kwargs: Additional keyword arguments.
         """
         for callback in callbacks + self.callbacks:
+            if is_noop_hook(callback, "on_node_execute_run"):
+                continue
             try:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
-                callback.on_node_execute_run(self.to_dict(**dict_kwargs), **kwargs)
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                callback.on_node_execute_run(
+                    serialization_for(self, callback.on_node_execute_run, for_tracing), **kwargs
+                )
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 

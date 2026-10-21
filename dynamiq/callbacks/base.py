@@ -1,6 +1,86 @@
+import contextvars
+import functools
+import inspect
 from abc import ABC
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Callable, Iterator
 from uuid import UUID
+
+READS_SERIALIZATION_ONLY = "_reads_serialization_only"
+
+# Serializations shared by marked hooks inside `shared_serialization_scope`, keyed by (id(entity), for_tracing). A
+# context variable, so concurrent runs on other tasks or threads never share one.
+_shared_serializations: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "dynamiq_shared_serializations", default=None
+)
+
+
+def reads_serialization_only(method: Callable) -> Callable:
+    """Mark a callback hook that neither edits nor keeps its `serialized` argument.
+
+    Inside `shared_serialization_scope` every marked hook receives the same serialization of a node, flow or workflow,
+    taken the first time one of them needs it, instead of a new `to_dict()` per call. A subclass that overrides a marked
+    hook receives new serializations again unless it marks its override too.
+
+    Args:
+        method (Callable): The hook.
+
+    Returns:
+        Callable: The same hook, marked.
+    """
+    setattr(method, READS_SERIALIZATION_ONLY, True)
+    return method
+
+
+@contextmanager
+def shared_serialization_scope() -> Iterator[None]:
+    """Share serializations among marked hooks until the block ends. Inside an open scope, that scope stays in use."""
+    if _shared_serializations.get() is not None:
+        yield
+        return
+    token = _shared_serializations.set({})
+    try:
+        yield
+    finally:
+        _shared_serializations.reset(token)
+
+
+def in_shared_serialization_scope(method: Callable) -> Callable:
+    """Run `method`, sync or async, inside `shared_serialization_scope`."""
+    if inspect.iscoroutinefunction(method):
+
+        @functools.wraps(method)
+        async def run_async(*args: Any, **kwargs: Any) -> Any:
+            with shared_serialization_scope():
+                return await method(*args, **kwargs)
+
+        return run_async
+
+    @functools.wraps(method)
+    def run_sync(*args: Any, **kwargs: Any) -> Any:
+        with shared_serialization_scope():
+            return method(*args, **kwargs)
+
+    return run_sync
+
+
+def is_noop_hook(callback: Any, name: str) -> bool:
+    """Whether the callback's `name` hook is the base handlers' no-op, which needs no call and no serialization."""
+    base = getattr(BaseCallbackHandler, name, None)
+    return base is not None and getattr(getattr(callback, name, None), "__func__", None) is base
+
+
+def serialization_for(entity: Any, hook: Callable, for_tracing: bool) -> dict:
+    """The `serialized` argument for `hook`: the shared one for a marked hook inside a scope, otherwise a new one."""
+    dict_kwargs = {"for_tracing": True} if for_tracing else {}
+    shared = _shared_serializations.get()
+    if shared is None or not getattr(hook, READS_SERIALIZATION_ONLY, False):
+        return entity.to_dict(**dict_kwargs)
+    key = (id(entity), for_tracing)
+    if (entry := shared.get(key)) is None:
+        # The entry holds the entity too, so its id cannot be reused by another object while the scope lives.
+        entry = shared[key] = (entity, entity.to_dict(**dict_kwargs))
+    return entry[1]
 
 
 class NodeCallbackHandler(ABC):

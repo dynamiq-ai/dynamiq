@@ -8,6 +8,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, computed_field
 
 from dynamiq.callbacks import TracingCallbackHandler
+from dynamiq.callbacks.base import in_shared_serialization_scope, is_noop_hook, serialization_for
 from dynamiq.checkpoints.types import RunPausedException
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.flows import BaseFlow, Flow
@@ -201,6 +202,7 @@ class Workflow(BaseModel, Runnable):
             logger.error(f"Failed to dump workflow to YAML. {e}")
             raise
 
+    @in_shared_serialization_scope
     def run_sync(
         self,
         input_data: Any,
@@ -249,6 +251,7 @@ class Workflow(BaseModel, Runnable):
 
         return RunnableResult(status=result.status, input=input_data, output=result.output, error=result.error)
 
+    @in_shared_serialization_scope
     async def run_async(
         self,
         input_data: Any,
@@ -333,10 +336,12 @@ class Workflow(BaseModel, Runnable):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
-                callback.on_workflow_start(self.to_dict(**dict_kwargs), input_data, **kwargs)
+                if is_noop_hook(callback, "on_workflow_start"):
+                    continue
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                callback.on_workflow_start(
+                    serialization_for(self, callback.on_workflow_start, for_tracing), input_data, **kwargs
+                )
 
     def run_on_workflow_end(
         self, output: Any, config: RunnableConfig = None, **kwargs: Any
@@ -350,10 +355,12 @@ class Workflow(BaseModel, Runnable):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
-                callback.on_workflow_end(self.to_dict(**dict_kwargs), output, **kwargs)
+                if is_noop_hook(callback, "on_workflow_end"):
+                    continue
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                callback.on_workflow_end(
+                    serialization_for(self, callback.on_workflow_end, for_tracing), output, **kwargs
+                )
 
     def run_on_workflow_error(
         self, error: BaseException, config: RunnableConfig = None, **kwargs: Any
@@ -367,10 +374,12 @@ class Workflow(BaseModel, Runnable):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
-                callback.on_workflow_error(self.to_dict(**dict_kwargs), error, **kwargs)
+                if is_noop_hook(callback, "on_workflow_error"):
+                    continue
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                callback.on_workflow_error(
+                    serialization_for(self, callback.on_workflow_error, for_tracing), error, **kwargs
+                )
 
     def run_on_workflow_canceled(self, config: RunnableConfig = None, **kwargs: Any):
         """Run callbacks on workflow cancellation.
@@ -381,7 +390,9 @@ class Workflow(BaseModel, Runnable):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
-                callback.on_workflow_canceled(self.to_dict(**dict_kwargs), **kwargs)
+                if is_noop_hook(callback, "on_workflow_canceled"):
+                    continue
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                callback.on_workflow_canceled(
+                    serialization_for(self, callback.on_workflow_canceled, for_tracing), **kwargs
+                )
