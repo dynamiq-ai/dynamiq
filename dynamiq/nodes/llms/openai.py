@@ -213,10 +213,10 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
 
         return await _openai_sdk.acreate(await self.get_async_client(), request)
 
-    def _build_streamed_response(self, chunks: list, messages: list[dict]) -> Any:
+    def _build_streamed_response(self, chunks: list, messages: list[dict], stream: Any = None) -> Any:
         if self.use_native_sdk:
             from dynamiq.nodes.llms import _openai_sdk  # deferred: importing the node must not load the OpenAI SDK
 
-            if _openai_sdk.is_sdk_stream(chunks):
-                return _openai_sdk.build_response(chunks, messages, self.model)
-        return super()._build_streamed_response(chunks, messages)
+            if isinstance(stream, (_openai_sdk.Stream, _openai_sdk.AsyncStream)):
+                return stream.build_response(messages, self.model)
+        return super()._build_streamed_response(chunks, messages, stream)
