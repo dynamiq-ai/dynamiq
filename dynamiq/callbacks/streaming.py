@@ -322,6 +322,9 @@ class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
         # True from binding until the held events that did not fit are all in the queue; events sent meanwhile are held.
         self._replaying = False
         self._replay_task: asyncio.Task | None = None
+        # Puts scheduled on the loop that have not run yet. While any has not, a put from the loop's thread queues
+        # behind them rather than going in directly, so events keep their send order.
+        self._scheduled_puts = 0
         if queue is None:
             queue = _ConsumerBoundQueue(on_read=self._bind_to_consumer_loop)
         if done_event is None:
@@ -389,14 +392,41 @@ class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
                 raise
 
     def send_to_queue(self, event: StreamingEventMessage):
-        """Send the event to the queue, holding it until a consumer binds the handler to its loop."""
+        """Send the event to the queue, holding it until a consumer binds the handler to its loop.
+
+        An unbounded queue never blocks a put, so on the loop's own thread the event goes in directly, and from any
+        other thread a put is scheduled on the loop with `call_soon_threadsafe`. A coroutine handed to
+        `run_coroutine_threadsafe` costs a task, a future and a loop wakeup per event, which at one event per streamed
+        token is much of a stream's CPU time. A bounded queue keeps that path, since its `put` waits for room.
+
+        Events keep their send order: while a scheduled put has not run, a put from the loop's thread is scheduled
+        behind it (the loop runs callbacks in the order they were scheduled) rather than overtaking it.
+        """
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
         with self._loop_lock:
             # Also held while earlier held events are still being replayed, so they keep their order.
             if self.loop is None or self._replaying:
                 self._pending.append(event)
                 return
             loop = self.loop
-        asyncio.run_coroutine_threadsafe(self.queue.put(event), loop)
+            if self.queue.maxsize > 0:
+                asyncio.run_coroutine_threadsafe(self.queue.put(event), loop)
+            elif running is loop and not self._scheduled_puts:
+                self.queue.put_nowait(event)
+            else:
+                # Scheduled under the lock, so puts from different threads keep the order they were sent in.
+                self._scheduled_puts += 1
+                schedule = loop.call_soon if running is loop else loop.call_soon_threadsafe
+                schedule(self._put_scheduled, event)
+
+    def _put_scheduled(self, event: StreamingEventMessage) -> None:
+        """Put an event whose put was scheduled on the loop."""
+        with self._loop_lock:
+            self._scheduled_puts -= 1
+        self.queue.put_nowait(event)
 
     async def _iter_queue_events(self) -> AsyncIterator[StreamingEventMessage]:
         """Async iterate over queue events.
