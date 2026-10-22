@@ -12,7 +12,7 @@ nodes:
         id: manager-llm
         type: dynamiq.nodes.llms.OpenAI
         connection: openai-conn
-        model: gpt-3.5-turbo
+        model: gpt-5.6-terra
     initial_state: researcher
     states:
         - id: researcher
@@ -24,7 +24,7 @@ nodes:
               id: manager-llm
               type: dynamiq.nodes.llms.OpenAI
               connection: openai-conn
-              model: gpt-3.5-turbo
+              model: gpt-5.6-terra
           tasks:
           - id: agent-researcher
             type: dynamiq.nodes.agents.Agent
@@ -33,7 +33,7 @@ nodes:
               id: agent-researcher-llm
               type: dynamiq.nodes.llms.OpenAI
               connection: openai-conn
-              model: gpt-3.5-turbo
+              model: gpt-5.6-terra
 
           - id: agent-researcher2
             type: dynamiq.nodes.agents.Agent
@@ -42,7 +42,7 @@ nodes:
               id: agent-researcher-llm
               type: dynamiq.nodes.llms.OpenAI
               connection: openai-conn
-              model: gpt-3.5-turbo
+              model: gpt-5.6-terra
           next_states:
             - "writer"
 
@@ -55,7 +55,7 @@ nodes:
               id: manager-llm
               type: dynamiq.nodes.llms.OpenAI
               connection: openai-conn
-              model: gpt-3.5-turbo
+              model: gpt-5.6-terra
           tasks:
           - id: agent-researcher
             type: dynamiq.nodes.agents.Agent
@@ -64,7 +64,7 @@ nodes:
               id: agent-researcher-llm
               type: dynamiq.nodes.llms.OpenAI
               connection: openai-conn
-              model: gpt-3.5-turbo
+              model: gpt-5.6-terra
 
           next_states:
             - "END"

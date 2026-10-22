@@ -54,7 +54,7 @@ def setup_agent() -> Agent:
         include_raw_content=True,
     )
 
-    llm = setup_llm(model_provider="gemini", model_name="gemini-2.5-flash-preview-05-20")
+    llm = setup_llm(model_provider="gemini", model_name="gemini-3.8-flash")
 
     agent = Agent(
         name="React Agent",

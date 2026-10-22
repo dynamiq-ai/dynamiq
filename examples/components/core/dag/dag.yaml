@@ -28,7 +28,7 @@ nodes:
   openai-1:  # id
     type: dynamiq.nodes.llms.OpenAI
     name: OpenAI-1
-    model: gpt-3.5-turbo
+    model: gpt-5.6-terra
     connection: openai-conn
     prompt:
       id: openai-ai-prompt
@@ -52,7 +52,7 @@ nodes:
   openai-2:  # id
     type: dynamiq.nodes.llms.OpenAI
     name: OpenAI-2
-    model: gpt-3.5-turbo
+    model: gpt-5.6-terra
     connection: openai-conn
     prompt: openai-ds-prompt
     depends:
@@ -70,7 +70,7 @@ nodes:
   openai-3:  # id
     type: dynamiq.nodes.llms.OpenAI
     name: OpenAI-3
-    model: gpt-3.5-turbo
+    model: gpt-5.6-terra
     connection: openai-conn
     prompt: openai-rag-prompt
     depends:
@@ -80,7 +80,7 @@ nodes:
   openai-4:  # id
     type: dynamiq.nodes.llms.OpenAI
     name: OpenAI-4
-    model: gpt-3.5-turbo
+    model: gpt-5.6-terra
     connection: openai-conn
     prompt: openai-facts-date-prompt
 
