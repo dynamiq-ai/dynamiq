@@ -49,7 +49,7 @@ def main():
 
     openai_node = OpenAI(
         name="openAI",
-        model="gpt-3.5-turbo-1106",
+        model="gpt-5.6-terra",
         prompt=Prompt(
             messages=[
                 Message(
@@ -59,7 +59,6 @@ def main():
             ],
             tools=tools,
         ),
-        temperature=0.1,
     )
 
     wf = Workflow(

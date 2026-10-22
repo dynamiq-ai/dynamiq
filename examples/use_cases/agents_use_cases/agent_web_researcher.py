@@ -46,7 +46,7 @@ Open Questions, and References.
 
 
 def _create_agent() -> Agent:
-    llm = setup_llm(model_provider="gpt", model_name="o4-mini", temperature=0.4)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-5.6-terra")
     file_store_backend = InMemoryFileStore()
     file_store_config = FileStoreConfig(enabled=True, backend=file_store_backend, agent_file_write_enabled=True)
 
