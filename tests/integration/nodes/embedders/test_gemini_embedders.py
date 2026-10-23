@@ -6,6 +6,7 @@ from litellm import APIError, AuthenticationError, BadRequestError, RateLimitErr
 
 from dynamiq import connections
 from dynamiq.callbacks import TracingCallbackHandler
+from dynamiq.components.embedders.gemini import GeminiEmbedder
 from dynamiq.nodes.embedders import GeminiDocumentEmbedder, GeminiTextEmbedder
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from tests.integration.nodes.embedders.conftest import (
@@ -343,3 +344,11 @@ async def test_workflow_with_gemini_document_embedder_async(
         task_type="RETRIEVAL_DOCUMENT",
         api_key="api_key",
     )
+
+
+def test_default_model_is_not_a_retired_preview():
+    # gemini-embedding-exp-03-07 was a preview model that Google shut down on 2025-10-30
+    default_model = "gemini/gemini-embedding-001"
+    assert GeminiTextEmbedder.model_fields["model"].default == default_model
+    assert GeminiDocumentEmbedder.model_fields["model"].default == default_model
+    assert GeminiEmbedder.model_fields["model"].default == default_model
