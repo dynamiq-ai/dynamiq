@@ -7,11 +7,11 @@ from typing import Any, ClassVar
 
 import filetype
 from jinja2 import Environment, meta
-from litellm import token_counter
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_serializer
 
 from dynamiq.types.llm_tool import Tool
 from dynamiq.utils import generate_uuid
+from dynamiq.utils.litellm import token_counter
 
 
 class MessageRole(str, enum.Enum):
@@ -51,10 +51,8 @@ def get_parameters_for_template(template: str, env: Environment | None = None) -
     """
     if not env:
         env = Environment(autoescape=True)
-    # Parse the template to get its Abstract Syntax Tree
     ast = env.parse(template)
 
-    # Find and return set of undeclared variables in the template
     return meta.find_undeclared_variables(ast)
 
 
@@ -268,7 +266,6 @@ class VisionMessage(BaseModel):
 
             value = kwargs[param]
 
-            # Initialize as unchanged; will be modified if image data is detected
             processed_value = value
 
             if isinstance(value, io.BytesIO):
@@ -282,10 +279,8 @@ class VisionMessage(BaseModel):
                 pass  # No action needed; assuming it's a regular URL or already a Data URL
 
             else:
-                # Unsupported data type for image parameter
                 raise ValueError(f"Unsupported data type for parameter '{param}': {type(value)}")
 
-            # Update the parameter with the processed value
             kwargs[param] = processed_value
 
     def format_message(self, **kwargs):
@@ -330,7 +325,6 @@ class VisionMessage(BaseModel):
 
     def __init__(self, **data):
         super().__init__(**data)
-        # Import and initialize Jinja2 Template here
         from jinja2 import Template
 
         self._Template = Template

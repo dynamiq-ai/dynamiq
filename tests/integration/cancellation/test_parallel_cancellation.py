@@ -322,7 +322,6 @@ class TestSubAgentCancellation:
                     "Thought: Delegate.\nAction: calc-sub-agent\n" 'Action Input: {"input": "calculate"}'
                 )
             else:
-                # Child: invoke its own slow tool
                 r["choices"][0]["message"]["content"] = (
                     "Thought: Calculate.\nAction: slow-calc\n" 'Action Input: {"step": 1}'
                 )

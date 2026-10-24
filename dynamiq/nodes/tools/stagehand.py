@@ -806,7 +806,6 @@ class Stagehand(ConnectionNode):
                         self._steel_browser_session, "session_viewer_url", None
                     )
             else:
-                # Browserbase: fetch from debug API
                 if self._session_id and self._browserbase_client:
                     debug_info = await self._browserbase_client.sessions.debug(self._session_id)
                     if hasattr(debug_info, "debugger_fullscreen_url"):
@@ -1138,7 +1137,6 @@ class Stagehand(ConnectionNode):
                 if file_chooser:
                     logger.debug(f"{self.id} - {self.name} - Uploading file {input_data.files.name}")
 
-                    # Read file content and automatically detect MIME type
                     file_content = input_data.files.getvalue()
                     mime_type = guess_mime_type_from_bytes(file_content, input_data.files.name)
 
@@ -1168,7 +1166,6 @@ class Stagehand(ConnectionNode):
         except Exception as e:
             raise ToolExecutionException(f"Error message: {e}", recoverable=True)
 
-        # Capture screenshot if enabled (only for act and goto actions)
         screenshot = None
         if self.is_return_screenshot_bytes_enabled and input_data.action_type in (
             StagehandActionType.ACT,

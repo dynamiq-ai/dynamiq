@@ -47,9 +47,9 @@ class BaseGraphStore(ABC):
     ) -> dict[str, Any]:
         """Upsert nodes and relationships described in the provider-neutral graph payload format.
 
-        No default implementation — each writing backend defines its OWN write path (Neo4j and Neptune
-        build ``MERGE`` statements and run them; the relational Postgres store writes its own tables).
-        Backends that do not support writing (e.g. AGE, ``_writes_graph = False``) inherit this and raise.
+        No default implementation: a backend that writes defines its own write path (Neo4j builds ``MERGE``
+        statements and runs them). Backends that do not write (Neptune and AGE, ``_writes_graph = False``)
+        inherit this and raise.
 
         Implementations accept these payloads and return a stats dict (``nodes_created``,
         ``relationships_created``, ``properties_set``, ``records``, ``keys``). The explicit id/name and

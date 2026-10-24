@@ -1,6 +1,6 @@
 import threading
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import orjson
@@ -9,9 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig, CheckpointContext
 from dynamiq.checkpoints.types import CheckpointStatus, utc_now
 from dynamiq.checkpoints.utils import decode_checkpoint_data, encode_checkpoint_data
-from dynamiq.runnables import RunnableConfig, RunnableResult
 from dynamiq.utils import encode_reversible, generate_uuid
 from dynamiq.utils.logger import logger
+
+if TYPE_CHECKING:
+    from dynamiq.runnables import RunnableConfig, RunnableResult
 
 
 class BaseCheckpointState(BaseModel):
@@ -297,7 +299,7 @@ class CheckpointFlowMixin(BaseModel):
     _checkpoint_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
     _checkpoint_persisted: bool = PrivateAttr(default=False)
 
-    def _get_effective_checkpoint_config(self, config: RunnableConfig | None) -> CheckpointConfig:
+    def _get_effective_checkpoint_config(self, config: "RunnableConfig | None") -> CheckpointConfig:
         """Merge flow-level checkpoint defaults with per-run overrides from RunnableConfig.
 
         Run-level values override flow-level defaults. Fields not explicitly set at run-level
@@ -339,7 +341,7 @@ class CheckpointFlowMixin(BaseModel):
         cfg = self._effective_checkpoint_config or self.checkpoint
         return cfg.enabled and cfg.backend is not None and cfg.checkpoint_on_cancel_enabled
 
-    def _setup_checkpoint_context(self, config: RunnableConfig | None) -> RunnableConfig | None:
+    def _setup_checkpoint_context(self, config: "RunnableConfig | None") -> "RunnableConfig | None":
         """Setup checkpoint context for HITL and mid-agent-loop checkpointing.
 
         Callbacks are always invoked from thread-pool worker threads (both in the sync
@@ -464,6 +466,8 @@ class CheckpointFlowMixin(BaseModel):
         )
 
         if config is None:
+            from dynamiq.runnables import RunnableConfig  # deferred: dynamiq.runnables imports this package
+
             config = RunnableConfig(checkpoint=CheckpointConfig(context=checkpoint_context))
         elif config.checkpoint:
             config.checkpoint.context = checkpoint_context
@@ -536,7 +540,7 @@ class CheckpointFlowMixin(BaseModel):
             self._save_checkpoint_unlocked()
 
     def _update_checkpoint(
-        self, new_results: dict[str, RunnableResult], status: CheckpointStatus, strict: bool = False
+        self, new_results: "dict[str, RunnableResult]", status: CheckpointStatus, strict: bool = False
     ) -> None:
         """Update checkpoint with new node results (thread-safe).
 
@@ -652,7 +656,7 @@ class CheckpointFlowMixin(BaseModel):
         await self._save_checkpoint_async_unlocked()
 
     async def _update_checkpoint_async(
-        self, new_results: dict[str, RunnableResult], status: CheckpointStatus, strict: bool = False
+        self, new_results: "dict[str, RunnableResult]", status: CheckpointStatus, strict: bool = False
     ) -> None:
         """Async update of checkpoint with new node results.
 

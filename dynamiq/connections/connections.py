@@ -52,6 +52,8 @@ class BaseConnection(BaseModel, ABC):
     """
 
     id: str = Field(default_factory=generate_uuid)
+    # A node's clone, such as a Map item's or a parallel tool call's, keeps the id: the client cache is keyed by it.
+    keeps_id: ClassVar[bool] = True
 
     @computed_field
     @cached_property
@@ -924,6 +926,8 @@ class Qdrant(BaseApiKeyConnection):
         qdrant_client = QdrantClient(
             url=self.url,
             api_key=self.api_key,
+            # The server version check costs a request per client and warns for any server more than a minor away.
+            check_compatibility=False,
         )
 
         return qdrant_client
@@ -1673,9 +1677,9 @@ class Snowflake(BaseConnection):
     snowflake_schema: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_SCHEMA", "schema"), alias="schema")
 
     def connect(self):
-        try:
-            import snowflake.connector
+        import snowflake.connector
 
+        try:
             conn = snowflake.connector.connect(
                 user=self.user,
                 password=self.password,
@@ -1771,10 +1775,8 @@ class Elasticsearch(BaseConnection):
         from elasticsearch import Elasticsearch
         from elasticsearch.exceptions import AuthenticationException
 
-        # Build connection params
         conn_params = {}
 
-        # Handle authentication
         if self.api_key is not None:
             if self.api_key_id is not None:
                 conn_params["api_key"] = (self.api_key_id, self.api_key)
@@ -1785,19 +1787,16 @@ class Elasticsearch(BaseConnection):
         elif self.cloud_id is None:  # Only require auth for non-cloud deployments
             raise ValueError("Either API key or username/password must be provided")
 
-        # Handle SSL/TLS
         if self.use_ssl:
             if self.ca_path is not None:
                 conn_params["ca_certs"] = self.ca_path
             conn_params["verify_certs"] = self.verify_certs
 
-        # Handle cloud deployment
         if self.cloud_id is not None:
             conn_params["cloud_id"] = self.cloud_id
         else:
             conn_params["hosts"] = [self.url]
 
-        # Create client
         try:
             es_client = Elasticsearch(**conn_params)
         except Exception as e:
@@ -2068,9 +2067,9 @@ class DatabricksSQL(BaseConnection):
     access_token: str = Field(default_factory=partial(get_env_var, "DATABRICKS_TOKEN"))
 
     def connect(self):
-        try:
-            from databricks import sql
+        from databricks import sql
 
+        try:
             conn = sql.connect(
                 server_hostname=self.server_hostname,
                 http_path=self.http_path,

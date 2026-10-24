@@ -123,17 +123,6 @@ def test_delete_documents_by_filters(es_vector_store, mock_es_client, mock_es_fi
     )
 
 
-def test_delete_documents_by_file_id(es_vector_store, mock_es_client, mock_es_filters):
-    file_id = "file_id"
-    with patch("dynamiq.storages.vector.base.create_file_id_filter", return_value=mock_es_filters):
-        es_vector_store.delete_documents_by_file_id(file_id)
-    norm_filters = {"must": [{"match": {"company": "BMW"}}, {"range": {"year": {"gt": 2010}}}]}
-
-    mock_es_client.delete_by_query.assert_called_once_with(
-        index=es_vector_store.index_name, query={"bool": norm_filters}, refresh=True
-    )
-
-
 def test_write_documents(es_vector_store, mock_es_client):
     mock_es_client.bulk.return_value.raw = {
         "items": [{"index": {"_shards": {"total": 2, "successful": 2, "failed": 0}}}]

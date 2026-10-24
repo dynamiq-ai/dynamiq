@@ -85,7 +85,6 @@ class Pinecone(MemoryBackend):
         if not self.vector_store._index:
             raise PineconeError("Failed to initialize Pinecone index")
 
-        # Configure embedder truncation settings
         self.embedder.document_embedder.truncation_enabled = self.message_truncation_enabled
         self.embedder.document_embedder.max_input_tokens = self.message_max_tokens
         self.embedder.document_embedder.truncation_method = self.message_truncation_method

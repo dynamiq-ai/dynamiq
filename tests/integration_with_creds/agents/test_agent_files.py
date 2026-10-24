@@ -17,7 +17,6 @@ from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
 
 
-# Path fixtures
 @pytest.fixture(scope="module")
 def data_folder_path():
     return os.path.join(os.path.dirname(ROOT_PATH), "examples", "components", "data")
@@ -56,7 +55,6 @@ def image_bytes_2(image_file_path):
     return image_file
 
 
-# Test configuration fixtures
 @pytest.fixture(scope="module")
 def agent_role():
     return "helpful assistant that describes images and saves the description to a file when asked."
@@ -80,7 +78,6 @@ def run_config():
     return RunnableConfig(request_timeout=120)
 
 
-# Connection fixtures
 @pytest.fixture(scope="module")
 def openai_connection():
     return OpenAIConnection()
@@ -91,7 +88,6 @@ def gemini_connection():
     return GeminiConnection()
 
 
-# LLM fixtures
 @pytest.fixture(scope="module")
 def openai_llm(openai_connection):
     return OpenAI(
@@ -191,7 +187,6 @@ def _run_and_assert_agent(agent, input_data, expected_keywords, run_config, expe
     [
         ("openai_llm", InferenceMode.XML),
         ("openai_llm", InferenceMode.DEFAULT),
-        # ("openai_llm", InferenceMode.FUNCTION_CALLING),
         ("openai_llm", InferenceMode.STRUCTURED_OUTPUT),
     ],
 )

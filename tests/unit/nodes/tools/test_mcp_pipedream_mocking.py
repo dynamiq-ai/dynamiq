@@ -52,7 +52,7 @@ def patch_discovery(*tool_names):
 
     return (
         patch.object(MCPSse, "connect", new=fake_connect),
-        patch("dynamiq.nodes.tools.mcp.ClientSession", return_value=FakeSession()),
+        patch("mcp.ClientSession", return_value=FakeSession()),
     )
 
 

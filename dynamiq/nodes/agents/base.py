@@ -543,14 +543,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             raise ValueError("file_store and sandbox cannot both be enabled for an Agent at the same time")
 
         if tools_sandbox:
-            # Add sandbox tools when sandbox is enabled (not serialized; recreated from sandbox config on load)
+            # Not serialized; recreated from sandbox config on load.
             sandbox_tools = tools_sandbox.get_tools(llm=self.llm)
             self._excluded_tool_ids.update(t.id for t in sandbox_tools)
             self._own_sandbox_tool_ids.update(t.id for t in sandbox_tools)
             self.tools.extend(sandbox_tools)
 
         elif self.file_store_backend:
-            # Add file tools when file store is enabled
             self.tools.extend(
                 [
                     FileReadTool(file_store=self.file_store_backend, llm=self.llm),

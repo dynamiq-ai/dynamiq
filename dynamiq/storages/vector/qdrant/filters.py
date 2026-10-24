@@ -47,12 +47,9 @@ def convert_filters_to_qdrant(
     if isinstance(filter_term, dict):
         filter_term = [filter_term]
 
-    # ======== IDENTIFY FILTER ITEMS ON EACH LEVEL ========
-
     for item in filter_term:
         operator = item.get("operator")
 
-        # Check for repeated similar operators on each level
         same_operator_flag = operator in current_level_operators and operator in LOGICAL_OPERATORS
         if not same_operator_flag:
             current_level_operators.append(operator)
@@ -66,7 +63,6 @@ def convert_filters_to_qdrant(
             raise FilterError(msg)
 
         if operator in LOGICAL_OPERATORS:
-            # Recursively process nested conditions
             current_filter = convert_filters_to_qdrant(item.get("conditions", []), is_parent_call=False) or []
 
             # When same_operator_flag is set to True,
@@ -93,7 +89,6 @@ def convert_filters_to_qdrant(
 
             parsed_conditions = _parse_comparison_operation(comparison_operation=operator, key=field, value=value)
 
-            # check if the parsed_conditions are models.Filter or models.Condition
             for condition in parsed_conditions:
                 if isinstance(condition, models.Filter):
                     qdrant_filter.append(condition)
@@ -104,15 +99,12 @@ def convert_filters_to_qdrant(
             msg = f"Unknown operator {operator} used in filters"
             raise FilterError(msg)
 
-    # ======== PROCESS FILTER ITEMS ON EACH LEVEL ========
-
     # If same logical operators have separate clauses, create separate filters
     if same_operator_flag:
         qdrant_filter = build_filters_for_repeated_operators(
             must_clauses, should_clauses, must_not_clauses, qdrant_filter
         )
 
-    # else append a single Filter for existing clauses
     elif must_clauses or should_clauses or must_not_clauses:
         qdrant_filter.append(
             models.Filter(
@@ -122,10 +114,7 @@ def convert_filters_to_qdrant(
             )
         )
 
-    # In case of parent call, a single Filter is returned
     if is_parent_call:
-        # If qdrant_filter has just a single Filter in parent call,
-        # then it might be returned instead.
         if len(qdrant_filter) == 1 and isinstance(qdrant_filter[0], models.Filter):
             return qdrant_filter[0]
         else:
@@ -136,7 +125,6 @@ def convert_filters_to_qdrant(
                 must_not=must_not_clauses or None,
             )
 
-    # Store conditions of each level in output of the loop
     elif conditions:
         qdrant_filter.extend(conditions)
 

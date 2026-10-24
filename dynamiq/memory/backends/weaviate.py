@@ -85,9 +85,8 @@ class Weaviate(MemoryBackend):
         """Initialize the Weaviate vector store and ensure schema properties."""
         try:
             writer_params = WeaviateWriterVectorStoreParams(
-                collection_name=self.collection_name,
+                index_name=self.collection_name,
                 create_if_not_exist=self.create_if_not_exist,
-                content_property_name=self.content_property_name,
                 tenant_name=self.tenant_name,
             )
 
@@ -111,7 +110,6 @@ class Weaviate(MemoryBackend):
                 properties_to_ensure.append(self.content_property_name)
                 self._vector_store.ensure_properties_exist(properties_to_ensure)
 
-            # Configure embedder truncation settings
             self.embedder.document_embedder.truncation_enabled = self.message_truncation_enabled
             self.embedder.document_embedder.max_input_tokens = self.message_max_tokens
             self.embedder.document_embedder.truncation_method = self.message_truncation_method

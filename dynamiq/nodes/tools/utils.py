@@ -51,7 +51,6 @@ def sanitize_filename(filename: str | None, default: str | None = None) -> str:
     filename = os.path.basename(filename)
     filename = filename.replace("\x00", "")
     filename = filename.lstrip(".")
-    # Replace path separators and other dangerous characters
     filename = re.sub(r"[/\\]", "_", filename)
     # Remove any remaining control characters
     filename = re.sub(r"[\x00-\x1f\x7f]", "", filename)
@@ -102,7 +101,6 @@ def guess_mime_type_from_bytes(data: bytes, filename: str = None) -> str:
     elif data.startswith(b"#") or (b" " in data and b"\n" in data and len(data.split(b"\n")) > 1):
         return "text/plain"
 
-    # Default fallback
     return "application/octet-stream"
 
 

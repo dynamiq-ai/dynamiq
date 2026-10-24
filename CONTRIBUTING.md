@@ -71,7 +71,7 @@ Good documentation is key to a successful project. If you find areas in our docu
 
 ## Code Style
 
-Please follow the code style used in the project. We use [PEP 8](https://www.python.org/dev/peps/pep-0008/) for Python code. Ensure your code passes all linting checks before submitting a pull request.
+Please follow the code style used in the project. We use [PEP 8](https://www.python.org/dev/peps/pep-0008/) for Python code. Ensure your code passes all linting checks before submitting a pull request. [AGENTS.md](AGENTS.md) lists the project's conventions, the checks CI runs and what to look for when reviewing.
 
 ## Review Process
 

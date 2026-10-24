@@ -380,12 +380,10 @@ class FaithfulnessEvaluator(BaseEvaluator):
             ]
         )
 
-        # Add each simplified statement
         lines.extend([f"   - {stmt}" for stmt in statements])
 
         lines.extend(["", "2. NLI Evaluation Results:"])
 
-        # Add each NLI result with its verdict and explanation
         for res in nli_results:
             mark = "✅" if res.verdict == 1 else "❌"
             lines.extend([f" {mark} - {res.statement}", f"     Explanation: {res.reason}", ""])
@@ -414,10 +412,8 @@ class FaithfulnessEvaluator(BaseEvaluator):
         Returns:
             FaithfulnessRunResult: The result with faithfulness score and detailed reasoning.
         """
-        # Validate the single input using a pydantic model
         single_input = FaithfulnessRunSingleInput(question=question, answer=answer, context=context, verbose=verbose)
 
-        # Simplify the answer (using question and answer)
         statements_list = self.simplify_statements([single_input.question], [single_input.answer])
         if not statements_list or statements_list[0] is None:
             if single_input.verbose:
@@ -426,7 +422,6 @@ class FaithfulnessEvaluator(BaseEvaluator):
         else:
             statements = statements_list[0]
 
-        # Evaluate faithfulness via NLI
         nli_results_list = self.check_faithfulness([single_input.context], [statements])
         if not nli_results_list or nli_results_list[0] is None:
             if single_input.verbose:

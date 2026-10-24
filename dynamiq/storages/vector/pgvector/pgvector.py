@@ -1,4 +1,6 @@
 import re
+import threading
+import weakref
 from contextlib import contextmanager
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, Optional
@@ -29,6 +31,19 @@ from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
     from psycopg import Connection as PsycopgConnection
+
+# Stores of concurrent runs share a connection through ConnectionManager. Registering the vector types opens a
+# transaction on it, and a commit by another thread inside that transaction fails, so they are set up one at a time.
+_vector_setup_lock = threading.Lock()
+# A search sets its index's search parameter on the connection, then queries. Another search setting its own in between
+# would cap the results at its smaller top_k, so the two steps run under a lock for each connection.
+_search_locks: "weakref.WeakKeyDictionary[Any, threading.Lock]" = weakref.WeakKeyDictionary()
+_search_locks_guard = threading.Lock()
+
+
+def _search_lock(conn: Any) -> threading.Lock:
+    with _search_locks_guard:
+        return _search_locks.setdefault(conn, threading.Lock())
 
 
 class PGVectorVectorFunction(str, Enum):
@@ -152,7 +167,8 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         if index_method is not None and index_method not in PGVectorIndexMethod:
             raise ValueError(f"index_method must be one of {list(PGVectorIndexMethod)}")
 
-        if client is None or (hasattr(client, "closed") and client.closed):
+        self._owns_client = client is None or bool(getattr(client, "closed", False))
+        if self._owns_client:
             if isinstance(connection, str):
                 self.connection_string = connection
                 self._conn = psycopg.connect(self.connection_string)
@@ -168,11 +184,12 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             self.connection_string = None
 
         self.create_extension = create_extension
-        if self.create_extension:
-            self._conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
-            self._conn.commit()
-
-        register_vector(self._conn)
+        with _vector_setup_lock:
+            if self.create_extension:
+                self._conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+                self._conn.commit()
+            if self._conn.adapters.types.get("vector") is None:
+                register_vector(self._conn)
 
         self.table_name = table_name
         self.schema_name = schema_name
@@ -201,7 +218,6 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         if self.create_if_not_exist:
             with self._get_connection() as conn:
-                # Check if table exists before creating it
                 table_exists = self._check_if_table_exists(conn)
 
                 self._create_schema(conn)
@@ -241,7 +257,6 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         """
         sanitized = error_msg
 
-        # Remove connection string patterns
         sanitized = re.sub(
             r'postgresql://[^\'"\s]+',
             f"postgresql://{SANITIZED_VALUE_PLACEHOLDER}",
@@ -287,7 +302,6 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             return
 
         if self.index_method == PGVectorIndexMethod.IVFFLAT:
-            # For IVFFLAT, probes should be proportional to top_k but capped
             probes = max(top_k // 10, 1)
             probes = min(probes, 100)
             conn.execute(f"SET ivfflat.probes = {probes}")
@@ -538,7 +552,6 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             lists = self.ivfflat_lists
             if lists is None:
                 try:
-                    # Estimate based on the amount of rows
                     row_count = self.count_documents()
                     lists = max(min(row_count // 1000, 1000), 10)
                 except Exception:
@@ -772,7 +785,6 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
                 )
             document_ids.append(doc.id)
 
-        # Prepare batch data
         batch_data = [(doc.id, doc.content, Jsonb(doc.metadata), doc.embedding) for doc in documents]
 
         query = SQL(
@@ -1138,16 +1150,13 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         query_embedding = self._convert_query_embedding_to_pgvector_format(query_embedding)
 
-        # Generate the score calculation based on the vector function
         score_definition = VECTOR_FUNCTION_TO_SCORE_DEFINITION[vector_function].format(
             embedding_key=embedding_key, query_embedding=query_embedding
         )
         score_definition = f"{score_definition} AS score"
 
-        # Do not select the embeddings if exclude_document_embeddings is True
         select_fields = f"id, {content_key}, metadata" if exclude_document_embeddings else "*"
 
-        # Build the base SELECT query with score
         base_select = SQL("SELECT {fields}, {score} FROM {schema_name}.{table_name}").format(
             fields=SQL(select_fields),
             score=SQL(score_definition),
@@ -1155,26 +1164,20 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             table_name=Identifier(self.table_name),
         )
 
-        # Handle filters if they exist
         where_clause, params = self._prepare_filters(filters)
 
-        # Determine sort order based on vector function type
         is_distance_metric = vector_function in ["l2_distance", "l1_distance"]
 
-        # Sort by score in ascending order if using a distance metric
-        # as the smaller the distance, the more similar the vectors are
+        # The smaller the distance, the more similar the vectors are
         sort_order = "ASC" if is_distance_metric else "DESC"
 
-        # Build the ORDER BY and LIMIT clause
         order_by = SQL(" ORDER BY score {sort_order} LIMIT {limit}").format(
             sort_order=SQL(sort_order), limit=SQLLiteral(top_k)
         )
 
-        # Combine all parts into final query
         sql_query = base_select + where_clause + order_by
 
-        with self._get_connection() as conn:
-            # Set runtime params for the current index method
+        with self._get_connection() as conn, _search_lock(conn):
             self._set_pgvector_runtime_params(conn, top_k)
 
             with conn.cursor(row_factory=dict_row) as cur:
@@ -1218,10 +1221,8 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         content_key = content_key or self.content_key
         search_vector = self._keyword_search_vector(content_key)
 
-        # Do not select the embeddings if exclude_document_embeddings is True
         select_fields = f"id, {content_key}, metadata" if exclude_document_embeddings else "*"
 
-        # Build the base SELECT query with score
         base_select = SQL(
             """
             SELECT {fields}, ts_rank_cd({search_vector}, query) AS score
@@ -1236,13 +1237,10 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             search_vector=search_vector,
         )
 
-        # Handle filters if they exist
         where_clause, params = self._prepare_filters(filters, operator="AND")
 
-        # Build the ORDER BY and LIMIT clause
         order_by = SQL(" ORDER BY score DESC LIMIT {limit}").format(limit=SQLLiteral(top_k))
 
-        # Combine all parts into final query
         sql_query = base_select + where_clause + order_by
 
         with self._get_connection() as conn:
@@ -1302,7 +1300,6 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         embedding_key = embedding_key or self.embedding_key
         search_vector = self._keyword_search_vector(content_key)
 
-        # If alpha is 0, perform purely keyword search
         if alpha == 0:
             return self._keyword_retrieval(
                 query,
@@ -1312,7 +1309,6 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
                 content_key=content_key,
                 embedding_key=embedding_key,
             )
-        # If alpha is 1, perform purely embedding search
         elif alpha == 1:
             return self._embedding_retrieval(
                 query_embedding,
@@ -1325,16 +1321,13 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         query_embedding = self._convert_query_embedding_to_pgvector_format(query_embedding)
 
-        # Generate the score calculation based on the vector function
         score_definition = VECTOR_FUNCTION_TO_SCORE_DEFINITION[vector_function].format(
             embedding_key=embedding_key, query_embedding=query_embedding
         )
 
-        # Determine sort order based on vector function type
         is_distance_metric = vector_function in ["l2_distance", "l1_distance"]
         sort_order = "ASC" if is_distance_metric else "DESC"
 
-        # Optimize subquery limit based on alpha
         if alpha < 0.1 or alpha > 0.9:
             subquery_limit = max(top_k * 2, 20)
         else:
@@ -1428,8 +1421,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         params = params + params
 
-        with self._get_connection() as conn:
-            # Set runtime params for the current index method
+        with self._get_connection() as conn, _search_lock(conn):
             self._set_pgvector_runtime_params(conn, top_k)
 
             with conn.cursor(row_factory=dict_row) as cur:
@@ -1445,5 +1437,6 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             self._conn.close()
 
     def __del__(self):
-        """Close the connection when the object is deleted."""
-        self.close()
+        """Close the connection if the store opened it. A client passed in may be shared, so it stays open."""
+        if getattr(self, "_owns_client", False):
+            self.close()

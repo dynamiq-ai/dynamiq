@@ -87,6 +87,7 @@ class ElasticsearchVectorStore(BaseVectorStore, DryRunMixin):
         """
         super().__init__(dry_run_config=dry_run_config)
 
+        self._owns_client = client is None
         if client is None:
             if connection is None:
                 connection = Elasticsearch()
@@ -119,7 +120,6 @@ class ElasticsearchVectorStore(BaseVectorStore, DryRunMixin):
 
     def _create_index_if_not_exists(self) -> None:
         """Create the index if it doesn't exist."""
-        # Base mapping
         mapping = {
             "mappings": {
                 "properties": {
@@ -135,11 +135,9 @@ class ElasticsearchVectorStore(BaseVectorStore, DryRunMixin):
             }
         }
 
-        # Add custom mapping settings if provided
         if self.mapping_settings:
             mapping["mappings"].update(self.mapping_settings)
 
-        # Add index settings if provided
         if self.index_settings:
             mapping["settings"] = self.index_settings
 
@@ -179,7 +177,6 @@ class ElasticsearchVectorStore(BaseVectorStore, DryRunMixin):
         if policy == DuplicatePolicy.OVERWRITE:
             return documents
 
-        # Get unique documents
         unique_docs = {}
         for doc in documents:
             if doc.id in unique_docs:
@@ -187,7 +184,6 @@ class ElasticsearchVectorStore(BaseVectorStore, DryRunMixin):
             unique_docs[doc.id] = doc
 
         if policy in {DuplicatePolicy.SKIP, DuplicatePolicy.FAIL}:
-            # Check which documents already exist
             existing_ids = set()
             for doc_id in unique_docs.keys():
                 try:
@@ -199,7 +195,6 @@ class ElasticsearchVectorStore(BaseVectorStore, DryRunMixin):
             if policy == DuplicatePolicy.FAIL and existing_ids:
                 raise VectorStoreException(f"Documents with IDs {existing_ids} already exist")
 
-            # Remove existing documents
             return [doc for doc in documents if doc.id not in existing_ids]
 
         return list(unique_docs.values())
@@ -235,12 +230,10 @@ class ElasticsearchVectorStore(BaseVectorStore, DryRunMixin):
         if not isinstance(documents[0], Document):
             raise ValueError("Documents must be of type Document")
 
-        # Handle duplicates
         documents = self._handle_duplicate_documents(documents, policy)
         if not documents:
             return 0
 
-        # Process in batches
         batch_size = batch_size or self.batch_size
         content_key = content_key or self.content_key
         embedding_key = embedding_key or self.embedding_key
@@ -327,7 +320,6 @@ class ElasticsearchVectorStore(BaseVectorStore, DryRunMixin):
             raise ValueError("query_embedding must not be empty")
 
         embedding_key = embedding_key or self.embedding_key
-        # Build the query
         query = {
             "knn": {
                 "field": embedding_key,
@@ -338,11 +330,9 @@ class ElasticsearchVectorStore(BaseVectorStore, DryRunMixin):
         }
 
         if filters:
-            # Normalise filters to Elasticsearch format
             filters = _normalize_filters(filters)
             query["knn"]["filter"] = {"bool": filters}
 
-        # Execute search
         response = self.client.search(
             index=self.index_name,
             query=query,
@@ -351,7 +341,6 @@ class ElasticsearchVectorStore(BaseVectorStore, DryRunMixin):
         )
         content_key = content_key or self.content_key
 
-        # Convert results to Documents with optional score scaling
         documents = []
         for hit in response["hits"]["hits"]:
             score = hit["_score"]
@@ -389,7 +378,6 @@ class ElasticsearchVectorStore(BaseVectorStore, DryRunMixin):
             _source_excludes=([embedding_key] if not include_embeddings else None),
         )
 
-        # Convert result to Document
         doc = Document(
             id=response["_id"],
             content=response["_source"][content_key],
@@ -483,6 +471,31 @@ class ElasticsearchVectorStore(BaseVectorStore, DryRunMixin):
 
         self.client.delete_by_query(index=self.index_name, query=bool_query, refresh=True)
 
+    def delete_documents_by_file_id(self, file_id: str) -> None:
+        """Delete documents whose metadata holds the file ID.
+
+        Args:
+            file_id (str): The file ID to filter by.
+        """
+        self.delete_documents_by_file_ids([file_id])
+
+    def delete_documents_by_file_ids(self, file_ids: list[str], batch_size: int = 500) -> None:
+        """Delete documents whose metadata holds one of the file IDs.
+
+        File IDs are matched exactly on ``metadata.file_id``. The shared file ID filter cannot be used: it names a
+        top-level ``file_id`` field and uses the "in" operator, which these filters do not support.
+
+        Args:
+            file_ids (list[str]): The file IDs to filter by.
+            batch_size (int): Maximum number of file IDs to delete in one request. Defaults to 500.
+        """
+        if not file_ids:
+            logger.warning("No file IDs provided. No documents will be deleted.")
+            return
+        for start in range(0, len(file_ids), batch_size):
+            batch = file_ids[start : start + batch_size]
+            self.delete_documents_by_filters({"field": "metadata.file_id", "operator": "contains_any", "value": batch})
+
     def list_documents(
         self,
         top_k: int | None = 100,
@@ -514,7 +527,6 @@ class ElasticsearchVectorStore(BaseVectorStore, DryRunMixin):
             _source_excludes=([embedding_key] if not include_embeddings else None),
         )
 
-        # Convert results to Documents with optional score scaling
         all_documents = []
         for hit in response["hits"]["hits"]:
             score = hit["_score"]
@@ -704,5 +716,6 @@ class ElasticsearchVectorStore(BaseVectorStore, DryRunMixin):
             self.client.close()
 
     def __del__(self):
-        """Cleanup on deletion."""
-        self.close()
+        """Close the client if the store created it. A client passed in may be shared, so it stays open."""
+        if getattr(self, "_owns_client", False):
+            self.close()

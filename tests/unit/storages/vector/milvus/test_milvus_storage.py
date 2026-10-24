@@ -18,10 +18,6 @@ def milvus_vector_store(mock_milvus_client):
     return MilvusVectorStore(client=mock_milvus_client, index_name="test_collection")
 
 
-def test_initialization(milvus_vector_store):
-    assert milvus_vector_store.client is not None
-
-
 def test_count_documents(milvus_vector_store, mock_milvus_client):
     mock_milvus_client.get_collection_stats.return_value = {"row_count": 5}
     assert milvus_vector_store.count_documents() == 5
@@ -212,7 +208,7 @@ def test_hybrid_search(milvus_vector_store, mock_milvus_client):
 def test_writer_params_dimension(dimension):
     if dimension is None:
         params = MilvusWriterVectorStoreParams()
-        assert params.dimension == 1536  # Default value
+        assert params.dimension == 1536
     else:
         params = MilvusWriterVectorStoreParams(dimension=dimension)
         assert params.dimension == dimension

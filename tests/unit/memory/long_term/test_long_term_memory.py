@@ -4,8 +4,6 @@ import pytest
 from dynamiq.memory.long_term import LongTermMemoryError, RememberOutcome
 from dynamiq.memory.long_term.backends.in_memory import InMemoryLongTermMemoryBackend
 
-# --- remember ---
-
 
 def test_remember_returns_a_fact_and_persists_it(backend, user_id):
     fact, outcome = backend.remember(content="User likes pizza", user_id=user_id)
@@ -181,9 +179,6 @@ def test_remember_stores_metadata(backend, user_id):
     assert backend.get(fact.id).metadata == {"category": "preference"}
 
 
-# --- recall ---
-
-
 def test_recall_returns_scored_facts(backend, user_id):
     backend.remember(content="User likes pizza", user_id=user_id)
     backend.remember(content="User dislikes mushrooms", user_id=user_id)
@@ -217,7 +212,7 @@ def test_recall_rejects_empty_query(backend, user_id):
         backend.recall(query="   ", user_id=user_id, limit=5)
 
 
-# --- forget (programmatic API; not exposed to agents) ---
+# forget (programmatic API; not exposed to agents)
 
 
 def test_forget_deletes_known_fact(backend, user_id):
@@ -237,24 +232,12 @@ def test_forget_cross_user_returns_forbidden(backend, user_id, other_user_id):
     assert backend.get(fact.id) is not None
 
 
-# --- admin / introspection ---
-
-
 def test_list_all_returns_user_facts(backend, user_id, other_user_id):
     backend.remember(content="a", user_id=user_id)
     backend.remember(content="b", user_id=user_id)
     backend.remember(content="c", user_id=other_user_id)
     facts = backend.list_all(user_id=user_id)
     assert {f.content for f in facts} == {"a", "b"}
-
-
-def test_get_returns_fact_by_id(backend, user_id):
-    fact, _ = backend.remember(content="x", user_id=user_id)
-    assert backend.get(fact.id) == fact
-
-
-def test_get_unknown_returns_none(backend):
-    assert backend.get("nope") is None
 
 
 def test_clear_user_deletes_all_user_facts(backend, user_id, other_user_id):

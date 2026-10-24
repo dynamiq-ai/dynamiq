@@ -478,7 +478,7 @@ def test_an_option_that_is_not_an_object_is_named_rather_than_filtered_away():
     )
     found = errors_of(flow_with(mixed))
     assert [e for e in found if "has an option that is not an object (1 of 3)" in e], found
-    # The count now describes what was written, not what survived.
+    # The count describes what was written, not what survived.
     assert not [e for e in found if "got 2" in e]
 
 

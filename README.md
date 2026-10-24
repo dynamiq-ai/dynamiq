@@ -37,17 +37,38 @@ Ready to dive in? Here's how you can get started with Dynamiq:
 
 ### Installation
 
-First, let's get Dynamiq installed. You'll need Python, so make sure that's set up on your machine. Then run:
+First, let's get Dynamiq installed. You'll need Python 3.10 or later, so make sure that's set up on your machine. Then run:
 
 ```sh
 pip install dynamiq
 ```
 
+This installs agents, workflows, every LLM provider, the built-in tools and memory, and reading of PDF, Word, PowerPoint and Excel files. Integrations that need a larger SDK come as extras. Using one without its extra raises an error that names the missing package:
+
+| Extra | For |
+|---|---|
+| `vectorstores` | Chroma, Elasticsearch, Milvus, OpenSearch, pgvector, Pinecone, Qdrant, Turbopuffer and Weaviate writers, retrievers and memory backends |
+| `files` | HTML and Markdown transformers, Markdown to PDF, PDF page images, the HTML header splitter and the Unstructured converter, plus pdfplumber in the Python tools |
+| `data` | matplotlib and seaborn for charts in the Python tools |
+| `sql` | MySQL, Snowflake and Databricks in the SQL executor |
+| `browser` | The Stagehand browser tool |
+| `sandboxes` | E2B and Daytona sandboxes |
+| `gcp` | Vertex AI RAG search and the Document AI converter |
+| `evals` | The BLEU, ROUGE and string similarity metrics |
+| `cua`, `monty` | The CUA desktop tool (Python 3.12 and 3.13) and the Python Monty tool |
+| `all` | Every extra except `cua` and `monty` |
+
+```sh
+pip install "dynamiq[vectorstores,files]"
+```
+
+dynamiq imports an integration, and litellm, the first time it is used, so `import dynamiq` takes a fraction of a second. A multi-threaded server that would rather pay that cost before it serves can set `DYNAMIQ_EAGER_IMPORTS=1`, which imports every installed integration with its package, as earlier versions did. litellm also downloads its model price list when it is imported; `LITELLM_LOCAL_MODEL_COST_MAP=True` makes it use the copy it ships with.
+
 Or build the Python package from the source code:
 ```sh
 git clone https://github.com/dynamiq-ai/dynamiq.git
 cd dynamiq
-uv sync
+uv sync --extra all
 ```
 
 ## Documentation
@@ -95,11 +116,13 @@ print(result.output)
 
 
 ### Simple ReAct Agent with asynchronous execution
-An agent that has the access to E2B Code Interpreter and is capable of solving complex coding tasks.
-Code sandboxes are also available via Daytona (`DaytonaInterpreterTool`) and AWS Bedrock AgentCore
-Code Interpreter (`BedrockAgentCoreInterpreterTool`, using the standard AWS connection).
+An agent that has access to the E2B Code Interpreter and is capable of solving complex coding tasks. E2B needs the
+`sandboxes` extra. Code sandboxes are also available via Daytona (`DaytonaInterpreterTool`, in the same extra) and
+AWS Bedrock AgentCore Code Interpreter (`BedrockAgentCoreInterpreterTool`, using the standard AWS connection).
 
 ```python
+import asyncio
+
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.connections import OpenAI as OpenAIConnection, E2B as E2BConnection
 from dynamiq.nodes.agents import Agent
@@ -187,7 +210,7 @@ wf.flow.add_nodes(second_agent)
 
 # Equivalent alternative way to define the workflow:
 # from dynamiq.flows import Flow
-# wf = Workflow(flow=Flow(nodes=[agent_first, agent_second]))
+# wf = Workflow(flow=Flow(nodes=[first_agent, second_agent]))
 
 # Run the workflow with an input
 result = wf.run(
@@ -247,7 +270,7 @@ wf.flow.add_nodes(second_agent)
 
 # Equivalent alternative way to define the workflow:
 # from dynamiq.flows import Flow
-# wf = Workflow(flow=Flow(nodes=[agent_first, agent_second]))
+# wf = Workflow(flow=Flow(nodes=[first_agent, second_agent]))
 
 # Run the workflow with an input
 result = wf.run(
@@ -323,7 +346,7 @@ print(result.output[manager_agent.id]["output"]["content"])
 ```
 
 ### RAG - document indexing flow
-This workflow takes input PDF files, pre-processes them, converts them to vector embeddings, and stores them in the Pinecone vector database.
+This workflow takes input PDF files, pre-processes them, converts them to vector embeddings, and stores them in the Pinecone vector database. Pinecone, like the other vector stores, needs the `vectorstores` extra.
 The example provided is for an existing index in Pinecone. You can find examples for index creation on the `docs/tutorials/rag` page.
 
 ```python
@@ -421,7 +444,6 @@ document_retriever = (
     PineconeDocumentRetriever(
         connection=PineconeConnection(api_key="PINECONE_API_KEY"),
         index_name="default",
-        dimension=1536,
         top_k=5,
     )
     .inputs(embedding=embedder.outputs.embedding)
@@ -460,7 +482,7 @@ answer_generator = (
 retrieval_wf.flow.add_nodes(answer_generator)
 
 # Run the RAG retrieval flow
-question = "What are the line intems provided in the invoice?"
+question = "What are the line items provided in the invoice?"
 result = retrieval_wf.run(input_data={"query": question})
 
 answer = result.output.get(answer_generator.id).get("output", {}).get("content")

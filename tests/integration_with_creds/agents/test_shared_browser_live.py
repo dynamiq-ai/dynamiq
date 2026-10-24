@@ -237,9 +237,6 @@ def _owner_output(result, owner: Agent) -> dict:
     return result.output[owner.id]["output"]
 
 
-# ---------------------------------------------------------------------------------------------
-# 1. Two subagents, coordinator owner: one session, state crosses, session ended once at the end.
-# ---------------------------------------------------------------------------------------------
 @pytest.mark.integration
 def test_two_subagents_share_session_and_state_crosses():
     """Canonical shape: owner delegates to a setter (stores a cookie) then a checker (reads it back)
@@ -291,9 +288,7 @@ def test_two_subagents_share_session_and_state_crosses():
     _assert_session_ended(session_id)
 
 
-# ---------------------------------------------------------------------------------------------
-# 2. Live page position crosses (the property that distinguishes this from close-based handoff).
-# ---------------------------------------------------------------------------------------------
+# Live page position crosses (the property that distinguishes this from close-based handoff).
 @pytest.mark.integration
 def test_live_page_position_crosses_between_subagents():
     """Navigator leaves the page on a distinctive URL; reader reports the current page without
@@ -394,9 +389,6 @@ def test_page_position_crosses_the_detach_boundary_deterministic():
                 pass
 
 
-# ---------------------------------------------------------------------------------------------
-# 3. Owner browses, THEN delegates (the old deadlock trap) — must not hang, must share.
-# ---------------------------------------------------------------------------------------------
 @pytest.mark.integration
 def test_owner_browses_then_delegates_without_deadlock():
     """Owner browses first, then delegates to a browsing subagent. Releasing page control around the
@@ -433,9 +425,6 @@ def test_owner_browses_then_delegates_without_deadlock():
     _assert_session_ended(session_id)
 
 
-# ---------------------------------------------------------------------------------------------
-# 4. Subagent browses, THEN owner browses — handoff in the other direction.
-# ---------------------------------------------------------------------------------------------
 @pytest.mark.integration
 def test_subagent_hands_back_then_owner_browses():
     """A navigator subagent browses first; after it returns, the owner's own tool picks up the
@@ -479,9 +468,6 @@ def test_subagent_hands_back_then_owner_browses():
     _assert_session_ended(session_id)
 
 
-# ---------------------------------------------------------------------------------------------
-# 5. A non-browsing delegate must not disturb the owner's page (nothing closes unless needed).
-# ---------------------------------------------------------------------------------------------
 @pytest.mark.integration
 def test_non_browsing_delegate_preserves_the_page():
     """Owner browses, delegates to a pure-LLM subagent, then reads the page again. It is unchanged:
@@ -532,9 +518,6 @@ def test_non_browsing_delegate_preserves_the_page():
     _assert_session_ended(session_id)
 
 
-# ---------------------------------------------------------------------------------------------
-# 6. Parallel browsing subagents serialize on the shared page instead of colliding.
-# ---------------------------------------------------------------------------------------------
 @pytest.mark.integration
 def test_parallel_browsing_subagents_share_one_session():
     """Owner with parallel tool calls dispatches two browsing subagents. Page control serializes them
@@ -576,9 +559,6 @@ def test_parallel_browsing_subagents_share_one_session():
     _assert_session_ended(session_id)
 
 
-# ---------------------------------------------------------------------------------------------
-# 7. Factory-mode subagents (fresh instance per call, clone path) still share one session.
-# ---------------------------------------------------------------------------------------------
 @pytest.mark.integration
 def test_factory_mode_subagents_share_one_session():
     """Factory subagents (fresh Agent per call, exercising the clone path) still attach to the run's
@@ -625,9 +605,6 @@ def test_factory_mode_subagents_share_one_session():
     _assert_session_ended(session_id)
 
 
-# ---------------------------------------------------------------------------------------------
-# 8. CROSS-RUN: a supplied Context carries state from one whole run to a later, separate run.
-# ---------------------------------------------------------------------------------------------
 @pytest.mark.integration
 def test_context_persists_state_across_separate_runs():
     """Two independent runs share a stable ``browser_context_id`` ("one per end user"). Run 1 sets a

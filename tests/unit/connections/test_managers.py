@@ -1,17 +1,19 @@
 import asyncio
+import sys
 
 import httpx
 import pytest
 
-from dynamiq.connections.connections import HTTPMethod
+from dynamiq.connections.connections import Chroma, DatabricksSQL
 from dynamiq.connections.connections import Http as HttpConnection
-from dynamiq.connections.connections import Whisper
+from dynamiq.connections.connections import HTTPMethod, Snowflake, Whisper
 from dynamiq.connections.managers import (
     ConnectionClientInitType,
     ConnectionManager,
     ConnectionManagerException,
     get_async_connection_manager,
 )
+from dynamiq.utils.lazy_imports import OptionalDependencyError
 
 
 def test_connection_manager_caches_client_on_first_connect_and_reuses():
@@ -232,3 +234,19 @@ async def test_aclose_skips_a_close_method_marked_as_a_coroutine():
 
     assert client.calls == []
     assert cm.connection_clients == {}
+
+
+@pytest.mark.parametrize(
+    "connection, module, extra",
+    [
+        (Chroma(host="localhost", port=8000), "chromadb", "vectorstores"),
+        (DatabricksSQL(server_hostname="host", http_path="path", access_token="token"), "databricks", "sql"),
+        (Snowflake(user="u", password="p", account="a", warehouse="w", database="d", schema="s"), "snowflake", "sql"),
+    ],
+    ids=["chroma", "databricks", "snowflake"],
+)
+def test_connecting_without_the_sdk_names_the_extra(connection, module, extra, monkeypatch):
+    monkeypatch.setitem(sys.modules, module, None)
+
+    with pytest.raises(OptionalDependencyError, match=rf'pip install "dynamiq\[{extra}\]"'):
+        ConnectionManager().get_connection_client(connection)

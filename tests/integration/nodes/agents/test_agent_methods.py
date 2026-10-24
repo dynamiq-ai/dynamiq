@@ -191,7 +191,6 @@ def test_xmlparser_parse_action_input_with_less_than_and_ampersand():
     text = '<output><thought>Compute loss</thought><action>code-executor</action><action_input>{"python": "loss_count = (moic_col < 1.0).sum()"}</action_input></output>'  # noqa E501
     result = XMLParser.parse(text, required_tags=["thought", "action", "action_input"], json_fields=["action_input"])
     assert result["action_input"] == {"python": "loss_count = (moic_col < 1.0).sum()"}
-    # Shell with &&
     text2 = '<output><thought>List dirs</thought><action>code-executor</action><action_input>{"shell_command": "ls -la /home/user/input && ls -la /home/user/output"}</action_input></output>'  # noqa E501
     result2 = XMLParser.parse(text2, required_tags=["thought", "action", "action_input"], json_fields=["action_input"])
     assert result2["action_input"] == {"shell_command": "ls -la /home/user/input && ls -la /home/user/output"}
@@ -444,7 +443,6 @@ def test_xmlparser_parse_with_markdown_in_answer():
 
     result = XMLParser.parse(text, required_tags=["thought", "answer"])
 
-    # Check markdown elements are preserved
     assert "# Heading 1" in result["answer"]
     assert "**bold text**" in result["answer"]
     assert "```python" in result["answer"]
@@ -558,7 +556,6 @@ def test_generate_structured_output_schemas(openai_node, mock_tool):
         tools=[mock_tool], sanitize_tool_name=agent.sanitize_tool_name, delegation_allowed=False
     )
 
-    # Verify schema structure
     assert "type" in schema
     assert schema["type"] == "json_schema"
     assert "json_schema" in schema
@@ -567,10 +564,8 @@ def test_generate_structured_output_schemas(openai_node, mock_tool):
     assert json_schema["name"] == "plan_next_action"
     assert json_schema["strict"] is True
 
-    # Verify required fields
     assert set(json_schema["schema"]["required"]) == {"thought", "action", "action_input", "output_files"}
 
-    # Verify properties
     properties = json_schema["schema"]["properties"]
     assert "thought" in properties
     assert "action" in properties
@@ -591,14 +586,12 @@ def test_generate_function_calling_schemas(openai_node, mock_tool):
     # Should have at least final answer function + mock tool
     assert len(schemas) >= 2
 
-    # First schema should be the final answer function
     final_answer_schema = schemas[0]
     assert final_answer_schema["type"] == "function"
     assert final_answer_schema["function"]["name"] == "provide_final_answer"
     assert "thought" in final_answer_schema["function"]["parameters"]["properties"]
     assert "answer" in final_answer_schema["function"]["parameters"]["properties"]
 
-    # Verify all schemas have required structure and flat-args shape
     for schema in schemas:
         assert "type" in schema
         assert schema["type"] == "function"
@@ -612,7 +605,6 @@ def test_generate_function_calling_schemas(openai_node, mock_tool):
         assert "action_input" not in properties
         # thought is the first property (load-bearing for streaming UX and model behavior)
         assert next(iter(properties)) == "thought"
-        # thought is in required
         assert parameters["required"][0] == "thought"
 
 
@@ -656,11 +648,9 @@ def test_todo_tools_added_when_enabled(openai_node, mock_llm_executor):
         inference_mode=InferenceMode.DEFAULT,
     )
 
-    # Check that TodoWriteTool was automatically added
     todo_tools = [t for t in agent.tools if isinstance(t, TodoWriteTool)]
     assert len(todo_tools) == 1, "TodoWriteTool should be automatically added"
 
-    # Check that todo instructions are in the prompt
     prompt = agent.generate_prompt()
     assert "Todo Management" in prompt, "TODO instructions should be in system prompt"
     assert "todo-write" in prompt, "todo-write tool should be mentioned in prompt"
@@ -703,10 +693,8 @@ def test_agent_state_updates_with_todos(openai_node):
             TodoItem(id="3", content="Third task", status=TodoStatus.PENDING),
         ]
     )
-    # Verify todos are TodoItem instances
     assert all(isinstance(t, TodoItem) for t in state.todos)
 
-    # Reset should clear state
     state.reset(max_loops=10)
     assert state.current_loop == 0
     assert state.max_loops == 10
@@ -1074,8 +1062,6 @@ class TestParallelToolCloning:
             inference_mode=InferenceMode.XML,
             parallel_tool_calls_enabled=True,
         )
-
-    # -- Low-level: _run_tool -------------------------------------------------
 
     def test_run_tool_does_not_clone_for_sequential_execution(self, parallel_agent, calculator_tool, mocker):
         """_run_tool must NOT clone when is_parallel is False (the default),

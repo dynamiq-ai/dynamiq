@@ -37,21 +37,17 @@ def mock_requests(mocker, mock_scale_response):
 
 def test_basic_search(mock_requests):
     """Test basic search functionality."""
-    # Setup
     scale_connection = ScaleSerp(api_key="test_key")
     search_tool = ScaleSerpTool(connection=scale_connection)
 
-    # Execute
     input_data = {"query": "test query", "limit": 5}
     result = search_tool.run(input_data)
 
-    # Verify API call
     mock_requests.assert_called_once()
     call_args = mock_requests.call_args[1]["params"]
     assert call_args["q"] == "test query"
     assert call_args["num"] == 5
 
-    # Verify response formatting
     assert "result" in result.output["content"]
     assert "Test Result 1" in str(result.output["content"])
     assert "Test Result 2" in str(result.output["content"])
@@ -59,22 +55,18 @@ def test_basic_search(mock_requests):
 
 def test_search_with_custom_params(mock_requests):
     """Test search with custom parameters."""
-    # Setup
     scale_connection = ScaleSerp(api_key="test_key")
     search_tool = ScaleSerpTool(connection=scale_connection, is_optimized_for_agents=True)
 
-    # Execute
     input_data = {"query": "test query", "search_type": SearchType.NEWS, "limit": 2}
     result = search_tool.run(input_data)
 
-    # Verify API call
     mock_requests.assert_called_once()
     call_args = mock_requests.call_args[1]["params"]
     assert call_args["q"] == "test query"
     assert call_args["num"] == 2
     assert call_args["search_type"] == "news"
 
-    # Verify response contains agent-optimized format
     content = result.output["content"]
     assert "## Sources with URLs" in content
     assert "## Search results for" in content

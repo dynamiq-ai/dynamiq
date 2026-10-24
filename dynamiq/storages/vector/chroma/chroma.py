@@ -1,6 +1,8 @@
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Optional
 
+from chromadb.errors import NotFoundError
+
 from dynamiq.connections import Chroma
 from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.storages.vector.base import BaseVectorStore
@@ -68,12 +70,11 @@ class ChromaVectorStore(BaseVectorStore, DryRunMixin):
             self.client = connection.connect()
         self.index_name = index_name
         if create_if_not_exist:
-            collection_exists = self.client.get_collection(name=index_name)
-            if not collection_exists:
+            try:
+                self._collection = self.client.get_collection(name=index_name)
+            except NotFoundError:
                 self._collection = self.client.create_collection(name=index_name)
                 self._track_collection(index_name)
-            else:
-                self._collection = self.client.get_collection(name=index_name)
         else:
             self._collection = self.client.get_collection(name=index_name)
 
@@ -200,7 +201,8 @@ class ChromaVectorStore(BaseVectorStore, DryRunMixin):
             raise ValueError("No filters provided. No documents will be deleted.")
         else:
             ids, where, where_document = self._normalize_filters(filters)
-            self._collection.delete(ids=ids, where=where, where_document=where_document)
+            # chromadb 1.x rejects empty filters, which mean no filter.
+            self._collection.delete(ids=ids or None, where=where or None, where_document=where_document or None)
 
     def delete_collection(self, collection_name: str | None = None):
         """
@@ -247,8 +249,8 @@ class ChromaVectorStore(BaseVectorStore, DryRunMixin):
             results = self._collection.query(
                 query_embeddings=query_embeddings,
                 n_results=top_k,
-                where=chroma_filters[1],
-                where_document=chroma_filters[2],
+                where=chroma_filters[1] or None,
+                where_document=chroma_filters[2] or None,
                 include=["embeddings", "documents", "metadatas", "distances"],
             )
 
@@ -299,7 +301,7 @@ class ChromaVectorStore(BaseVectorStore, DryRunMixin):
         """
         if filters:
             ids, where, where_document = self._normalize_filters(filters)
-            kwargs: dict[str, Any] = {"where": where}
+            kwargs: dict[str, Any] = {"where": where or None}
 
             if ids:
                 kwargs["ids"] = ids
@@ -347,17 +349,14 @@ class ChromaVectorStore(BaseVectorStore, DryRunMixin):
         if not isinstance(filters, dict):
             raise TypeError("'filters' parameter must be a dictionary")
 
-        # Check if it's the new format
         if "operator" in filters or "conditions" in filters:
             processed_filters = ChromaVectorStore._process_filter_node(filters)
         else:
-            # It's the old format, use the old processing method
             return ChromaVectorStore._process_old_filters(filters)
 
         ids = []
         where_document = {}
 
-        # Extract 'id' and 'content' filters if present
         if "metadata.id" in processed_filters:
             ids = processed_filters["metadata.id"].get("$eq", [])
             del processed_filters["metadata.id"]
@@ -442,11 +441,9 @@ class ChromaVectorStore(BaseVectorStore, DryRunMixin):
         Raises:
             ValueError: If the node structure is invalid.
         """
-        if "operator" in node and "conditions" in node:  # Logic node
+        if "operator" in node and "conditions" in node:
             return ChromaVectorStore._process_logic_node(node)
-        elif (
-            "field" in node and "operator" in node and "value" in node
-        ):  # Comparison node
+        elif "field" in node and "operator" in node and "value" in node:
             return ChromaVectorStore._process_comparison_node(node)
         else:
             raise ValueError("Invalid filter node structure")
@@ -541,7 +538,7 @@ class ChromaVectorStore(BaseVectorStore, DryRunMixin):
                 }
 
                 if metadatas := result.get("metadatas"):
-                    document_dict["metadata"] = dict(metadatas[i][j])
+                    document_dict["metadata"] = dict(metadatas[i][j] or {})
 
                 if embeddings := result.get("embeddings"):
                     document_dict["embedding"] = embeddings[i][j]
@@ -578,9 +575,10 @@ class ChromaVectorStore(BaseVectorStore, DryRunMixin):
             }
 
             if metadatas := result.get("metadatas"):
-                document_dict["metadata"] = dict(metadatas[i])
+                document_dict["metadata"] = dict(metadatas[i] or {})
 
-            if embeddings := result.get("embeddings"):
+            # A numpy array, which has no truth value.
+            if (embeddings := result.get("embeddings")) is not None:
                 document_dict["embedding"] = embeddings[i]
 
             if distances := result.get("distances"):

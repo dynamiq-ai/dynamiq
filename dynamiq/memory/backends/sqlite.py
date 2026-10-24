@@ -26,7 +26,6 @@ class SQLite(MemoryBackend):
     db_path: Annotated[str, Field(default="conversations.db")]
     index_name: Annotated[str, Field(default="conversations")]
 
-    # SQL Query Constants
     CREATE_TABLE_QUERY: ClassVar[
         str
     ] = """

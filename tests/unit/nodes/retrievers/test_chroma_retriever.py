@@ -15,7 +15,7 @@ from dynamiq.storages.vector import ChromaVectorStore
 @pytest.fixture
 def mock_chroma_vector_store():
     mock_store = MagicMock(spec=ChromaVectorStore)
-    mock_store.client = MagicMock()  # Add the client attribute to the mock
+    mock_store.client = MagicMock()
     return mock_store
 
 

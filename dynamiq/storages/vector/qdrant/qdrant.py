@@ -196,7 +196,8 @@ class QdrantVectorStore(BaseVectorStore, DryRunMixin):
             optimizers_config: Params for optimizer.
             wal_config: Params for Write-Ahead-Log.
             quantization_config: Params for quantization. If `None`, quantization will be disabled.
-            init_from: Use data stored in another collection to initialize this collection.
+            init_from: Use data stored in another collection to initialize this collection. Needs qdrant-client
+                older than 1.16.
             wait_result_from_api: Whether to wait for the result from the API after each request.
             metadata: Additional metadata to include with the documents.
             write_batch_size: The batch size for writing documents.
@@ -272,8 +273,8 @@ class QdrantVectorStore(BaseVectorStore, DryRunMixin):
                 path=self.path,
                 metadata=self.metadata,
                 force_disable_check_same_thread=self.force_disable_check_same_thread,
+                check_compatibility=False,
             )
-            # Make sure the collection is properly set up
             self._set_up_collection(
                 collection_name=self.index_name,
                 embedding_dim=self.dimension,
@@ -1096,7 +1097,6 @@ class QdrantVectorStore(BaseVectorStore, DryRunMixin):
         if use_sparse_embeddings is None:
             use_sparse_embeddings = self.use_sparse_embeddings
 
-        # dense vectors configuration
         vectors_config = rest.VectorParams(size=embedding_dim, on_disk=on_disk, distance=distance)
 
         # Reset cached payload index information when recreating a collection
@@ -1132,7 +1132,8 @@ class QdrantVectorStore(BaseVectorStore, DryRunMixin):
                 optimizers_config=self.optimizers_config,
                 wal_config=self.wal_config,
                 quantization_config=self.quantization_config,
-                init_from=self.init_from,
+                # qdrant-client 1.16 rejects init_from, so it is only sent when set.
+                **({"init_from": self.init_from} if self.init_from is not None else {}),
             )
         except UnexpectedResponse as exc:
             if getattr(exc, "status_code", None) == 404:

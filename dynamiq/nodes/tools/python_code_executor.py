@@ -1,6 +1,7 @@
 import builtins
 import errno
 import importlib
+import importlib.util
 import inspect
 import io
 import json
@@ -34,6 +35,28 @@ from dynamiq.utils.logger import logger
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 OPTIONAL_PRELOAD_MODULES: tuple[tuple[str, str | None], ...] = (("seaborn", "sns"),)
+
+
+def _describe_libraries() -> str:
+    """Describe the libraries the code can use.
+
+    pdfplumber and the plotting libraries come with extras, so they are left out when they are not installed.
+    """
+    libraries = ["pandas", "numpy", "requests"]
+    if importlib.util.find_spec("pdfplumber"):
+        libraries.append("pdfplumber")
+    libraries += ["pypdf", "docx (python-docx)", "pptx (python-pptx)", "openpyxl"]
+    if not (importlib.util.find_spec("matplotlib") and importlib.util.find_spec("seaborn")):
+        return f"Available libraries include: {', '.join(libraries)}, and the standard library. "
+    libraries.append("seaborn (preloaded as `sns` and the default for plotting)")
+    return (
+        "Matplotlib is forced onto the 'Agg' backend so you can always render plots headlessly with "
+        "`plt.savefig(...)` (no GUI popups). "
+        f"Available libraries include: {', '.join(libraries)}, and the standard library. "
+        "Default to seaborn for charting so plots render consistently without extra setup. Seaborn is already "
+        "injected as `sns`, but explicit `import seaborn as sns` or `import matplotlib.pyplot as plt` statements are "
+        "also permitted if you prefer. "
+    )
 
 
 class PythonCodeExecutorFileWorkspace(BaseModel):
@@ -264,18 +287,7 @@ class PythonCodeExecutor(Node):
         "when you need metadata, binary vs text detection, or want a "
         "consistent API—so prefer read_file()/write_file(), "
         "list_files(), file_exists(), describe_file(), etc., or"
-        " call them via `helpers['read_file']('foo.csv')`. Matplotlib "
-        "is forced onto the 'Agg' backend so you can always render"
-        " plots headlessly with `plt.savefig(...)` (no GUI popups). "
-        "Available libraries include: pandas, numpy, "
-        "requests, pdfplumber, pypdf, docx (python-docx), "
-        "pptx (python-pptx), markdown, openpyxl, "
-        "seaborn (preloaded as `sns` and the default for plotting), and the "
-        "standard library. Default to seaborn for"
-        " charting so plots render consistently without extra setup. Seaborn is "
-        "already injected as `sns`, but explicit "
-        "`import seaborn as sns` or `import matplotlib.pyplot as plt` statements "
-        "are also permitted if you prefer. Write normal Python "
+        " call them via `helpers['read_file']('foo.csv')`. " + _describe_libraries() + "Write normal Python "
         "exactly as it would appear in a `.py` file—use literal "
         "newlines instead of escaping them, "
         "and avoid JSON-style quoting inside the source. Any "

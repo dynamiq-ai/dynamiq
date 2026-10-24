@@ -24,9 +24,6 @@ def make_client():
     return client, boto_client
 
 
-# --- normalize_sandbox_path --------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
@@ -41,9 +38,6 @@ def make_client():
 )
 def test_normalize_sandbox_path(raw, expected):
     assert normalize_sandbox_path(raw) == expected
-
-
-# --- error translation -------------------------------------------------------
 
 
 def test_translate_error_none_response_does_not_crash():
@@ -74,12 +68,8 @@ def test_translate_error_non_retryable_passthrough():
     assert AgentCoreCodeInterpreterClient._translate_error(err) is err
 
 
-# --- client construction disables botocore retries ---------------------------
-
-
 def test_client_disables_botocore_retries():
     """The client must not use botocore's default legacy retries (non-idempotent invoke)."""
-    # The Config passed to session.client("bedrock-agentcore", config=...) must disable retries.
     with patch.object(AWSConnection, "get_boto3_session") as gs:
         gs.return_value = MagicMock()
         AgentCoreCodeInterpreterClient(AWSConnection(region="us-west-2"))
@@ -115,9 +105,6 @@ def test_invoke_is_sent_exactly_once_on_transport_error():
             client.invoke(AgentCoreSession(identifier="aws.codeinterpreter.v1", session_id="s"), "executeCode", {})
 
     assert len(attempts) == 1, f"invoke was sent {len(attempts)} times; user code could run more than once"
-
-
-# --- invoke stream parsing ---------------------------------------------------
 
 
 def _stream(*results):
@@ -190,9 +177,6 @@ def test_invoke_translates_mid_stream_throttling():
         client.invoke(MagicMock(identifier="id", session_id="s"), "executeCode", {"code": "x"})
 
 
-# --- extract_file_bytes ------------------------------------------------------
-
-
 def test_extract_file_bytes_blob_resource():
     result = AgentCoreInvocationResult(
         content=[{"type": "resource", "resource": {"type": "blob", "blob": b"raw bytes"}}]
@@ -220,9 +204,6 @@ def test_extract_file_bytes_str_blob_coercion():
 def test_extract_file_bytes_empty_raises():
     with pytest.raises(FileNotFoundError):
         AgentCoreCodeInterpreterClient.extract_file_bytes(AgentCoreInvocationResult(content=[]))
-
-
-# --- invocation result properties -------------------------------------------
 
 
 def test_result_stdout_falls_back_to_text_blocks():

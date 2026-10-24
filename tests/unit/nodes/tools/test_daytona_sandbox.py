@@ -112,7 +112,6 @@ def test_package_installation(daytona_tool, mock_daytona_sdk):
     result = daytona_tool.execute(input_data)
 
     assert result["content"]["packages_installation"] == "Installed packages: pandas,numpy"
-    # Verify pip install was called with the packages
     calls = [str(c) for c in mock_sandbox.process.exec.call_args_list]
     assert any("pip install" in c and "pandas" in c for c in calls)
 
@@ -241,7 +240,6 @@ def test_persistent_sandbox_false(mock_daytona_sdk):
     input_data = DaytonaInterpreterInputSchema(python="print('hello')")
     tool.execute(input_data)
 
-    # Verify sandbox was destroyed after execution
     mock_client.delete.assert_called_once_with(mock_sandbox)
 
 
