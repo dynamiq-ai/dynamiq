@@ -503,24 +503,28 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             return
 
         if self.mode_name == InferenceMode.FUNCTION_CALLING.value:
-            text_delta, function_name, tc_index = self._extract_function_calling_text(chunk)
-            if tc_index != self._fc_current_index:
-                if self._fc_current_index != -1:
-                    self._reset_tool_call_state()
-                self._fc_current_index = tc_index
+            # One chunk can carry several tool calls; each one goes through the parser in order.
+            for text_delta, function_name, tc_index in self._extract_function_calling_text(chunk):
+                if tc_index != self._fc_current_index:
+                    if self._fc_current_index != -1:
+                        self._reset_tool_call_state()
+                    self._fc_current_index = tc_index
 
-            if function_name and function_name == FINAL_ANSWER_FUNCTION_NAME:
-                self._answer_started = True
-            elif function_name:
-                self._tool_input_started = True
-                self._current_action_name = self.agent.sanitize_tool_name(function_name)
-                new_id = generate_uuid()
-                self.agent._streaming_tool_run_id = new_id
-                self.agent._streaming_tool_run_ids.append(new_id)
-            self._latest_fc_args_delta = text_delta or ""
-        else:
-            text_delta = self._extract_text_delta(chunk)
+                if function_name and function_name == FINAL_ANSWER_FUNCTION_NAME:
+                    self._answer_started = True
+                elif function_name:
+                    self._tool_input_started = True
+                    self._current_action_name = self.agent.sanitize_tool_name(function_name)
+                    new_id = generate_uuid()
+                    self.agent._streaming_tool_run_id = new_id
+                    self.agent._streaming_tool_run_ids.append(new_id)
+                self._latest_fc_args_delta = text_delta or ""
+                self._process_text_delta(text_delta)
+            return
 
+        self._process_text_delta(self._extract_text_delta(chunk))
+
+    def _process_text_delta(self, text_delta: str) -> None:
         if not text_delta:
             return
 
@@ -653,36 +657,36 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
 
         return extracted_content
 
-    def _extract_function_calling_text(self, chunk: dict[str, Any]) -> tuple[str, str | None, int]:
+    def _extract_function_calling_text(self, chunk: dict[str, Any]) -> list[tuple[str, str | None, int]]:
         """
         Extract incremental JSON values (arguments), function name, and tool call index
-        from the LLM streaming chunks in FUNCTION_CALLING inference mode.
+        for every tool call in an LLM streaming chunk in FUNCTION_CALLING inference mode.
 
         Returns:
-            tuple[str, str | None, int]: (arguments_text, function_name, tool_call_index)
+            list[tuple[str, str | None, int]]: (arguments_text, function_name, tool_call_index) per tool call.
+                A chunk without tool calls yields one empty entry at the current index.
         """
-        arguments_text = ""
-        function_name = None
-        tc_index = self._fc_current_index if self._fc_current_index != -1 else 0
-
         choices = chunk.get("choices") or []
-        if choices:
-            delta = choices[0].get("delta", {})
-            tool_calls = delta.get("tool_calls")
+        tool_calls = choices[0].get("delta", {}).get("tool_calls") if choices else None
 
-            if tool_calls and len(tool_calls) > 0:
-                tool_call = tool_calls[0]
-                tc_index = tool_call.get("index", 0)
-                if tool_call.get("type") == "function" and "function" in tool_call:
-                    function_data = tool_call["function"]
+        parsed = []
+        for tool_call in tool_calls or []:
+            arguments_text = ""
+            function_name = None
+            tc_index = tool_call.get("index", 0)
+            if tool_call.get("type") == "function" and "function" in tool_call:
+                function_data = tool_call["function"]
 
-                    if function_data.get("name"):
-                        function_name = function_data["name"]
+                if function_data.get("name"):
+                    function_name = function_data["name"]
 
-                    if function_data.get("arguments"):
-                        arguments_text = function_data["arguments"]
+                if function_data.get("arguments"):
+                    arguments_text = function_data["arguments"]
+            parsed.append((arguments_text, function_name, tc_index))
 
-        return arguments_text, function_name, tc_index
+        if not parsed:
+            parsed.append(("", None, self._fc_current_index if self._fc_current_index != -1 else 0))
+        return parsed
 
     def _resolve_tool_data(self) -> AgentToolData:
         """Resolve the current action name to an AgentToolData instance."""
