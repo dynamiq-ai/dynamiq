@@ -86,15 +86,12 @@ def _parse_logical_condition(condition: dict[str, Any], initial: bool = True) ->
         if _is_all_logical(conditions):
             if initial:
                 conditions = [_parse_logical_condition(c, initial=False) for c in conditions]
-                # Merge conditions
                 merged = {}
                 for d in conditions:
                     for k, v in d.items():
                         if k in merged:
-                            # Combine lists
                             if isinstance(merged[k], list) and isinstance(v, list):
                                 merged[k].extend(v)
-                            # Merge dicts based on the structure
                             elif isinstance(merged[k], dict) and isinstance(v, dict):
                                 for sub_k, sub_v in v.items():
                                     if (
@@ -106,7 +103,6 @@ def _parse_logical_condition(condition: dict[str, Any], initial: bool = True) ->
                                     else:
                                         merged[k][sub_k] = sub_v
                             else:
-                                # Keep the last value
                                 merged[k] = v
                         else:
                             merged[k] = v

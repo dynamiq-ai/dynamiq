@@ -6,9 +6,7 @@ from dynamiq.types import Document
 
 def main() -> None:
     if find_spec("bs4") is None:
-        print(
-            "HTMLHeaderSplitter requires beautifulsoup4. Install with: uv sync (or pip install beautifulsoup4)"
-        )
+        print('HTMLHeaderSplitter requires beautifulsoup4. Install it with: pip install "dynamiq[files]"')
         return
 
     splitter = HTMLHeaderSplitter()

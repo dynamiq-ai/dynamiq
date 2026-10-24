@@ -76,7 +76,6 @@ class MemoryStoreAPISimulator:
         self.memories: dict[tuple[str, str, str], str] = {}
         self.calls: list[tuple[str, str]] = []
 
-    # -- transport ---------------------------------------------------------
     def request(self, verb, url, headers=None, params=None, json=None, timeout=None):
         self.calls.append((verb, url))
 
@@ -103,7 +102,6 @@ class MemoryStoreAPISimulator:
             return self._delete(scope, path)
         return self._list(scope, params.get("path") or "")
 
-    # -- endpoints ---------------------------------------------------------
     def _read(self, scope, path):
         if (*scope, path) not in self.memories:
             return _Response(404, {"message": f"no such memory: {path}"})
@@ -134,7 +132,6 @@ class MemoryStoreAPISimulator:
             },
         )
 
-    # -- helpers -----------------------------------------------------------
     @staticmethod
     def _path_is_safe(path: str) -> bool:
         if not path:

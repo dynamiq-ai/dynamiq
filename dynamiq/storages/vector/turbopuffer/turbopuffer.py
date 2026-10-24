@@ -141,8 +141,6 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
         if self.client:
             self.client.close()
 
-    # Schema
-
     def _load_schema(self, refresh: bool = False) -> dict[str, dict]:
         """Return the namespace schema, empty when the namespace does not exist yet."""
         if self._schema is None or refresh:
@@ -171,8 +169,6 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
             schema = self._load_schema(refresh=True)
         preferred = (content_key, *DEFAULT_SEARCHABLE_TEXT_METADATA_FIELDS)
         return [name for name in dict.fromkeys(preferred) if schema.get(name, {}).get("full_text_search")]
-
-    # Writing
 
     def _encode_vector(self, embedding: list[float]) -> str:
         return base64.b64encode(np.asarray(embedding, dtype="<f4").tobytes()).decode("ascii")
@@ -380,8 +376,6 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
         if documents:
             self.write_documents(documents, policy=DuplicatePolicy.OVERWRITE)
 
-    # Reading
-
     def _attributes(self, include_embeddings: bool) -> dict[str, Any]:
         if include_embeddings:
             return {"include_attributes": True}
@@ -548,8 +542,6 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
             documents.extend(self._to_document(row, content_key=content_key) for row in rows)
         return documents
 
-    # Deleting
-
     def delete_documents(self, document_ids: list[str] | None = None, delete_all: bool = False) -> None:
         """
         Delete documents from the namespace.
@@ -620,8 +612,6 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
             pass
         if name == self.index_name:
             self._schema = None
-
-    # Retrieval
 
     def _embedding_retrieval(
         self,

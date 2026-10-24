@@ -1,6 +1,5 @@
 from typing import Any, ClassVar, Literal
 
-from litellm import token_counter
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.checkpoints.checkpoint import BaseCheckpointState
@@ -12,6 +11,7 @@ from dynamiq.prompts import Message, MessageRole
 from dynamiq.prompts.prompts import Prompt, VisionMessage
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.cancellation import check_cancellation
+from dynamiq.utils.litellm import token_counter
 from dynamiq.utils.logger import logger
 
 MERGE_SUMMARIES_PROMPT = (
@@ -94,7 +94,6 @@ class ContextManagerTool(Node):
         """Initialize components for the tool."""
         connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
-        # Initialize the LLM if it is a postponed component
         if self.llm.is_postponed_component_init:
             self.llm.init_components(connection_manager)
 

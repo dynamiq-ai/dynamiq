@@ -822,7 +822,6 @@ class KnowledgeGraphRetriever(ConnectionNode):
                 # `content` prefers verbatim source text. ACL-safe: each source_doc_id came from an ACL-visible edge.
                 output["content"] = "\n\n".join(d.content for d in source_documents if d.content) or facts
             if self.summarize and documents:
-                # keep the raw retrieval under `context`; `content` becomes the composed answer
                 output["context"] = output["content"]
                 output["content"] = self._summarize(input_data.query, output["context"], config, **kwargs)
             return output

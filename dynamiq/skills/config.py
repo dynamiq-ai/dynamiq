@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import importlib
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from dynamiq.skills.registries import BaseSkillRegistry
 from dynamiq.skills.types import SkillInstructions, SkillMetadata, SkillRegistryError
+from dynamiq.utils.lazy_imports import import_type
 
 
 class SkillsConfig(BaseModel):
@@ -36,9 +36,9 @@ class SkillsConfig(BaseModel):
                     "Registry type must be a fully qualified class name"
                     " (e.g. dynamiq.skills.registries.filesystem.FileSystem)."
                 )
-            module_name, class_name = registry_type.rsplit(".", 1)
-            module = importlib.import_module(module_name)
-            registry_cls = getattr(module, class_name)
+            registry_cls = import_type(registry_type)
+            if not (isinstance(registry_cls, type) and issubclass(registry_cls, BaseSkillRegistry)):
+                raise ValueError(f"Registry type {registry_type!r} is not a skill registry.")
             init_data = {k: val for k, val in v.items() if k != "type"}
             return registry_cls(**init_data)
         return v

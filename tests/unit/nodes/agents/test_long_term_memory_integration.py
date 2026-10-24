@@ -63,14 +63,8 @@ def _input(user_id=None, session_id=None):
     return SimpleNamespace(user_id=user_id, session_id=session_id, input="hi")
 
 
-# --- LongTermMemoryConfig ---
-
-
 def test_config_defaults_to_enabled():
     assert _ltm_config().enabled is True
-
-
-# --- Agent field declarations ---
 
 
 def test_agent_has_long_term_memory_field():
@@ -82,9 +76,6 @@ def test_agent_has_long_term_memory_field():
 def test_agent_long_term_memory_defaults_to_none(llm):
     agent = _make_agent(llm)
     assert agent.long_term_memory is None
-
-
-# --- _build_long_term_memory_tools ---
 
 
 def test_build_returns_default_tools_when_ltm_and_user_id_present(llm, ltm):
@@ -199,9 +190,6 @@ def test_init_components_initializes_ltm_embedder(llm):
     assert len(init_calls) == 1
 
 
-# --- per-call ContextVar overlay: LTM tools never mutate self.tools ---
-
-
 def _patch_run_agent_capture_runtime_tools(agent, captured):
     """Capture what the LLM-facing `tool_by_names` resolution sees mid-run."""
 
@@ -266,7 +254,7 @@ def test_execute_does_not_serialize_concurrent_calls_when_ltm_configured(llm, lt
     barrier = threading.Barrier(2, timeout=5)
 
     def fake_run(*args, **kwargs):
-        barrier.wait()  # times out under a lock; verifies real concurrency
+        barrier.wait()  # times out, failing the run, if the calls are serialized
         return "ok"
 
     with patch.object(agent, "_run_agent", side_effect=fake_run):
@@ -276,7 +264,7 @@ def test_execute_does_not_serialize_concurrent_calls_when_ltm_configured(llm, lt
                 pool.submit(agent.run_sync, input_data={"input": "hi", "user_id": "u2"}),
             ]
             for f in futures:
-                f.result(timeout=10)
+                assert f.result(timeout=10).status.value == "success"
 
 
 def test_concurrent_calls_isolate_per_user_ltm_tools(llm, ltm):
@@ -291,7 +279,7 @@ def test_concurrent_calls_isolate_per_user_ltm_tools(llm, ltm):
     barrier = threading.Barrier(2, timeout=5)
 
     def fake_run(*args, **kwargs):
-        barrier.wait()
+        barrier.wait()  # times out if a lock serializes the two runs
         resolved = agent.tool_by_names
         bound_user_ids = {t.user_id for t in resolved.values() if hasattr(t, "user_id")}
         assert len(bound_user_ids) == 1, f"cross-user leakage: {bound_user_ids}"

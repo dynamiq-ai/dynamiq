@@ -230,14 +230,6 @@ class TestRequestOptions:
         assert documentai.ProcessOptions.pb(request.process_options).HasField("ocr_config")
         assert request.process_options.ocr_config.enable_native_pdf_parsing is enable_native_pdf_parsing
 
-    def test_mime_type_is_guessed_from_the_filename(self, converter, client):
-        image = BytesIO(b"not-really-a-png")
-        image.name = "scan.png"
-
-        converter.run(files=[image])
-
-        assert client.process_document.call_args.kwargs["request"].raw_document.mime_type == "image/png"
-
 
 class TestMimeTypes:
     @pytest.mark.parametrize(

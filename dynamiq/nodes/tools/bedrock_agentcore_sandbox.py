@@ -39,8 +39,8 @@ class BedrockAgentCoreInterpreterTool(BaseCodeInterpreterTool):
     name: str = "bedrock-agentcore-code-interpreter-tool"
     description: str = DESCRIPTION_SANDBOX_INTERPRETER
     base_path: str = "."
-    # Session lifetime (time-to-live). Defaults higher than the base tool so a persistent
-    # session is unlikely to hit its hard TTL between executions.
+    # Defaults higher than the base tool so a persistent session is unlikely to hit its hard
+    # TTL between executions.
     timeout: int = Field(default=3600, description="Session lifetime in seconds (AgentCore caps it at 28800).")
     connection: AWSConnection | None = None
     code_interpreter_identifier: str = Field(

@@ -5,11 +5,9 @@ from dynamiq.nodes.llms import BaseLLM
 
 
 def test_llm_evaluator_without_ground_truth():
-    # Mock LLM
     mock_llm = MagicMock(spec=BaseLLM)
 
-    # Define what the llm.execute method should return
-    # It should return a dict with key 'content' containing the LLM's output as a string
+    # llm.execute returns a dict with key 'content' containing the LLM's output as a string.
     mock_llm.execute.side_effect = [
         {"content": '{"score": 0}'},
         {"content": '{"score": 0}'},
@@ -18,8 +16,8 @@ def test_llm_evaluator_without_ground_truth():
 
     evaluator = LLMEvaluator(
         instructions="Is this answer problematic for children?",
-        inputs=[{"name": "answers", "type": list[str]}],  # Updated inputs definition
-        outputs=[{"name": "score", "type": int}],  # Updated outputs definition
+        inputs=[{"name": "answers", "type": list[str]}],
+        outputs=[{"name": "score", "type": int}],
         examples=[
             {
                 "inputs": {"answers": "Damn, this is straight outta hell!!!"},
@@ -46,7 +44,6 @@ def test_llm_evaluator_without_ground_truth():
 
 
 def test_llm_evaluator_with_ground_truth():
-    # Mock LLM
     mock_llm = MagicMock(spec=BaseLLM)
     mock_llm.execute.side_effect = [
         {"content": '{"score": 0}'},
@@ -58,8 +55,8 @@ def test_llm_evaluator_with_ground_truth():
         inputs=[
             {"name": "answers", "type": list[str]},
             {"name": "ground_truth", "type": list[str]},
-        ],  # Updated inputs definition
-        outputs=[{"name": "score", "type": int}],  # Updated outputs definition
+        ],
+        outputs=[{"name": "score", "type": int}],
         examples=[
             {
                 "inputs": {
@@ -96,7 +93,6 @@ def test_llm_evaluator_with_ground_truth():
 
 
 def test_llm_evaluator_with_answer_correctness():
-    # Mock LLM
     mock_llm = MagicMock(spec=BaseLLM)
     mock_llm.execute.side_effect = [
         {"content": '{"score": 0}'},
@@ -115,11 +111,11 @@ def test_llm_evaluator_with_answer_correctness():
     evaluator = LLMEvaluator(
         instructions=instruction_text.strip(),
         inputs=[
-            {"name": "question", "type": list[str]},  # Updated inputs definition
+            {"name": "question", "type": list[str]},
             {"name": "ground_truth_answer", "type": list[str]},
             {"name": "answer_by_llm", "type": list[str]},
         ],
-        outputs=[{"name": "score", "type": int}],  # Updated outputs definition
+        outputs=[{"name": "score", "type": int}],
         examples=[
             {
                 "inputs": {
@@ -167,13 +163,11 @@ def test_llm_evaluator_with_answer_correctness():
 
 
 def test_llm_evaluator_with_placeholders_no_inputs_with_examples():
-    # Mock LLM
     mock_llm = MagicMock(spec=BaseLLM)
     mock_llm.execute.return_value = {"content": '{"quote": "Believe in yourself and all that you are."}'}
 
     instructions = "Please provide a motivational quote: '{{ quote_placeholder }}'"
 
-    # Instantiate LLMEvaluator without inputs
     evaluator = LLMEvaluator(
         instructions=instructions,
         outputs=[{"name": "quote", "type": str}],
@@ -191,7 +185,6 @@ def test_llm_evaluator_with_placeholders_no_inputs_with_examples():
         llm=mock_llm,
     )
 
-    # Run the evaluator without inputs
     results = evaluator.run()
     expected_results = {"results": [{"quote": "Believe in yourself and all that you are."}]}
 
@@ -199,20 +192,17 @@ def test_llm_evaluator_with_placeholders_no_inputs_with_examples():
 
 
 def test_llm_evaluator_with_placeholders_no_inputs_without_examples():
-    # Mock LLM
     mock_llm = MagicMock(spec=BaseLLM)
     mock_llm.execute.return_value = {"content": '{"quote": "Believe in yourself and all that you are."}'}
 
     instructions = "Please provide a motivational quote: '{{ quote_placeholder }}'"
 
-    # Instantiate LLMEvaluator without inputs
     evaluator = LLMEvaluator(
         instructions=instructions,
         outputs=[{"name": "quote", "type": str}],
         llm=mock_llm,
     )
 
-    # Run the evaluator without inputs
     results = evaluator.run()
     expected_results = {"results": [{"quote": "Believe in yourself and all that you are."}]}
 

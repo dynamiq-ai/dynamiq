@@ -1,10 +1,10 @@
 from typing import Any, Literal
 
-from litellm import token_counter
 from pydantic import BaseModel, PositiveInt
 
 from dynamiq.connections import Gemini as GeminiConnection
 from dynamiq.nodes.llms.base import BaseLLM
+from dynamiq.utils.litellm import token_counter
 from dynamiq.utils.logger import logger
 
 # Google rejects a cache below the model's minimum and fails the whole request. `min_tokens`

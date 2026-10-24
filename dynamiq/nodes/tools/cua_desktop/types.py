@@ -84,9 +84,6 @@ class CuaAction(str, Enum):
     RUN_COMMAND = "run_command"
 
 
-# Mouse Actions
-
-
 class CuaMoveMouseSchema(BaseModel):
     """move_mouse: Move the cursor to the specified screen coordinates.
 
@@ -193,9 +190,6 @@ class CuaGetCursorPositionSchema(BaseModel):
     action: Literal[CuaAction.GET_CURSOR_POSITION] = CuaAction.GET_CURSOR_POSITION
 
 
-# Keyboard Actions
-
-
 class CuaTypeTextSchema(BaseModel):
     """type_text: Type text into the current focused input.
 
@@ -232,9 +226,6 @@ class CuaSendKeySchema(BaseModel):
         return v
 
 
-# Scrolling Actions
-
-
 class CuaScrollSchema(BaseModel):
     """scroll: Scroll the mouse wheel.
 
@@ -258,7 +249,6 @@ class CuaScrollSchema(BaseModel):
         clicks = self.clicks
         direction = self.direction
 
-        # Both must be provided
         if (clicks is not None) != (direction is not None):
             if clicks is not None:
                 raise ValueError("clicks can only be used when direction is specified")
@@ -266,9 +256,6 @@ class CuaScrollSchema(BaseModel):
                 raise ValueError("direction can only be used when clicks is specified")
 
         return self
-
-
-# Screen Actions
 
 
 class CuaTakeScreenshotSchema(BaseModel):
@@ -306,9 +293,6 @@ class CuaGetScreenSizeSchema(BaseModel):
     """get_screen_size: Get the screen dimensions."""
 
     action: Literal[CuaAction.GET_SCREEN_SIZE] = CuaAction.GET_SCREEN_SIZE
-
-
-# Window Management
 
 
 class CuaLaunchSchema(BaseModel):
@@ -390,9 +374,6 @@ class CuaCloseWindowSchema(BaseModel):
     window_id: str | int = Field(..., description="ID of the window to close")
 
 
-# Clipboard Actions
-
-
 class CuaClipboardSchema(BaseModel):
     """clipboard: Get or set clipboard content.
 
@@ -411,9 +392,6 @@ class CuaClipboardSchema(BaseModel):
         if info.data.get("operation") == "set" and not v:
             raise ValueError("text is required when operation is 'set'")
         return v
-
-
-# Accessibility
 
 
 class CuaToScreenCoordinatesSchema(BaseModel):
@@ -438,9 +416,6 @@ class CuaToScreenshotCoordinatesSchema(BaseModel):
     action: Literal[CuaAction.TO_SCREENSHOT_COORDINATES] = CuaAction.TO_SCREENSHOT_COORDINATES
     x: float = Field(..., description="X coordinate in screen space")
     y: float = Field(..., description="Y coordinate in screen space")
-
-
-# Other Actions
 
 
 class CuaWaitSchema(BaseModel):

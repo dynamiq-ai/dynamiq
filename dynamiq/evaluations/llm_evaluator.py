@@ -106,7 +106,6 @@ class LLMEvaluator:
         }
         self.api_params["generation_kwargs"] = merged_generation_kwargs
 
-        # Prepare the prompt with placeholders
         template = self._prepare_prompt_template()
         message = Message(role="user", content=template)
         self.prompt = Prompt(messages=[message])
@@ -131,7 +130,6 @@ class LLMEvaluator:
         Raises:
             ValueError: If the inputs or outputs are not correctly formatted.
         """
-        # Validate inputs
         if not isinstance(inputs, list) or not all(isinstance(inp, dict) for inp in inputs):
             msg = "LLM evaluator expects inputs to be a list of dictionaries."
             raise ValueError(msg)
@@ -144,7 +142,6 @@ class LLMEvaluator:
                 raise ValueError(msg)
             # No type check on 'type' to allow types from 'typing' module
 
-        # Validate outputs
         if not isinstance(outputs, list) or not all(isinstance(outp, dict) for outp in outputs):
             msg = "LLM evaluator expects outputs to be a list of dictionaries."
             raise ValueError(msg)
@@ -157,7 +154,6 @@ class LLMEvaluator:
                 raise ValueError(msg)
             # No type check on 'type' to allow types from 'typing' module
 
-        # Validate examples
         if not isinstance(examples, list) or not all(isinstance(example, dict) for example in examples):
             msg = f"LLM evaluator expects examples to be a list of dictionaries but received {examples}."
             raise ValueError(msg)
@@ -195,14 +191,12 @@ class LLMEvaluator:
             values = list(zip(*inputs.values()))
             list_of_input_data = [dict(zip(input_names, v)) for v in values]
         else:
-            # If no inputs are provided, create a list with a single empty dictionary
             list_of_input_data = [{}]
 
         results: list[dict[str, Any]] = []
         errors = 0
 
         for input_data in list_of_input_data:
-            # Pass the prompt and input_data to LLM
             try:
                 result = self.llm.execute(input_data=input_data, prompt=self.prompt)
             except Exception as e:
@@ -242,9 +236,7 @@ class LLMEvaluator:
             self.instructions.strip(),
         ]
 
-        # Check if outputs are provided
         if self.outputs:
-            # Prepare expected_output_section
             expected_output_dict = {outp["name"]: self._get_placeholder_for_type(outp["type"]) for outp in self.outputs}
             expected_output = json.dumps(expected_output_dict, indent=2)
             prompt_parts.extend(
@@ -261,7 +253,6 @@ class LLMEvaluator:
             )
 
         if self.examples:
-            # Prepare examples_section with explicit labels
             examples_parts = []
             for idx, example in enumerate(self.examples, start=1):
                 example_input = json.dumps(example["inputs"], indent=2)

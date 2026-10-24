@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from pptx import Presentation
+from pptx.shapes.graphfrm import GraphicFrame
+from pptx.shapes.group import GroupShape
 
 from dynamiq.components.converters.base import BaseConverter
 from dynamiq.components.converters.utils import build_source_metadata, get_filename_for_bytesio
@@ -85,18 +87,12 @@ class PPTXConverter(BaseConverter):
         """
         docs = []
         if document_creation_mode == DocumentCreationMode.ONE_DOC_PER_FILE:
-            text_all_slides = "\n".join(
-                "\n".join(shape.text for shape in slide.shapes if hasattr(shape, "text") and shape.text)
-                for slide in elements.slides
-            )
+            text_all_slides = "\n".join(self._shapes_text(slide.shapes) for slide in elements.slides)
             metadata = build_source_metadata(metadata, filepath)
             docs = [Document(content=text_all_slides, metadata=metadata)]
 
         elif document_creation_mode == DocumentCreationMode.ONE_DOC_PER_PAGE:
-            texts_per_page = [
-                "\n".join(shape.text for shape in slide.shapes if hasattr(shape, "text") and shape.text)
-                for slide in elements.slides
-            ]
+            texts_per_page = [self._shapes_text(slide.shapes) for slide in elements.slides]
             metadata = build_source_metadata(metadata, filepath)
 
             docs = []
@@ -106,3 +102,28 @@ class PPTXConverter(BaseConverter):
                 docs.append(Document(content=text, metadata=page_metadata))
 
         return docs
+
+    @classmethod
+    def _shapes_text(cls, shapes) -> str:
+        """Join the text of the shapes, rendering tables as Markdown and including the shapes inside groups."""
+        texts = []
+        for shape in shapes:
+            if isinstance(shape, GroupShape):
+                text = cls._shapes_text(shape.shapes)
+            elif isinstance(shape, GraphicFrame) and shape.has_table:
+                text = cls._table_markdown(shape.table)
+            else:
+                text = getattr(shape, "text", "")
+            if text:
+                texts.append(text)
+        return "\n".join(texts)
+
+    @staticmethod
+    def _table_markdown(table) -> str:
+        """Render a table as Markdown, with its first row as the header."""
+        lines = [
+            "| " + " | ".join(cell.text.strip().replace("|", "\\|").replace("\n", "<br>") for cell in row.cells) + " |"
+            for row in table.rows
+        ]
+        lines.insert(1, "| " + " | ".join(["---"] * len(table.columns)) + " |")
+        return "\n".join(lines)

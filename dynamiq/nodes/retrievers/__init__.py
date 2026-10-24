@@ -1,18 +1,7 @@
-from .chroma import ChromaDocumentRetriever
-from .elasticsearch import ElasticsearchDocumentRetriever
-from .milvus import MilvusDocumentRetriever
-from .opensearch import OpenSearchDocumentRetriever
-from .pgvector import PGVectorDocumentRetriever
-from .pinecone import PineconeDocumentRetriever
-from .qdrant import QdrantDocumentRetriever
-from .retriever import VectorStoreRetriever
-from .turbopuffer import TurbopufferDocumentRetriever
-from .weaviate import WeaviateDocumentRetriever
+from typing import TYPE_CHECKING
 
-# ``GraphRetriever`` resolves via __getattr__ (below), so it is NOT in this module's __dict__.
-# ``from ... import *`` skips __getattr__ when no __all__ is defined (it reads __dict__), which would
-# drop ``GraphRetriever``. Listing it in __all__ makes ``import *`` do a real getattr per name, which
-# DOES invoke __getattr__ -- restoring the star-import export while keeping the lazy, cycle-safe load.
+from dynamiq.utils.lazy_imports import lazy_exports
+
 __all__ = [
     "ChromaDocumentRetriever",
     "ElasticsearchDocumentRetriever",
@@ -27,13 +16,32 @@ __all__ = [
     "GraphRetriever",
 ]
 
+if TYPE_CHECKING:
+    from .chroma import ChromaDocumentRetriever
+    from .elasticsearch import ElasticsearchDocumentRetriever
+    from .milvus import MilvusDocumentRetriever
+    from .opensearch import OpenSearchDocumentRetriever
+    from .pgvector import PGVectorDocumentRetriever
+    from .pinecone import PineconeDocumentRetriever
+    from .qdrant import QdrantDocumentRetriever
+    from .retriever import VectorStoreRetriever
+    from .turbopuffer import TurbopufferDocumentRetriever
+    from .weaviate import WeaviateDocumentRetriever
 
-def __getattr__(name):
-    # Back-compat: GraphRetriever moved to dynamiq.nodes.knowledge_graphs.KnowledgeGraphRetriever.
-    # Resolved lazily so old serialized ``type`` strings (dynamiq.nodes.retrievers.GraphRetriever)
-    # still deserialize without importing the graphs package at init time (avoids an import cycle).
-    if name == "GraphRetriever":
-        from dynamiq.nodes.knowledge_graphs import KnowledgeGraphRetriever
+_LAZY_EXPORTS = {
+    # GraphRetriever moved to dynamiq.nodes.knowledge_graphs.KnowledgeGraphRetriever. The alias keeps old type
+    # strings, such as dynamiq.nodes.retrievers.GraphRetriever, loading.
+    "GraphRetriever": "dynamiq.nodes.knowledge_graphs:KnowledgeGraphRetriever",
+    "ChromaDocumentRetriever": ".chroma",
+    "ElasticsearchDocumentRetriever": ".elasticsearch",
+    "MilvusDocumentRetriever": ".milvus",
+    "OpenSearchDocumentRetriever": ".opensearch",
+    "PGVectorDocumentRetriever": ".pgvector",
+    "PineconeDocumentRetriever": ".pinecone",
+    "QdrantDocumentRetriever": ".qdrant",
+    "VectorStoreRetriever": ".retriever",
+    "TurbopufferDocumentRetriever": ".turbopuffer",
+    "WeaviateDocumentRetriever": ".weaviate",
+}
 
-        return KnowledgeGraphRetriever
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+lazy_exports(__name__, _LAZY_EXPORTS, globals())

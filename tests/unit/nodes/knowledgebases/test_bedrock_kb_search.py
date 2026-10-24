@@ -547,7 +547,6 @@ def test_yaml_roundtrip(tmp_path):
     assert [doc.content for doc in result["documents"]] == ["hit"]
 
 
-# --- Source-location resolution -------------------------------------------------------------
 # Every entry in LOCATION_URI_FIELDS, so a typo in the map is caught rather than silently
 # degrading to the best-effort scan.
 @pytest.mark.parametrize(
@@ -596,7 +595,6 @@ def test_location_without_any_uri_field_yields_no_source_uri(tool):
     assert "source_uri" not in result["documents"][0].metadata
 
 
-# --- Media content extraction ---------------------------------------------------------------
 def test_video_content_uses_summary(tool):
     tool.client.retrieve.return_value = {
         "retrievalResults": [
@@ -656,7 +654,6 @@ def test_unknown_content_type_falls_back_to_text(tool):
     assert result["documents"][0].content == "still readable"
 
 
-# --- Guardrails -----------------------------------------------------------------------------
 def test_guardrail_action_none_is_surfaced_without_a_note(connection):
     """A guardrail that did not fire still reports its action, but must not annotate the content."""
     node = BedrockKnowledgeBaseSearch(
@@ -688,7 +685,6 @@ def test_guardrail_intervention_on_empty_results_keeps_both_messages(tool):
     assert "guardrail intervened" in result["content"]
 
 
-# --- Knowledge base addressing --------------------------------------------------------------
 def test_knowledge_base_arn_is_sent_verbatim(connection):
     """Managed and cross-account KBs are addressed by full ARN rather than bare id."""
     arn = "arn:aws:bedrock:us-east-1:123456789012:knowledge-base/KB12345678"

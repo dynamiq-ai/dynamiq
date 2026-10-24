@@ -4,7 +4,6 @@ from dynamiq.evaluations.metrics import ContextRecallEvaluator
 
 
 def test_context_recall_evaluator(openai_node):
-    # Sample data
     questions = ["What can you tell me about Albert Einstein?", "Tell me about the Great Wall of China."]
     contexts = [
         (
@@ -33,8 +32,7 @@ def test_context_recall_evaluator(openai_node):
 
     evaluator = ContextRecallEvaluator(llm=openai_node)
 
-    # Prepare the mocked results for each classification call.
-    # There will be one call per question.
+    # One classification call per question.
     mocked_run_results = [
         # For the first question:
         {
@@ -99,7 +97,6 @@ def test_context_recall_evaluator(openai_node):
         answers=answers,
         verbose=False,
     )
-    # Extract results from output; each result is a ContextRecallRunResult
     results = output.results
 
     # Expected scores:
@@ -109,7 +106,6 @@ def test_context_recall_evaluator(openai_node):
 
     for result, expected in zip(results, expected_scores):
         assert abs(result.score - expected) < 0.01, f"Expected {expected}, got {result.score}"
-        # Also, the reasoning should never be empty.
         assert result.reasoning.strip() != "", "Reasoning should not be empty"
 
 
@@ -143,8 +139,8 @@ def test_context_recall_evaluator_with_list_of_lists_of_contexts(openai_node):
 
     evaluator = ContextRecallEvaluator(llm=openai_node)
 
-    # Prepare mocked results. When contexts are provided as a list[list[str]],
-    # each sub-list is joined into a single string.
+    # When contexts are provided as a list[list[str]], each sub-list is joined into a single string.
+    # Each sub-list of contexts is joined into one string, so there is one classification call per question.
     mocked_run_results = [
         # For the first question, joined context:
         {
@@ -205,7 +201,7 @@ def test_context_recall_evaluator_with_list_of_lists_of_contexts(openai_node):
 
     output = evaluator.run(
         questions=questions,
-        contexts=contexts,  # Passing list[list[str]]
+        contexts=contexts,
         answers=answers,
         verbose=False,
     )

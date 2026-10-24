@@ -1,9 +1,13 @@
 import io
 import os
 import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from dynamiq.nodes.node import ErrorHandling
+from dynamiq.nodes.tools import python_code_executor
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor, PythonCodeExecutorFileWorkspace
 from dynamiq.runnables import RunnableStatus
 from dynamiq.storages.file.in_memory import InMemoryFileStore
@@ -164,3 +168,59 @@ def run():
     payload = result.output["content"]
     assert payload["rows"] == 2
     assert payload["total"] == 35.0
+
+
+def test_concurrent_runs_read_their_own_files():
+    code = (
+        "import time\nimport pandas as pd\n"
+        "def run(params=None):\n    time.sleep(0.2)\n    return str(pd.read_csv('data.csv', header=None)[0][0])\n"
+    )
+    cwd = os.getcwd()
+
+    def run(tenant):
+        file_store = InMemoryFileStore()
+        file_store.store("data.csv", tenant.encode())
+        return PythonCodeExecutor(file_store=file_store).run(input_data={"code": code}).output["content"]
+
+    tenants = [f"tenant-{i}" for i in range(6)]
+    with ThreadPoolExecutor(len(tenants)) as pool:
+        assert list(pool.map(run, tenants)) == tenants
+    assert os.getcwd() == cwd
+
+
+def test_a_run_past_its_time_limit_keeps_its_directory_while_no_other_run_waits(tmp_path, monkeypatch):
+    monkeypatch.setattr(python_code_executor, "_WORKSPACE_TIME_LIMIT_SECONDS", 0.2)
+    monkeypatch.chdir(tmp_path)
+    code = (
+        "import time\nimport pandas as pd\n"
+        "def run(params=None):\n    time.sleep(0.5)\n    pd.DataFrame({'a': [7]}).to_csv('result.csv', index=False)\n"
+        "    return str(pd.read_csv('result.csv')['a'][0])\n"
+    )
+
+    result = PythonCodeExecutor(file_store=InMemoryFileStore()).run(input_data={"code": code})
+
+    assert result.output["content"] == "7"
+    assert not (tmp_path / "result.csv").exists()
+
+
+def test_a_run_past_its_time_limit_does_not_block_the_next_one():
+    hung = PythonCodeExecutor(file_store=InMemoryFileStore(), error_handling=ErrorHandling(timeout_seconds=0.5))
+    file_store = InMemoryFileStore()
+    file_store.store("data.csv", b"next")
+    following = PythonCodeExecutor(file_store=file_store)
+
+    with ThreadPoolExecutor(1) as pool:
+        pool.submit(hung.run, input_data={"code": "import time\ndef run(params=None):\n    time.sleep(4)\n"})
+        deadline = time.monotonic() + 30
+        while not python_code_executor._WORKSPACE_LOCK.locked() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        started = time.monotonic()
+        result = following.run(
+            input_data={
+                "code": "import pandas as pd\ndef run(params=None):\n"
+                "    return str(pd.read_csv('data.csv', header=None)[0][0])\n"
+            }
+        )
+
+    assert result.output["content"] == "next"
+    assert time.monotonic() - started < 2

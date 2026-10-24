@@ -3,6 +3,7 @@ from typing import Callable
 
 from pydantic import BaseModel, PrivateAttr, model_validator
 from dynamiq.evaluations import BaseEvaluator
+from dynamiq.utils.lazy_imports import optional_dependency_error
 from dynamiq.utils.logger import logger
 
 
@@ -138,7 +139,12 @@ class StringSimilarityEvaluator(BaseEvaluator):
         self._initialize_distance_map()
 
     def _initialize_distance_map(self) -> None:
-        from rapidfuzz import distance as rapidfuzz_distance
+        try:
+            from rapidfuzz import distance as rapidfuzz_distance  # evals extra; the other evaluators here need none
+        except ImportError as e:
+            if optional_error := optional_dependency_error(e, "StringSimilarityEvaluator"):
+                raise optional_error from e
+            raise
         self._distance_map = {
             DistanceMeasure.LEVENSHTEIN: rapidfuzz_distance.Levenshtein,
             DistanceMeasure.HAMMING: rapidfuzz_distance.Hamming,

@@ -5,16 +5,16 @@ install-dependencies-examples:
 	uv sync --no-install-project --only-group examples
 
 install-dependencies-main:
-	uv sync --no-install-project --no-default-groups
+	uv sync --no-install-project --no-default-groups --extra all
 
 install-dependencies-all:
-	uv sync --no-install-project --group examples
+	uv sync --no-install-project --extra all --group examples
 
 install-pre-commit:
 	uv run pre-commit install --install-hooks
 
 install:
-	uv sync --no-install-project
+	uv sync --no-install-project --extra all
 	make install-pre-commit
 
 prepare:
