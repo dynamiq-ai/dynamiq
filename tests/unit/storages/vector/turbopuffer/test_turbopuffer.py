@@ -327,7 +327,7 @@ def test_count_documents(store, namespace):
     assert store.count_documents() == 7
 
 
-def test_delete_documents_by_filters(store, namespace):
+def test_delete_documents_by_file_ids(store, namespace):
     store.delete_documents_by_file_ids(["f1", "f2"])
 
     assert namespace.write.call_args.kwargs == {"delete_by_filter": ["file_id", "In", ["f1", "f2"]]}

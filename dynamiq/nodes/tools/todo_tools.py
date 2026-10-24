@@ -270,7 +270,6 @@ RULES:
 
             final_todos = list(existing_by_id.values())
         else:
-            # Replace all
             final_todos = new_todos
 
         self._save_todos(final_todos)
@@ -281,7 +280,6 @@ RULES:
         # is correctly empty.
         self._list_created_this_run = bool(final_todos)
 
-        # Calculate stats
         stats = {
             "total": len(final_todos),
             TodoStatus.PENDING.value: sum(1 for t in final_todos if t.get("status") == TodoStatus.PENDING.value),

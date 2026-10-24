@@ -203,7 +203,6 @@ class DOCXConverter(BaseConverter):
         """
         table = Table(table_element, docx_obj)
 
-        # Check for single-cell tables
         if len(table.rows) == 1 and len(table.columns) == 1:
             cell_text = table.rows[0].cells[0].text
             if cell_text.strip():
@@ -220,7 +219,6 @@ class DOCXConverter(BaseConverter):
 
         cell_set = set()
         for row_idx, row in enumerate(table.rows):
-            # Skip the header row
             if row_idx == 0:
                 continue
 
@@ -300,7 +298,6 @@ class DOCXConverter(BaseConverter):
 
             if numbering_id and numbering_id != "0":
                 level = int(indexing_level) + 1 if indexing_level else 1
-                # Check if the paragraph is a numbered list item or a bullet list item
                 is_numbered = "Number" in paragraph.style.name if paragraph.style and paragraph.style.name else False
                 marker = f"{level}." if is_numbered else "•"
                 return True, marker, level

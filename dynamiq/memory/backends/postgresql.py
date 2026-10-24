@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 import uuid
 from enum import Enum
@@ -24,6 +25,12 @@ class FetchMode(str, Enum):
 class PostgresMemoryError(Exception):
     """Base exception class for PostgreSQL Memory Backend errors."""
     pass
+
+
+# Concurrent CREATE TABLE IF NOT EXISTS statements for a new table can fail with a duplicate key error, and every run
+# builds its own backend, so a process creates each table once, one at a time.
+_created_tables: set[tuple] = set()
+_create_tables_lock = threading.Lock()
 
 
 class PostgreSQL(MemoryBackend):
@@ -74,7 +81,7 @@ class PostgreSQL(MemoryBackend):
             self._conn = self.connection.connect()
             self._is_closed = False
             if self.create_if_not_exist:
-                self._create_table_and_indices()
+                self._ensure_table()
             logger.debug(f"PostgreSQL backend connected to table '{self.table_name}'.")
         except psycopg.Error as e:
             logger.error(f"Failed to initialize PostgreSQL connection or table '{self.table_name}': {e}")
@@ -137,6 +144,15 @@ class PostgreSQL(MemoryBackend):
             sql_str = sql_query.as_string(cur) if isinstance(sql_query, SQL) else str(sql_query)
             logger.error(f"PostgreSQL error executing SQL: {e}\nSQL: {sql_str}\nParams: {params}")
             raise PostgresMemoryError(f"PostgreSQL error: {e}") from e
+
+    def _ensure_table(self) -> None:
+        """Create the table and its indices, once per process for each database and table."""
+        connection = self.connection
+        table = (connection.host, connection.port, connection.database, connection.user, self.table_name)
+        with _create_tables_lock:
+            if table not in _created_tables:
+                self._create_table_and_indices()
+                _created_tables.add(table)
 
     def _create_table_and_indices(self) -> None:
         """Creates the table and necessary indices if they don't exist."""

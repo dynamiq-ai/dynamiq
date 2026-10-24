@@ -57,7 +57,6 @@ def test_write_graph_batches_nodes_and_writes_edges():
 
     result = store.write_graph(nodes=nodes, relationships=relationships)
 
-    # --- one UNWIND node query per label-group, one UNWIND edge query per structural group ---
     assert client.execute_query.call_count == 3
     person_call, org_call, edge_call = client.execute_query.call_args_list
 
@@ -99,7 +98,6 @@ def test_write_graph_batches_nodes_and_writes_edges():
         ]
     }
 
-    # --- aggregated stats: all statement summaries summed ---
     assert result["nodes_created"] == 2
     assert result["relationships_created"] == 1
     assert result["properties_set"] == 6  # 2 + 2 (nodes) + 2 (edge)

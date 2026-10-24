@@ -456,7 +456,7 @@ def test_memory_snapshot_with_inmemory_backend(anthropic_llm, run_config):
     user_id = str(uuid.uuid4())
     session_id = str(uuid.uuid4())
 
-    # --- Seed another user/session that must survive all agent runs ---
+    # Seed another user/session that must survive all agent runs
     other_user_id = str(uuid.uuid4())
     other_session_id = str(uuid.uuid4())
     other_filters = {"user_id": other_user_id, "session_id": other_session_id}
@@ -465,7 +465,7 @@ def test_memory_snapshot_with_inmemory_backend(anthropic_llm, run_config):
     memory.add(role=MessageRole.USER, content=OTHER_USER_MSG, metadata=other_filters.copy())
     memory.add(role=MessageRole.ASSISTANT, content=OTHER_ASSISTANT_MSG, metadata=other_filters.copy())
 
-    # --- Turn 1: ask about a person (forces tool call) ---
+    # Turn 1: ask about a person (forces tool call)
 
     result_1 = wf.run(
         input_data={
@@ -519,7 +519,7 @@ def test_memory_snapshot_with_inmemory_backend(anthropic_llm, run_config):
     )
 
     wf1 = Workflow(flow=flows.Flow(nodes=[agent]))
-    # --- Turn 2: ask agent to recall the tool result from turn 1 ---
+    # Turn 2: ask agent to recall the tool result from turn 1
 
     result_2 = wf1.run(
         input_data={
@@ -564,14 +564,13 @@ def test_memory_snapshot_with_inmemory_backend(anthropic_llm, run_config):
     contents = " ".join(m.content for m in stored_after_t2)
     assert USER_COMPANY in contents, "Memory snapshot should still contain the tool result from turn 1"
 
-    # --- Verify other user/session data survived both agent runs ---
     other_stored = memory.get_agent_conversation(filters=other_filters)
     assert len(other_stored) == 2, f"Other user's messages should be intact after agent runs, got {len(other_stored)}"
     other_contents = [m.content for m in other_stored]
     assert OTHER_USER_MSG in other_contents, "Other user's message should be preserved"
     assert OTHER_ASSISTANT_MSG in other_contents, "Other assistant's reply should be preserved"
 
-    # --- Same agent, same prompt twice ---
+    # Same agent, same prompt twice
     same_prompt_agent = Agent(
         name="SamePromptAgent",
         llm=anthropic_llm,
@@ -609,7 +608,7 @@ def test_memory_snapshot_with_inmemory_backend(anthropic_llm, run_config):
         second_same_prompt_usage["cache_read_input_tokens"] > 0
     ), f"Expected cache read on same-prompt run 2, got: {second_same_prompt_usage}"
 
-    # --- Multi-turn conversation with same agent ---
+    # Multi-turn conversation with same agent
     usage_capture.usage_payloads.clear()
     multi_turn_agent = Agent(
         name="MultiTurnAgent",

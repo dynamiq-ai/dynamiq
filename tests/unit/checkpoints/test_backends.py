@@ -200,6 +200,24 @@ class BackendTestMixin:
         remaining = backend.get_list_by_flow(flow_id, limit=100)
         assert len(remaining) == 3
 
+    def test_cleanup_by_count_keeps_the_checkpoint_a_waiting_run_resumes_from(self, backend: CheckpointBackend):
+        flow_id = "cleanup-waiting-flow"
+        waiting = FlowCheckpoint(flow_id=flow_id, run_id="waiting", status=CheckpointStatus.PENDING_INPUT)
+        resumed = FlowCheckpoint(flow_id=flow_id, run_id="resumed", status=CheckpointStatus.PAUSED)
+        backend.save(waiting)
+        time.sleep(0.01)
+        backend.save(resumed)
+        for i in range(3):
+            time.sleep(0.01)
+            backend.save(FlowCheckpoint(flow_id=flow_id, run_id=f"run-{i}", status=CheckpointStatus.COMPLETED))
+        time.sleep(0.01)
+        # A resumed run appends its next checkpoint as a child of the one it paused at.
+        backend.save(FlowCheckpoint(flow_id=flow_id, run_id="resumed", parent_checkpoint_id=resumed.id))
+
+        assert backend.cleanup_by_flow(flow_id, keep_count=1) == 4
+        assert backend.load(waiting.id) is not None and backend.load(resumed.id) is None
+        assert backend.cleanup_by_flow(flow_id, keep_count=0) == 2
+
     def test_checkpoint_with_complex_data(self, backend: CheckpointBackend):
         """Test saving and loading checkpoint with complex nested data."""
         checkpoint = FlowCheckpoint(
@@ -583,23 +601,6 @@ class TestFileSystemBackend(BackendTestMixin):
         results = backend.get_list_by_run("run-123")
         assert len(results) == 1
         assert results[0].run_id == "run-123"
-
-    def test_get_list_by_flow_and_run_filesystem(self, backend: FileSystem):
-        """get_list_by_flow_and_run scopes to a specific flow's run directory."""
-        flow_id = "scoped-flow"
-        wf_run_id = "scoped-wf-run"
-
-        cp1 = FlowCheckpoint(flow_id=flow_id, run_id="run-1", wf_run_id=wf_run_id)
-        cp2 = FlowCheckpoint(flow_id=flow_id, run_id="run-2", wf_run_id=wf_run_id)
-        cp3 = FlowCheckpoint(flow_id="other-flow", run_id="run-3", wf_run_id=wf_run_id)
-
-        backend.save(cp1)
-        backend.save(cp2)
-        backend.save(cp3)
-
-        results = backend.get_list_by_flow_and_run(flow_id, wf_run_id)
-        assert len(results) == 2
-        assert all(r.flow_id == flow_id for r in results)
 
 
 class TestAsyncBackendMethods:

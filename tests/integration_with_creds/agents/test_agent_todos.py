@@ -67,7 +67,6 @@ def test_agent_todo_state_updates(openai_llm, run_config, monkeypatch):
         verbose=True,
     )
 
-    # Verify TodoWriteTool was added automatically
     todo_tools = [t for t in agent.tools if isinstance(t, TodoWriteTool)]
     assert len(todo_tools) == 1, "TodoWriteTool should be automatically added"
 

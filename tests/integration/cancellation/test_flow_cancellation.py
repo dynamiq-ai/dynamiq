@@ -116,8 +116,7 @@ class TestPreCanceledFlow:
         assert result.output is None
         assert result.error is not None
         assert result.error.type is CanceledException
-        assert result.error.message  # has a descriptive message
-        # LLM should never have been called
+        assert result.error.message
         assert llm_call.call_count == 0
 
     def test_pre_canceled_workflow_returns_canceled(self, mocker, cancellation_token, runnable_config):
@@ -150,7 +149,7 @@ class TestMidExecutionCancellation:
         assert result.output is None
         assert result.error is not None
         assert result.error.type is CanceledException
-        assert result.error.message  # has a descriptive message
+        assert result.error.message
 
     def test_cancel_after_first_node_completes(self, mocker, cancellation_token, runnable_config):
         """Input + Python complete fast; cancel during slow node."""
@@ -225,7 +224,6 @@ class TestMultiRunIsolation:
         config1 = RunnableConfig(cancellation=CancellationConfig(token=token1))
         config2 = RunnableConfig(cancellation=CancellationConfig(token=token2))
 
-        # Cancel run 1 immediately, run 2 should succeed
         token1.cancel()
 
         result1 = flow.run_sync(input_data={"query": "run1"}, config=config1)

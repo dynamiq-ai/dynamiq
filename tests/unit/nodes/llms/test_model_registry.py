@@ -322,11 +322,6 @@ def test_basellm_ignores_a_litellm_entry_that_omits_the_flag():
         assert llm.is_function_calling_supported is True
 
 
-# ---------------------------------------------------------------------------
-# sync_to_litellm: gap-fill registry entries into litellm.model_cost
-# ---------------------------------------------------------------------------
-
-
 def test_sync_registers_unknown_model_into_litellm(monkeypatch):
     """After sync, a model litellm didn't know reports FC support via litellm itself."""
     import litellm
@@ -438,8 +433,7 @@ def test_sync_keeps_function_calling_params_under_drop_params(monkeypatch):
 
     monkeypatch.setenv("DYNAMIQ_SYNC_MODEL_REGISTRY_TO_LITELLM", "1")
 
-    # sambanova gates `tools` on per-model FC support, so an unknown model gets them
-    # dropped under drop_params (this is the bug this branch fixes).
+    # sambanova gates `tools` on per-model FC support, so an unknown model gets them dropped under drop_params.
     model = "sambanova/unknown-fc-model"
     tools = [
         {

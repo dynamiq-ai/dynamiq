@@ -233,20 +233,17 @@ def test_get_documents_by_id_chunks_large_batches(monkeypatch) -> None:
     assert [len(c.kwargs["filters"].value) for c in calls] == [2, 2, 1]
     # each call's limit matches its chunk size (never the full 5, never > DEFAULT_QUERY_LIMIT)
     assert all(c.kwargs["limit"] == len(c.kwargs["filters"].value) for c in calls)
-    # every id is fetched and accumulated across chunks
     assert len(docs) == 5
 
 
 @patch("dynamiq.storages.vector.weaviate.weaviate.Weaviate")
 def test_to_data_object_with_valid_properties(mock_weaviate):
     """Test the _to_data_object method with valid property names."""
-    # We'll bypass the initialization that connects to Weaviate
+    # Bypass the initialization that connects to Weaviate
     store = WeaviateVectorStore.__new__(WeaviateVectorStore)
 
-    # Set only the required attributes for _to_data_object to work
     store.content_key = "content"
 
-    # Create a document with valid metadata property names
     doc = Document(
         content="Test content",
         document_id="test_id_1",
@@ -259,10 +256,8 @@ def test_to_data_object_with_valid_properties(mock_weaviate):
         embedding=[0.1, 0.2, 0.3],
     )
 
-    # This should pass without raising any exceptions
     data_obj = store._to_data_object(doc)
 
-    # Verify the properties are correctly transferred
     assert data_obj["validProperty"] == "value1"
     assert data_obj["valid_property"] == "value2"
     assert data_obj["_property"] == "value3"
@@ -274,13 +269,11 @@ def test_to_data_object_with_valid_properties(mock_weaviate):
 @patch("dynamiq.storages.vector.weaviate.weaviate.Weaviate")
 def test_to_data_object_with_invalid_properties(mock_weaviate):
     """Test the _to_data_object method with invalid property names."""
-    # We'll bypass the initialization that connects to Weaviate
+    # Bypass the initialization that connects to Weaviate
     store = WeaviateVectorStore.__new__(WeaviateVectorStore)
 
-    # Set only the required attributes for _to_data_object to work
     store.content_key = "content"
 
-    # Create a document with invalid metadata property names
     doc = Document(
         content="Test content",
         document_id="test_id_2",
@@ -292,10 +285,8 @@ def test_to_data_object_with_invalid_properties(mock_weaviate):
         embedding=[0.1, 0.2, 0.3],
     )
 
-    # This should raise a ValueError
     with pytest.raises(ValueError) as excinfo:
         store._to_data_object(doc)
 
-    # Verify the error message mentions the invalid property name
     assert "Invalid property name" in str(excinfo.value)
     assert "1invalid_property" in str(excinfo.value)

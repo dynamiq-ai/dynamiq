@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from qdrant_client import QdrantClient
 from qdrant_client.http import models as rest
 
 from dynamiq.storages.vector.exceptions import VectorStoreException
@@ -74,11 +75,6 @@ def test_replace_document_metadata_missing_id_fails_fast(qdrant_vector_store, mo
     with pytest.raises(VectorStoreException, match="2"):
         qdrant_vector_store.replace_document_metadata(["1", "2"], {"tags": ["x"]})
     mock_qdrant_client.set_payload.assert_not_called()
-
-
-def test_delete_documents(qdrant_vector_store, mock_qdrant_client):
-    qdrant_vector_store.delete_documents(document_ids=["1"])
-    mock_qdrant_client.delete.assert_called_once()
 
 
 def test_delete_documents_by_ids(qdrant_vector_store, mock_qdrant_client):
@@ -178,3 +174,18 @@ def test_handle_duplicate_documents(qdrant_vector_store):
 def test_drop_duplicate_documents(qdrant_vector_store):
     documents = [Document(id="1", content="Document 1"), Document(id="1", content="Document 1")]
     assert qdrant_vector_store._drop_duplicate_documents(documents) == [documents[0]]
+
+
+def test_write_and_query_against_local_qdrant():
+    store = QdrantVectorStore(
+        client=QdrantClient(location=":memory:"), index_name="docs", dimension=3, create_if_not_exist=True
+    )
+    store.write_documents(
+        [
+            Document(id="1", content="tea", embedding=[1.0, 0.0, 0.0]),
+            Document(id="2", content="chess", embedding=[0.0, 1.0, 0.0]),
+        ]
+    )
+
+    assert store.count_documents() == 2
+    assert [document.content for document in store._query_by_embedding([1.0, 0.1, 0.0], top_k=1)] == ["tea"]

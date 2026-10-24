@@ -5,17 +5,6 @@ import warnings
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Union
 
-from litellm import get_max_tokens, get_model_info, get_supported_openai_params, supports_vision
-from litellm.exceptions import (
-    APIConnectionError,
-    BudgetExceededError,
-    InternalServerError,
-    RateLimitError,
-    ServiceUnavailableError,
-    Timeout,
-)
-from litellm.utils import supports_pdf_input
-from litellm.utils import supports_prompt_caching as litellm_supports_prompt_caching
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from dynamiq.callbacks.streaming import BaseStreamingCallbackHandler
@@ -31,6 +20,15 @@ from dynamiq.prompts import Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.llm_tool import Tool
+from dynamiq.utils.litellm import (
+    get_litellm,
+    get_max_tokens,
+    get_model_info,
+    get_supported_openai_params,
+    supports_pdf_input,
+)
+from dynamiq.utils.litellm import supports_prompt_caching as litellm_supports_prompt_caching
+from dynamiq.utils.litellm import supports_vision
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -187,7 +185,7 @@ _SAMPLING_UNSUPPORTED_MIN_VERSION: dict[str, tuple[int, int]] = {
     "haiku": (5, 5),
 }
 
-# Matches `claude-<family>-<major>[-<minor>]` anywhere in a model id
+# Matches `claude-<family>[-<major>[-<minor>]]` anywhere in a model id
 _CLAUDE_MODEL_RE = re.compile(r"claude-(opus|sonnet|haiku|fable|mythos)(?:-(\d{1,2})(?!\d)(?:-(\d{1,2})(?!\d))?)?")
 
 _SAMPLING_UNSUPPORTED_INDICATORS: tuple[str, ...] = (
@@ -370,13 +368,10 @@ class BaseLLM(ConnectionNode):
         """
         super().__init__(**kwargs)
 
-        # Save a bit of loading time as litellm is slow
-        from litellm import acompletion, completion, stream_chunk_builder
-
-        # Avoid the same imports multiple times and for future usage in execute
-        self._completion = completion
-        self._acompletion = acompletion
-        self._stream_chunk_builder = stream_chunk_builder
+        litellm = get_litellm()
+        self._completion = litellm.completion
+        self._acompletion = litellm.acompletion
+        self._stream_chunk_builder = litellm.stream_chunk_builder
 
     def init_components(self, connection_manager=None):
         """Initialize components including fallback LLM if configured.
@@ -804,7 +799,7 @@ class BaseLLM(ConnectionNode):
         response_format = response_format or self.response_format or prompt.response_format
         tools = tools or self.tools or prompt.tools
 
-        # Suppress DeprecationWarning if deprecated parameters are not set
+        # Pydantic warns on every read of a deprecated field, including this internal one.
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=DeprecationWarning)
             use_inference_mode = (not response_format or not tools) and self.inference_mode != InferenceMode.DEFAULT
@@ -1056,8 +1051,7 @@ class BaseLLM(ConnectionNode):
             forced_tool_params = self._tool_params_to_force()
             tools = self.transform_tool_schemas(tools)
             messages = self._sanitize_fc_messages(messages)
-        # Check if a streaming callback is available in the config and enable streaming only if it is.
-        # This is to avoid unnecessary streaming to reduce CPU usage.
+        # Stream only if a streaming callback is available: unnecessary streaming costs CPU.
         is_streaming_callback_available = any(
             isinstance(callback, BaseStreamingCallbackHandler) for callback in config.callbacks
         )
@@ -1340,7 +1334,8 @@ class BaseLLM(ConnectionNode):
         Returns:
             bool: True if it's a rate limit error.
         """
-        if issubclass(exception_type, (RateLimitError, BudgetExceededError)):
+        errors = get_litellm().exceptions
+        if issubclass(exception_type, (errors.RateLimitError, errors.BudgetExceededError)):
             return True
         return any(indicator in error_str for indicator in LLM_RATE_LIMIT_ERROR_INDICATORS)
 
@@ -1354,7 +1349,11 @@ class BaseLLM(ConnectionNode):
         Returns:
             bool: True if it's a connection error.
         """
-        if issubclass(exception_type, (APIConnectionError, Timeout, ServiceUnavailableError, InternalServerError)):
+        errors = get_litellm().exceptions
+        if issubclass(
+            exception_type,
+            (errors.APIConnectionError, errors.Timeout, errors.ServiceUnavailableError, errors.InternalServerError),
+        ):
             return True
         if issubclass(exception_type, (ConnectionError, TimeoutError, OSError)):
             return True
@@ -1457,7 +1456,6 @@ class BaseLLM(ConnectionNode):
         )
 
         # Use the primary's already transformed input for fallback
-        # This ensures fallback works with the same prepared input as primary
         fallback_input = result.input.model_dump() if hasattr(result.input, "model_dump") else result.input
         fallback_result = fallback_llm.run_sync(
             input_data=fallback_input,

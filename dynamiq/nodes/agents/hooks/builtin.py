@@ -11,7 +11,6 @@ PromptInjectionHook  prompt_injection  check the user input and tool results wit
 
 import copy
 import dataclasses
-import importlib
 import json
 import re
 import threading
@@ -48,6 +47,7 @@ from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.feedback import FeedbackMethod
 from dynamiq.utils.jsonpath import _is_rooted, is_jsonpath
 from dynamiq.utils.jsonpath import mapper as jsonpath_mapper
+from dynamiq.utils.lazy_imports import import_type
 from dynamiq.utils.logger import logger
 
 REGEX_TIMEOUT_SECONDS = 1.0
@@ -481,15 +481,21 @@ _MAX_SESSION_STORES = 1000
 
 @contextmanager
 def _locked_store(ctx: HookContext) -> Iterator[dict]:
-    """The placeholder mapping. With a ``session_id`` or ``user_id`` (the ids memory is keyed by) it is kept per
-    user and session (in process), so that the placeholders of earlier turns, which the history holds, keep their
-    meaning and numbering continues; otherwise per run.
+    """The placeholder mapping. When the server scopes the run with ``trusted_context``, such as with its tenant,
+    and the run has a ``session_id`` or ``user_id`` (the ids memory is keyed by), it is kept per scope, user and
+    session (in process), so that the placeholders of earlier turns, which the history holds, keep their meaning and
+    numbering continues; otherwise per run. The client sets ``user_id`` and ``session_id``, so without a trusted
+    scope two tenants' runs could share a mapping and restore each other's values. A per-run mapping of a run with
+    those ids numbers its placeholders in a namespace of its own, so that an earlier turn's placeholder in the history
+    is never restored to another value.
     The key has no ``agent_id``: an inherited hook runs in sub-agents under their own ids but shares one store."""
-    if not (ctx.session_id or ctx.user_id):
+    if not (ctx.trusted and (ctx.session_id or ctx.user_id)):
         with ctx.lock:
+            if ctx.session_id or ctx.user_id:
+                ctx.hook_state.setdefault("namespace", str(uuid4().int))
             yield ctx.hook_state
         return
-    key = (ctx.hook_key, ctx.user_id, ctx.session_id)
+    key = (json.dumps(ctx.trusted, sort_keys=True, default=str), ctx.hook_key, ctx.user_id, ctx.session_id)
     with _SESSION_STORES_LOCK:
         if key not in _SESSION_STORES:
             _SESSION_STORES[key] = {"namespace": str(uuid4().int)}
@@ -518,7 +524,9 @@ def _sub_validated(pattern, text: str, replace, entity: str) -> str:
 class PIIHook(TextGuardHook):
     """Detect PII and mask it with numbered placeholders (``<EMAIL_1>``) so that the agent keeps working.
 
-    One mapping per run lives in the run context and is checkpointed with the agent. ``scope`` decides what is masked:
+    One mapping per run lives in the run context and is checkpointed with the agent. Runs the server scopes with
+    ``trusted_context`` share one per scope, user and session instead, so that the placeholders of earlier turns
+    keep their values. ``scope`` decides what is masked:
 
     * ``persisted`` (default): masking at the source. The user's message and each tool result are masked once, so the
       conversation history, memory, checkpoints and the summarizer only ever hold placeholders, and nothing is
@@ -729,11 +737,12 @@ class DetectorConfig(BaseModel):
         """A dumped connection (a dict with its dotted ``type``) is rebuilt as that connection class."""
         if not (isinstance(value, dict) and value.get("type")):
             return value
-        module_name, _, class_name = str(value["type"]).rpartition(".")
         try:
-            connection_class = getattr(importlib.import_module(module_name), class_name)
+            connection_class = import_type(str(value["type"]))
         except (ImportError, AttributeError, ValueError) as e:
             raise ValueError(f"connection type {value['type']!r} could not be imported: {e}") from e
+        if not (isinstance(connection_class, type) and issubclass(connection_class, (HuggingFace, Lakera, Replicate))):
+            raise ValueError(f"connection type {value['type']!r} is not a HuggingFace, Lakera or Replicate connection")
         return connection_class(**{key: item for key, item in value.items() if key != "type"})
 
     @model_validator(mode="after")

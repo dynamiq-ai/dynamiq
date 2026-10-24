@@ -22,7 +22,7 @@ COPY ./pyproject.toml /app/pyproject.toml
 COPY ./uv.lock /app/uv.lock
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project
+    uv sync --frozen --no-install-project --extra all
 
 FROM runtime AS develop
 

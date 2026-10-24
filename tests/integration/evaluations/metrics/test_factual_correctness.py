@@ -4,7 +4,6 @@ from dynamiq.evaluations.metrics import FactualCorrectnessEvaluator
 
 
 def test_factual_correctness_evaluator(openai_node):
-    # Sample data
     answers = [
         (
             "Albert Einstein was a German theoretical physicist. "
@@ -18,10 +17,8 @@ def test_factual_correctness_evaluator(openai_node):
         ("The Eiffel Tower is located in Paris, France. " "It was constructed in 1887 and opened in 1889."),
     ]
 
-    # Initialize evaluator with the provided openai_node
     evaluator = FactualCorrectnessEvaluator(llm=openai_node)
 
-    # Mock the run method of the claim decomposer
     evaluator._claim_decomposer.run = MagicMock(
         side_effect=[
             # First call (answer claim decomposition for 1st answer)
@@ -73,7 +70,6 @@ def test_factual_correctness_evaluator(openai_node):
         ]
     )
 
-    # Mock the run method of the NLI evaluator
     evaluator._nli_evaluator.run = MagicMock(
         side_effect=[
             # First call: Verify answer claims (1st answer) against 1st context (precision)
@@ -165,9 +161,7 @@ def test_factual_correctness_evaluator(openai_node):
         ]
     )
 
-    # Run the evaluator
     run_output = evaluator.run(answers=answers, contexts=contexts, verbose=False)
-    # Extract computed scores from output results
     correctness_scores = [res.score for res in run_output.results]
 
     # Expected scores based on the mocked data:
@@ -179,7 +173,6 @@ def test_factual_correctness_evaluator(openai_node):
     # F1 = (2*0.5*0.333)/(0.5+0.333)=0.4 (approx).
     expected_scores = [0.8, 0.4]
 
-    # Assert that the correctness scores are as expected.
     for computed, expected in zip(correctness_scores, expected_scores):
         assert abs(computed - expected) < 0.01, f"Expected {expected}, got {computed}"
 
@@ -198,7 +191,6 @@ def test_factual_correctness_evaluator_with_list_of_lists(openai_node):
         ("The Eiffel Tower is located in Berlin, Germany. It was constructed in 1889."),
     ]
 
-    # contexts passed as list[list[str]] instead of list[str]
     contexts = [
         [
             "Albert Einstein was a German-born theoretical physicist.",
@@ -210,10 +202,8 @@ def test_factual_correctness_evaluator_with_list_of_lists(openai_node):
         ],
     ]
 
-    # Initialize evaluator
     evaluator = FactualCorrectnessEvaluator(llm=openai_node)
 
-    # Mock the run method of the claim decomposer (decompose_claims)
     evaluator._claim_decomposer.run = MagicMock(
         side_effect=[
             # 1) Decompose claims from first response
@@ -265,7 +255,6 @@ def test_factual_correctness_evaluator_with_list_of_lists(openai_node):
         ]
     )
 
-    # Mock the run method of the NLI evaluator (verify_claims)
     evaluator._nli_evaluator.run = MagicMock(
         side_effect=[
             # 1) Verify first response claims against first context (precision)
@@ -357,11 +346,10 @@ def test_factual_correctness_evaluator_with_list_of_lists(openai_node):
         ]
     )
 
-    # Run the evaluator with contexts passed as list[list[str]]
     run_output = evaluator.run(answers=answers, contexts=contexts, verbose=False)
     correctness_scores = [res.score for res in run_output.results]
 
-    # Expected scores (same as before): [0.8, 0.4]
+    # The same scores as with list[str] contexts.
     expected_scores = [0.8, 0.4]
 
     for computed, expected in zip(correctness_scores, expected_scores):

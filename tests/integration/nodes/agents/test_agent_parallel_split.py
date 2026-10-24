@@ -299,7 +299,6 @@ class TestBatchStreamEvents:
         ]
         agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
 
-        # Second call is the completion event
         completion_event = mock_stream.call_args_list[1][0][0]
         completion_step = mock_stream.call_args_list[1][0][1]
 
@@ -310,7 +309,6 @@ class TestBatchStreamEvents:
         assert completion_event.tool.action_type == "parallel_execution"
         assert completion_event.status == RunnableStatus.SUCCESS
 
-        # result is a list of per-tool summaries
         assert isinstance(completion_event.result, list)
         assert len(completion_event.result) == 2
         tool_names = {entry["name"] for entry in completion_event.result}

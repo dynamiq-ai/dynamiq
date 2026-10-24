@@ -461,3 +461,18 @@ def test_the_nodes_waiting_for_a_reply_are_the_feedback_tools_and_the_approval_g
     node = SubWorkflow(id="sub", name="sub", flow=Flow(id="flow", nodes=[ask, notify, gate, plain]))
 
     assert {waiting.id for waiting in reply_waiting_nodes(node)} == {"ask", "gate"}
+
+
+def test_a_clone_keeps_its_connection_id_and_so_the_cached_client():
+    from dynamiq.connections import Http, HTTPMethod
+    from dynamiq.connections.managers import ConnectionManager
+    from dynamiq.nodes.tools.http_api_call import HttpApiCall
+
+    connection = Http(id="conn", url="https://example.invalid", method=HTTPMethod.GET)
+    node = HttpApiCall(connection=connection, is_postponed_component_init=True)
+
+    clone = regenerate_node_ids(node.clone(), {})
+
+    assert clone.id != node.id and clone.connection.id == "conn"
+    manager = ConnectionManager()
+    assert manager.get_connection_id(clone.connection) == manager.get_connection_id(node.connection)

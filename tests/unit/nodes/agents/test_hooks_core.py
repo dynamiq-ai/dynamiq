@@ -252,3 +252,20 @@ def test_live_answer_filter_exists_only_when_every_answer_hook_can_stream():
     assert HookRunner([live, Suffix()]).live_answer_filter(ctx) is None  # a Python hook that rewrites the answer
     assert HookRunner([PIIHook()]).live_answer_filter(ctx) is None  # not opted in
     assert HookRunner([RegexHook(patterns=["x"], action="block", live_stream=True)]).live_answer_filter(ctx) is None
+
+
+def test_a_hook_registers_again_when_its_module_runs_again(monkeypatch):
+    from dynamiq.nodes.agents.hooks import core
+
+    monkeypatch.setattr(core, "HOOK_REGISTRY", {})
+    source = (
+        "from dynamiq.nodes.agents.hooks import Hook, register_hook\n\n"
+        "@register_hook('again')\nclass Again(Hook):\n    pass\n"
+    )
+    # A module imported again after a failed import, such as one stopped by an import deadlock, runs again.
+    for _ in range(2):
+        exec(compile(source, "<again_hooks>", "exec"), {"__name__": "again_hooks"})  # nosec B102
+
+    other = source.replace("class Again", "class Other")
+    with pytest.raises(ValueError, match="'again' is already registered"):
+        exec(compile(other, "<other_hooks>", "exec"), {"__name__": "other_hooks"})  # nosec B102

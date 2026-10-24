@@ -21,7 +21,6 @@ def extract_json_string(s: str) -> str | None:
     escape = False
 
     for i, char in enumerate(s):
-        # Toggle in_string when encountering an unescaped double quote
         if char == '"' and not escape:
             in_string = not in_string
         elif char == "\\" and not escape:
@@ -37,17 +36,13 @@ def extract_json_string(s: str) -> str | None:
                 if bracket_stack:
                     opening_bracket = bracket_stack.pop()
                     if (opening_bracket == "{" and char != "}") or (opening_bracket == "[" and char != "]"):
-                        # Mismatched brackets
                         return None
-                    # If stack is empty, we've balanced everything
                     if not bracket_stack and start_index is not None:
                         return s[start_index : i + 1]
                 else:
-                    # Found a closing bracket without a matching opener
                     return None
         escape = False
 
-    # If brackets never fully balanced, return None
     return None
 
 
@@ -66,24 +61,20 @@ def parse_llm_json_output(response: str) -> dict[str, Any] | list[Any]:
     Raises:
         ValueError: If the output cannot be parsed into valid JSON.
     """
-    # Try directly parsing
     try:
         return json.loads(response)
     except json.JSONDecodeError:
         pass
 
-    # Attempt bracket extraction
     json_str = extract_json_string(response)
     if not json_str:
         raise ValueError(f"Response from LLM is not valid JSON: {response}")
 
-    # Try parsing the extracted substring
     try:
         return json.loads(json_str)
     except json.JSONDecodeError:
         pass
 
-    # Clean and try again
     cleaned_json_str = clean_json_string(json_str)
     try:
         return json.loads(cleaned_json_str)
@@ -111,7 +102,6 @@ def _remove_comments_outside_strings(source: str) -> str:
     while i < n:
         c = source[i]
         if not in_str:
-            # Look for a string start or comment
             if c in ["'", '"']:
                 in_str = True
                 str_delim = c
@@ -120,40 +110,32 @@ def _remove_comments_outside_strings(source: str) -> str:
             elif c == "/" and i + 1 < n:
                 next_char = source[i + 1]
                 if next_char == "/":
-                    # Single-line comment: skip until newline
                     i += 2
                     while i < n and source[i] not in ("\r", "\n"):
                         i += 1
                 elif next_char == "*":
-                    # Multi-line comment: skip until "*/"
                     i += 2
                     while i + 1 < n and not (source[i] == "*" and source[i + 1] == "/"):
                         i += 1
                     i += 2  # Skip the closing '*/'
                 else:
-                    # Just a '/', not a comment
                     result.append(c)
                     i += 1
             else:
-                # Normal character outside a string
                 result.append(c)
                 i += 1
         else:
             # Currently inside a string
             if c == str_delim:
-                # Check if this quote is escaped
                 if i > 0 and source[i - 1] == "\\":
-                    # It's an escaped quote
                     result.append(c)
                     i += 1
                 else:
-                    # Closing the string
                     in_str = False
                     str_delim = None
                     result.append(c)
                     i += 1
             else:
-                # Normal character inside the string
                 result.append(c)
                 i += 1
 
@@ -173,9 +155,7 @@ def single_quoted_replacer(match: Match[str]) -> str:
         The corresponding double-quoted string literal.
     """
     content = match.group(1)
-    # Convert escaped \' to an actual apostrophe
     content = content.replace("\\'", "'")
-    # Escape any double quotes inside
     content = content.replace('"', '\\"')
     return f'"{content}"'
 
@@ -198,19 +178,15 @@ def clean_json_string(json_str: str) -> str:
     Returns:
         A cleaned JSON string suitable for json.loads.
     """
-    # 1. Remove comments
     json_str = _remove_comments_outside_strings(json_str)
 
-    # 2. Convert single‐quoted string literals -> double‐quoted
     pattern = r"'((?:\\'|[^'])*)'"
     json_str = re.sub(pattern, single_quoted_replacer, json_str)
 
-    # 3. Replace Python-specific boolean/null with JSON equivalents
     json_str = re.sub(r"\bTrue\b", "true", json_str)
     json_str = re.sub(r"\bFalse\b", "false", json_str)
     json_str = re.sub(r"\bNone\b", "null", json_str)
 
-    # 4. Remove trailing commas before a closing bracket or brace
     json_str = re.sub(r",\s*(\]|\})", r"\1", json_str)
 
     return json_str

@@ -196,10 +196,33 @@ jobs:
           version: "0.11.24"
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --extra all
 
       - name: Run tests
         run: uv run --frozen pytest tests --ignore=tests/integration_with_creds -m "not smoke" -n auto --dist worksteal
+
+  # The other test jobs install all the extras. This one installs the default dependencies only, so a module that the
+  # default install imports cannot come to depend on an extra, and the file tools that agents add work without extras.
+  test-default-install:
+    name: test (default install)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: "0.11.24"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run tests
+        run: >-
+          uv run --frozen pytest tests/unit/utils/test_lazy_imports.py tests/unit/test_lazy_loading.py
+          tests/unit/nodes/tools/test_file_tools.py
 
   build-mkdocs:
     runs-on: ubuntu-latest

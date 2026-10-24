@@ -28,12 +28,6 @@ def test_skills_config_get_skills_metadata_disabled():
     assert cfg.get_skills_metadata() == []
 
 
-def test_skills_config_get_skills_metadata_no_source():
-    """get_skills_metadata returns [] when source is None (enabled=False)."""
-    cfg = SkillsConfig()
-    assert cfg.get_skills_metadata() == []
-
-
 def test_skills_config_get_skill_instructions_disabled_raises():
     """get_skill_instructions raises when skills disabled."""
     cfg = SkillsConfig(enabled=False)

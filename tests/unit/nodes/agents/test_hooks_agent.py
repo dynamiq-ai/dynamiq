@@ -887,7 +887,12 @@ def test_pii_scope_request_masks_only_what_each_llm_call_is_sent(mode, session_p
         final_step("sent to <EMAIL_123_1>"),
     ]
     result, recorder = run_scripted(
-        agent, mode, steps, question="mail ann@x.com", input_extra={"user_id": "u", "session_id": "s"}
+        agent,
+        mode,
+        steps,
+        question="mail ann@x.com",
+        input_extra={"user_id": "u", "session_id": "s"},
+        trusted={"org": "acme"},
     )
     assert result.status == RunnableStatus.SUCCESS
     assert "ann@x.com" not in recorder.sent_text() and "boss@corp.com" not in recorder.sent_text()
@@ -1089,6 +1094,7 @@ def test_memory_keeps_placeholders_when_the_answer_is_restored_for_the_caller(mo
         [final_step("noted <EMAIL_123_1>")],
         question="my mail is ann@x.com",
         input_extra={"user_id": "u1", "session_id": "s1"},
+        trusted={"org": "acme"},
     )
     assert result.output["content"] == "noted ann@x.com"  # the caller gets the real value
     stored = " ".join(str(m.content) for m in memory.get_all())
@@ -1161,8 +1167,8 @@ def test_pii_numbering_continues_across_turns_of_a_session():
     from dynamiq.nodes.agents.hooks.core import HookContext
 
     hook = PIIHook()
-    turn1 = HookContext(hook_key="pii", agent_id="a", session_id="numbering-session")
-    turn2 = HookContext(hook_key="pii", agent_id="a", session_id="numbering-session")
+    turn1 = HookContext(hook_key="pii", agent_id="a", session_id="numbering-session", trusted={"org": "acme"})
+    turn2 = HookContext(hook_key="pii", agent_id="a", session_id="numbering-session", trusted={"org": "acme"})
     first = hook._mask(turn1, "john@acme.com", "input")
     second = hook._mask(turn2, "jane@other.com", "input")
     assert first.endswith("_1>") and second == first[:-3] + "_2>"
@@ -1232,11 +1238,27 @@ def test_pii_numbering_continues_for_a_user_without_a_session_id():
     from dynamiq.nodes.agents.hooks.core import HookContext
 
     hook = PIIHook()
-    run1 = HookContext(hook_key="pii", agent_id="a", user_id="numbering-user")
-    run2 = HookContext(hook_key="pii", agent_id="a", user_id="numbering-user")
+    run1 = HookContext(hook_key="pii", agent_id="a", user_id="numbering-user", trusted={"org": "acme"})
+    run2 = HookContext(hook_key="pii", agent_id="a", user_id="numbering-user", trusted={"org": "acme"})
     first = hook._mask(run1, "a@x.com", "input")
     second = hook._mask(run2, "b@y.com", "input")
     assert first.endswith("_1>") and second == first[:-3] + "_2>"
+
+
+def test_pii_values_are_not_shared_across_runs_without_a_trusted_scope_or_across_scopes():
+    from dynamiq.nodes.agents.hooks.core import HookContext
+
+    hook = PIIHook(restore_in_output=True)
+
+    def run(**trusted):
+        # The same agent id and client-chosen ids, as two tenants' agents built from one template can have.
+        return HookContext(hook_key="agent:pii:1", user_id="1", session_id="default", trusted=trusted)
+
+    for first, second in [(run(), run()), (run(org="a"), run(org="b"))]:
+        alice = hook._mask(first, "alice@a.com", "input")
+        hook._mask(second, "bob@b.com", "input")
+        # Memory can hold the first run's placeholder; the second run leaves it as it is.
+        assert hook._restore(second, f"Contacts on file: {alice}") == f"Contacts on file: {alice}"
 
 
 def test_a_pending_approval_in_one_run_does_not_block_another_run(monkeypatch):
@@ -1611,10 +1633,10 @@ def test_session_cache_loss_never_reassigns_a_placeholder(monkeypatch):
 
     monkeypatch.setattr(builtin, "_SESSION_STORES", builtin.OrderedDict())
     hook = PIIHook(restore_in_tools=["send-email"], restore_in_output=True)
-    first = HookContext(hook_key="pii", session_id="cache-loss")
+    first = HookContext(hook_key="pii", session_id="cache-loss", trusted={"org": "acme"})
     old = hook._mask(first, "alice@x.com", "input")
     builtin._SESSION_STORES.clear()  # another worker, restart or eviction
-    second = HookContext(hook_key="pii", session_id="cache-loss")
+    second = HookContext(hook_key="pii", session_id="cache-loss", trusted={"org": "acme"})
     new = hook._mask(second, "bob@y.com", "input")
     assert old != new
     assert hook.before_tool(second, ToolCall(name="send-email", input={"to": old})) is ALLOW

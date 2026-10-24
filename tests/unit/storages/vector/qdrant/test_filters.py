@@ -147,8 +147,6 @@ def test_build_nin_condition():
         must=None,
         should=None,
     )
-    print("test_build_nin_condition actual:", result.model_dump())
-    print("test_build_nin_condition expected:", expected.model_dump())
     assert result.model_dump() == expected.model_dump()
 
 
