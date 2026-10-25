@@ -23,6 +23,7 @@ from .openai import OpenAI
 from .openrouter import OpenRouter
 from .perplexity import Perplexity
 from .replicate import Replicate
+from .runcrate import Runcrate
 from .sambanova import SambaNova
 from .togetherai import TogetherAI
 from .vertexai import VertexAI
