@@ -871,3 +871,10 @@ def test_max_loops_fallback_returns_the_extracted_answer(mocker):
     )
 
     assert agent._handle_max_loops_exceeded(Message(role=MessageRole.USER, content="task")) == "Partial result"
+
+
+@pytest.mark.parametrize("arguments", ["", "  "])
+def test_function_call_blank_arguments_become_empty_dict(arguments):
+    from dynamiq.nodes.agents.agent import FunctionCall
+
+    assert FunctionCall(name="no_params_tool", arguments=arguments).arguments == {}

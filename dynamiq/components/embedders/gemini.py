@@ -9,12 +9,12 @@ class GeminiEmbedder(BaseEmbedder):
     Attributes:
         connection (GeminiConnection): The connection to the Gemini API. A new connection
             is created if none is provided.
-        model (str): The model name to use for embedding. Defaults to "gemini/gemini-embedding-exp-03-07"
+        model (str): The model name to use for embedding. Defaults to "gemini/gemini-embedding-001"
         input_type (str): Specifies the type of embedding task. Defaults to "search_query"
     """
 
     connection: GeminiConnection
-    model: str = "gemini/gemini-embedding-exp-03-07"
+    model: str = "gemini/gemini-embedding-001"
     input_type: str = "search_query"
 
     def __init__(self, **kwargs):

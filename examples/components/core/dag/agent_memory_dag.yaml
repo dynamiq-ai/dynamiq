@@ -12,7 +12,7 @@ nodes:
       id: memory-agent-llm
       type: dynamiq.nodes.llms.OpenAI
       connection: openai-conn
-      model: gpt-3.5-turbo
+      model: gpt-5.6-terra
     memory:
       backend:
         type: dynamiq.memory.backends.Pinecone

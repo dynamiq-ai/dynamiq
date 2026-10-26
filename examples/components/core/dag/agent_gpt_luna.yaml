@@ -1,0 +1,189 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+nodes:
+  luna-auto:
+    type: dynamiq.nodes.agents.Agent
+    name: Luna auto
+    role: "a concise, helpful assistant"
+    max_loops: 3
+    llm:
+      id: luna-auto-llm
+      type: dynamiq.nodes.llms.OpenAI
+      name: OpenAI-Luna-auto
+      model: gpt-6-luna
+      connection: openai-conn
+      max_tokens: 4000
+      reasoning_effort: auto
+      verbosity: medium
+      strict_tools: false
+      error_handling:
+        timeout_seconds: 120
+        retry_interval_seconds: 1
+        max_retries: 1
+      caching:
+        enabled: false
+    input_transformer:
+      selector:
+        input: "$.input"
+    output_transformer:
+      selector:
+        answer: "$.content"
+
+  luna-off-null:
+    type: dynamiq.nodes.agents.Agent
+    name: Luna off-null
+    role: "a concise, helpful assistant"
+    max_loops: 3
+    llm:
+      id: luna-off-null-llm
+      type: dynamiq.nodes.llms.OpenAI
+      name: OpenAI-Luna-off-null
+      model: gpt-6-luna
+      connection: openai-conn
+      max_tokens: 4000
+      reasoning_effort: null
+      verbosity: medium
+      strict_tools: false
+      error_handling:
+        timeout_seconds: 120
+        retry_interval_seconds: 1
+        max_retries: 1
+      caching:
+        enabled: false
+    input_transformer:
+      selector:
+        input: "$.input"
+    output_transformer:
+      selector:
+        answer: "$.content"
+
+  luna-none:
+    type: dynamiq.nodes.agents.Agent
+    name: Luna none
+    role: "a concise, helpful assistant"
+    max_loops: 3
+    llm:
+      id: luna-none-llm
+      type: dynamiq.nodes.llms.OpenAI
+      name: OpenAI-Luna-none
+      model: gpt-6-luna
+      connection: openai-conn
+      max_tokens: 4000
+      reasoning_effort: none
+      verbosity: medium
+      strict_tools: false
+      error_handling:
+        timeout_seconds: 120
+        retry_interval_seconds: 1
+        max_retries: 1
+      caching:
+        enabled: false
+    input_transformer:
+      selector:
+        input: "$.input"
+    output_transformer:
+      selector:
+        answer: "$.content"
+
+  luna-low:
+    type: dynamiq.nodes.agents.Agent
+    name: Luna low
+    role: "a concise, helpful assistant"
+    max_loops: 3
+    llm:
+      id: luna-low-llm
+      type: dynamiq.nodes.llms.OpenAI
+      name: OpenAI-Luna-low
+      model: gpt-6-luna
+      connection: openai-conn
+      max_tokens: 4000
+      reasoning_effort: low
+      verbosity: medium
+      strict_tools: false
+      error_handling:
+        timeout_seconds: 120
+        retry_interval_seconds: 1
+        max_retries: 1
+      caching:
+        enabled: false
+    input_transformer:
+      selector:
+        input: "$.input"
+    output_transformer:
+      selector:
+        answer: "$.content"
+
+  luna-medium:
+    type: dynamiq.nodes.agents.Agent
+    name: Luna medium
+    role: "a concise, helpful assistant"
+    max_loops: 3
+    llm:
+      id: luna-medium-llm
+      type: dynamiq.nodes.llms.OpenAI
+      name: OpenAI-Luna-medium
+      model: gpt-6-luna
+      connection: openai-conn
+      max_tokens: 4000
+      reasoning_effort: medium
+      verbosity: medium
+      strict_tools: false
+      error_handling:
+        timeout_seconds: 120
+        retry_interval_seconds: 1
+        max_retries: 1
+      caching:
+        enabled: false
+    input_transformer:
+      selector:
+        input: "$.input"
+    output_transformer:
+      selector:
+        answer: "$.content"
+
+  luna-high:
+    type: dynamiq.nodes.agents.Agent
+    name: Luna high
+    role: "a concise, helpful assistant"
+    max_loops: 3
+    llm:
+      id: luna-high-llm
+      type: dynamiq.nodes.llms.OpenAI
+      name: OpenAI-Luna-high
+      model: gpt-6-luna
+      connection: openai-conn
+      max_tokens: 4000
+      reasoning_effort: high
+      verbosity: medium
+      strict_tools: false
+      error_handling:
+        timeout_seconds: 120
+        retry_interval_seconds: 1
+        max_retries: 1
+      caching:
+        enabled: false
+    input_transformer:
+      selector:
+        input: "$.input"
+    output_transformer:
+      selector:
+        answer: "$.content"
+
+flows:
+  luna-reasoning-flow:
+    name: Luna Reasoning Effort Flow
+    nodes:
+      - luna-auto
+      - luna-off-null
+      - luna-none
+      - luna-low
+      - luna-medium
+      - luna-high
+
+workflows:
+  luna-reasoning-workflow:
+    flow: luna-reasoning-flow
+    version: 1
