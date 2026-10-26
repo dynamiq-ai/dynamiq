@@ -16,7 +16,7 @@
     <img src="https://img.shields.io/github/release/dynamiq-ai/dynamiq" alt="Release Notes">
   </a>
   <a href="#" target="_blank">
-    <img src="https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg" alt="Python 3.10+">
+    <img src="https://img.shields.io/badge/Python-3.11%2B-brightgreen.svg" alt="Python 3.11+">
   </a>
   <a href="https://github.com/dynamiq-ai/dynamiq/blob/main/LICENSE" target="_blank">
     <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License">
