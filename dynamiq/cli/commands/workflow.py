@@ -7,6 +7,7 @@ from dynamiq.cli import flowcheck
 from dynamiq.cli.client import ApiClient, ok
 from dynamiq.cli.commands.context import with_api_and_settings
 from dynamiq.cli.config import Settings
+from dynamiq.types.streaming import STREAMING_EVENT
 
 workflow = click.Group(name="workflow", help="Manage workflows: create, save the DAG, test, release")
 
@@ -225,6 +226,7 @@ def normalize_flow(flow, project_id: str | None = None):
     * missing node `name`                     -> the node id
     * `llm` / `tools[]` without an `id`       -> a fresh UUID each
     * Pipedream tool without `external_user_id` -> the current project id
+    * streaming on without an `event`         -> "streaming", the runtime's default
     """
     if not isinstance(flow, dict):
         return flow
@@ -288,8 +290,30 @@ def normalize_flow(flow, project_id: str | None = None):
 
         fill_external_user_id(node, project_id, note, "node")
 
+        fill_streaming_event(node, note, f"node {label!r}")
+        if isinstance(node.get("llm"), dict):
+            fill_streaming_event(node["llm"], note, f"node {label!r}: llm")
+        for tool in node.get("tools") or []:
+            if isinstance(tool, dict):
+                fill_streaming_event(tool, note, f"node {label!r}: tool {tool.get('id') or tool.get('type', '?')}")
+        # validate checks every node nested at any depth (a Map's node, an agent tool's llm), so fill those too
+        for nested_label, nested in flowcheck.nested_nodes(node, label):
+            fill_streaming_event(nested, note, f"node {nested_label!r}")
+
     warn_tool_chained_after_agent(flow)
     return flow
+
+
+def fill_streaming_event(node, note, where: str) -> None:
+    """Name the event of a node that streams without one, as the runtime would.
+
+    The runtime streams under "streaming" when no event is named, but older platform releases
+    refuse the flow instead, so the default is written out before the flow is sent.
+    """
+    streaming = node.get("streaming")
+    if isinstance(streaming, dict) and streaming.get("enabled") and streaming.get("event") is None:
+        streaming["event"] = STREAMING_EVENT
+        note(f'{where}: streaming has no event; used the default "{STREAMING_EVENT}"')
 
 
 def fill_external_user_id(node, project_id: str | None, note, where: str) -> None:

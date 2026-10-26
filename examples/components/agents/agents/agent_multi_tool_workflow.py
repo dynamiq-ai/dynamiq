@@ -53,7 +53,7 @@ def setup_multi_tool_agent() -> Agent:
     tool_search = ExaTool(connection=conn_search)
 
     # Setup LLM
-    llm = setup_llm(model_provider="gpt", model_name="o3-mini", temperature=0.2)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-5.6-sol")
 
     # Create agent
     agent = Agent(

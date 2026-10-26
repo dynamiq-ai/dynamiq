@@ -32,6 +32,53 @@ def test_a_dry_run_is_sent_on_by_default_and_off_under_no_dry_run():
     assert form_sent_by("--no-dry-run")["dry_run"] == (None, "false")
 
 
+def test_streaming_turned_on_without_an_event_is_sent_with_the_runtime_default():
+    from dynamiq.cli.commands.workflow import normalize_flow
+
+    flow = {
+        "nodes": [
+            {
+                "id": "helper",
+                "type": "dynamiq.nodes.agents.Agent",
+                "streaming": {"enabled": True},
+                "llm": {"id": "llm", "streaming": {"enabled": False}},
+                "tools": [{"id": "search", "streaming": {"enabled": True, "event": None}}],
+            },
+            {"id": "named", "type": "dynamiq.nodes.agents.Agent", "streaming": {"enabled": True, "event": "data"}},
+        ]
+    }
+
+    normalize_flow(flow)
+
+    helper, named = flow["nodes"]
+    assert helper["streaming"]["event"] == "streaming"
+    assert helper["tools"][0]["streaming"]["event"] == "streaming"
+    assert "event" not in helper["llm"]["streaming"]
+    assert named["streaming"]["event"] == "data"
+
+
+def test_streaming_on_a_deeper_nested_node_is_sent_with_the_runtime_default():
+    from dynamiq.cli.commands.workflow import normalize_flow
+
+    agent_tool = {
+        "id": "sub-agent",
+        "type": "dynamiq.nodes.agents.Agent",
+        "llm": {"id": "sub-llm", "type": "dynamiq.nodes.llms.OpenAI", "streaming": {"enabled": True}},
+    }
+    mapped = {"id": "mapped", "type": "dynamiq.nodes.llms.OpenAI", "streaming": {"enabled": True}}
+    flow = {
+        "nodes": [
+            {"id": "helper", "type": "dynamiq.nodes.agents.Agent", "tools": [agent_tool]},
+            {"id": "map", "type": "dynamiq.nodes.operators.Map", "node": mapped},
+        ]
+    }
+
+    normalize_flow(flow)
+
+    assert agent_tool["llm"]["streaming"]["event"] == "streaming"
+    assert mapped["streaming"]["event"] == "streaming"
+
+
 def test_the_current_project_is_sent_as_project_id():
     assert form_sent_by()["project_id"] == (None, "00000000-0000-4000-8000-000000000001")
 

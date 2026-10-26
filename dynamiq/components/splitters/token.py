@@ -162,7 +162,13 @@ class TokenSplitterComponent(SplitterComponentBase):
                 break
             start_index = byte_to_char[token_byte_offsets[start]]
             end_index = byte_to_char[token_byte_offsets[start + len(window)]]
-            chunks.append((tokenizer.decode(window), start_index, end_index))
+            chunk = tokenizer.decode(window)
+            if "\ufffd" in chunk:
+                # A window cut through a multi-byte character: use the whole characters from the source text.
+                # Such chunks may exceed chunk_size by a few tokens.
+                chunk = text[start_index:end_index]
+            if chunk:
+                chunks.append((chunk, start_index, end_index))
             if start + self.chunk_size >= len(token_ids):
                 break
         return chunks

@@ -82,7 +82,7 @@ def run_react_agent_message_workflow() -> tuple[str, dict[UUID, Run]]:
         dict[UUID, Run]: Traces runs.
     """
     # Set up OpenAI connection and language model
-    llm = setup_llm(model_provider="gemini", model_name="gemini-2.0-flash")
+    llm = setup_llm(model_provider="gemini", model_name="gemini-3.8-flash")
     agent = Agent(
         name=AGENT_NAME,
         llm=llm,
@@ -128,7 +128,7 @@ def run_simple_agent_message_workflow() -> tuple[str, dict[UUID, Run]]:
         dict[UUID, Run]: Traces runs.
     """
     # Set up OpenAI connection and language model
-    llm = setup_llm(model_provider="gemini", model_name="gemini-2.0-flash")
+    llm = setup_llm(model_provider="gemini", model_name="gemini-3.8-flash")
     agent = Agent(
         name=AGENT_NAME,
         llm=llm,
@@ -172,7 +172,7 @@ def run_reflection_agent_vision_message_workflow() -> tuple[str, dict[UUID, Run]
         dict[UUID, Run]: Traces runs.
     """
     # Set up OpenAI connection and language model
-    llm = setup_llm(model_provider="gemini", model_name="gemini-2.0-flash")
+    llm = setup_llm(model_provider="gemini", model_name="gemini-3.8-flash")
     agent = Agent(
         name=AGENT_NAME,
         llm=llm,
@@ -225,7 +225,7 @@ def run_react_agent_vision_message_workflow() -> tuple[str, dict[UUID, Run]]:
         dict[UUID, Run]: Traces runs.
     """
     # Set up OpenAI connection and language model
-    llm = setup_llm(model_provider="gemini", model_name="gemini-2.0-flash")
+    llm = setup_llm(model_provider="gemini", model_name="gemini-3.8-flash")
     agent = Agent(
         name=AGENT_NAME,
         llm=llm,
@@ -278,7 +278,7 @@ def run_simple_agent_vision_message_workflow() -> tuple[str, dict[UUID, Run]]:
         dict[UUID, Run]: Traces runs.
     """
     # Set up OpenAI connection and language model
-    llm = setup_llm(model_provider="gemini", model_name="gemini-2.0-flash")
+    llm = setup_llm(model_provider="gemini", model_name="gemini-3.8-flash")
     agent = Agent(
         name=AGENT_NAME,
         llm=llm,

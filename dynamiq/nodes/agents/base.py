@@ -317,8 +317,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         default_factory=list,
         description=(
             "Hooks around user input, LLM calls, tool calls (sub-agents included) and the final answer. "
-            "Built-in `type`s: pii, prompt_injection, tool_policy, call_limit, regex, transform; "
-            "or a Python subclass of Hook via a dotted `type`."
+            "`type` is the hook's import path: a built-in (dynamiq.nodes.agents.hooks.PIIHook, PromptInjectionHook, "
+            "ToolPolicyHook, CallLimitHook, RegexHook, TransformHook; or the short name pii, prompt_injection, "
+            "tool_policy, call_limit, regex, transform) or a Python subclass of Hook."
         ),
     )
     tool_output_sandbox_persistence: ToolOutputSandboxPersistenceConfig = Field(
@@ -446,7 +447,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     @field_validator("hooks", mode="before")
     @classmethod
     def _resolve_hooks(cls, value):
-        """Build hooks from dicts (YAML): ``type: pii`` for built-ins, ``type: pkg.module.Class`` for Python hooks."""
+        """Build hooks from dicts (YAML): ``type: pkg.module.Class``, or a built-in's short name (``type: pii``)."""
         if isinstance(value, list):
             return [resolve_hook(item) for item in value]
         return value
@@ -660,6 +661,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             if tool.is_postponed_component_init:
                 tool.init_components(connection_manager)
             tool.is_optimized_for_agents = True
+
+        for hook in self.hooks:
+            detector = getattr(hook, "detector", None)
+            if isinstance(detector, Node) and detector.is_postponed_component_init:
+                detector.init_components(connection_manager)
 
         if self.long_term_memory and self.long_term_memory.backend.embedder.is_postponed_component_init:
             self.long_term_memory.backend.embedder.init_components(connection_manager)
@@ -1976,11 +1982,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         self._restored_hook_state = None
 
     @staticmethod
-    def _hook_to_dict(hook: Hook, dumped: dict, include_secure_params: bool = False, **kwargs) -> dict:
+    def _hook_to_dict(hook: Hook, dumped: dict, **kwargs) -> dict:
+        """A hook's detector is a node: serialized as the agent's other nodes are (``for_tracing`` included)."""
         detector = getattr(hook, "detector", None)
-        if detector is None or include_secure_params:
+        if not isinstance(detector, Node):
             return dumped
-        return {**dumped, "detector": {**dumped["detector"], "connection": detector.connection.to_dict(**kwargs)}}
+        return {**dumped, "detector": detector.to_dict(**kwargs)}
 
     def _snapshot_hook_state(self) -> dict | None:
         """JSON-safe copy of the run's hook state for checkpoints."""
