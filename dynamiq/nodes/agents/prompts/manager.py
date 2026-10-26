@@ -6,7 +6,6 @@ import textwrap
 from datetime import datetime
 from typing import Any
 
-from jinja2 import Template
 from pydantic import BaseModel
 
 from dynamiq.nodes.agents.prompts.react import (
@@ -42,6 +41,7 @@ from dynamiq.nodes.agents.prompts.secondary_instructions import (
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.storages.memory.base import render_namespaces
+from dynamiq.utils.jinja import compile_template
 from dynamiq.utils.logger import logger
 
 
@@ -219,12 +219,12 @@ class AgentPromptManager:
         formatted_prompt_blocks = {}
         for block, content in self._prompt_blocks.items():
             if block_names is None or block in block_names:
-                formatted_content = Template(content).render(temp_variables)
+                formatted_content = compile_template(content).render(temp_variables)
                 if content:
                     formatted_prompt_blocks[block] = formatted_content
 
         render_context = {**temp_variables, **formatted_prompt_blocks}
-        prompt = Template(self.agent_template).render(render_context).strip()
+        prompt = compile_template(self.agent_template).render(render_context).strip()
         prompt = self._clean_prompt(prompt)
         return textwrap.dedent(prompt)
 
@@ -235,7 +235,7 @@ class AgentPromptManager:
         so the fallback LLM call sees any schema constraints the rest of the
         prompt carries.
         """
-        return Template(self.max_loops_prompt).render(self._prompt_variables)
+        return compile_template(self.max_loops_prompt).render(self._prompt_variables)
 
     def render_block(self, block_name: str, **kwargs) -> str:
         """
@@ -261,7 +261,7 @@ class AgentPromptManager:
         variables.update(kwargs)
 
         # Pass dict directly to avoid crash on non-identifier keys
-        return Template(template_content).render(variables)
+        return compile_template(template_content).render(variables)
 
     @staticmethod
     def _clean_prompt(prompt: str) -> str:
