@@ -1583,7 +1583,7 @@ def test_approval_timeout_checkpoint_preserves_owner_state_and_refunds_pending_c
 
     saved = captured["state"].iteration_data["hook_state"]["hooks"]
     assert saved["agent:pii:1"]["placeholder_to_value"] == {"<EMAIL_1>": "ann@x.com"}
-    assert saved["agent:call_limit:1"]["calls"] == (1 if nested else 0)
+    assert saved["agent:call_limit:1"]["calls"] == 0
     assert saved["agent:search-budget:1"]["calls"] == 0
     assert captured["live"]["hooks"]["agent:search-budget:1"]["calls"] == 1
     assert not any(key.startswith("child:") for key in saved)
