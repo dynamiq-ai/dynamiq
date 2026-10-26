@@ -1617,6 +1617,126 @@ def test_session_cache_loss_never_reassigns_a_placeholder(monkeypatch):
     second = HookContext(hook_key="pii", session_id="cache-loss")
     new = hook._mask(second, "bob@y.com", "input")
     assert old != new
-    assert hook.before_tool(second, ToolCall(name="send-email", input={"to": old})) is ALLOW
+    # The tool is meant to get the real address, which this process no longer has: the call does not run.
+    blocked = hook.before_tool(second, ToolCall(name="send-email", input={"to": old}))
+    assert isinstance(blocked, Block) and blocked.as_ == BlockAs.OBSERVATION and old in blocked.reason
     assert hook._restore(second, f"{old} {new}") == f"{old} bob@y.com"
     assert hook.on_output(second, f"{old} {new}").value == f"{old} bob@y.com"
+
+
+@pytest.fixture
+def numbered_namespaces(monkeypatch):
+    """Session stores get the namespaces 1, 2, ... in the order they are made, so placeholders are predictable."""
+    from itertools import count
+    from types import SimpleNamespace
+
+    from dynamiq.nodes.agents.hooks import builtin
+
+    numbers = count(1)
+    monkeypatch.setattr(builtin, "_SESSION_STORES", builtin.OrderedDict())
+    monkeypatch.setattr(builtin, "uuid4", lambda: SimpleNamespace(int=next(numbers)))
+
+
+session_ids = pytest.mark.parametrize("ids", [{"user_id": "u1"}, {"session_id": "s1"}], ids=["user_id", "session_id"])
+
+
+@session_ids
+def test_a_session_store_evicted_while_the_run_goes_on_still_restores_the_runs_placeholders(ids, numbered_namespaces):
+    from dynamiq.nodes.agents.hooks import builtin
+
+    class Busy(SearchTool):
+        def execute(self, input_data, config=None, **kwargs):
+            builtin._SESSION_STORES.clear()  # other sessions' runs in this process pushed the store out
+            return super().execute(input_data, config, **kwargs)
+
+    agent = build_agent([PIIHook(entities=["email"], restore_in_tools=["send-email"])], tools=[Busy(), EmailTool()])
+    steps = [tool_step("search", query="q"), tool_step("send-email", to="<EMAIL_1_1>"), final_step("sent")]
+    result, _ = run_scripted(
+        agent, InferenceMode.STRUCTURED_OUTPUT, steps, question="Email bob@example.com", input_extra=ids
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert tool_inputs("send-email") == [{"to": "bob@example.com", "body": ""}]
+
+
+@session_ids
+def test_a_run_resumed_in_another_process_restores_the_placeholders_of_its_session(ids, numbered_namespaces):
+    from dynamiq.nodes.agents.hooks import builtin
+
+    mode = InferenceMode.STRUCTURED_OUTPUT
+    first = build_agent([PIIHook(entities=["email"], restore_in_tools=["send-email"])])
+    captured = {}
+
+    class Capture(SearchTool):
+        def execute(self, input_data, config=None, **kwargs):
+            captured["state"] = first.get_iteration_state()  # taken mid-run, as the checkpoint of a pause would be
+            return super().execute(input_data, config, **kwargs)
+
+    first.tools = [Capture(), EmailTool()]
+    steps = [tool_step("search", query="q"), final_step("paused")]
+    run_scripted(first, mode, steps, question="Email bob@example.com", input_extra=ids)
+    builtin._SESSION_STORES.clear()  # the resume runs in a process that never saw the run
+
+    resumed = build_agent([PIIHook(entities=["email"], restore_in_tools=["send-email"])])
+    resumed._iteration_state, resumed._has_restored_iteration = captured["state"], True
+    steps = [tool_step("send-email", to="<EMAIL_1_1>"), final_step("sent")]
+    result, _ = run_scripted(resumed, mode, steps, question="carry on", input_extra=ids)
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert tool_inputs("send-email") == [{"to": "bob@example.com", "body": ""}]
+
+
+@pytest.mark.parametrize("other_process", [False, True], ids=["same_process", "other_process"])
+def test_a_placeholder_from_an_earlier_turn_reaches_a_tool_only_as_its_real_value(other_process, numbered_namespaces):
+    from dynamiq.memory import Memory
+    from dynamiq.memory.backends import InMemory
+    from dynamiq.nodes.agents.hooks import builtin
+
+    mode, memory = InferenceMode.STRUCTURED_OUTPUT, Memory(backend=InMemory())
+    ids = {"user_id": "u1", "session_id": "s1"}
+    hooks = [PIIHook(entities=["email"], restore_in_tools=["send-email"])]
+    run_scripted(
+        build_agent(hooks, memory=memory), mode, [final_step("noted")], "my mail is bob@x.com", input_extra=ids
+    )
+    if other_process:
+        builtin._SESSION_STORES.clear()  # the next turn runs where the first turn's values are not held
+
+    steps = [tool_step("send-email", to="<EMAIL_1_1>"), final_step("asked")]
+    result, recorder = run_scripted(build_agent(hooks, memory=memory), mode, steps, "mail it", input_extra=ids)
+
+    assert result.status == RunnableStatus.SUCCESS
+    if other_process:
+        # The call is not run with the placeholder; the model is told to ask for the value again.
+        assert tool_inputs("send-email") == []
+        assert "<EMAIL_1_1> is no longer available" in recorder.sent_text()
+    else:
+        assert tool_inputs("send-email") == [{"to": "bob@x.com", "body": ""}]
+
+
+def test_a_placeholder_another_pii_hook_holds_is_left_for_that_hook_to_restore(numbered_namespaces):
+    asked = PIIHook(name="user-pii", entities=["email"], on=["input"], restore_in_tools=["send-email"])
+    found = PIIHook(name="tool-pii", entities=["email"], on=["tool_result"], restore_in_tools=["send-email"])
+    agent = build_agent([asked, found], tools=[SearchTool(result="the owner is bob@y.com"), EmailTool()])
+    # Namespace 1 is the user's message, 2 the search result; the first hook to look holds only the first.
+    steps = [tool_step("search", query="owner"), tool_step("send-email", to="<EMAIL_2_1>"), final_step("sent")]
+    result, _ = run_scripted(
+        agent, InferenceMode.STRUCTURED_OUTPUT, steps, question="ann@x.com asks", input_extra={"user_id": "u1"}
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert tool_inputs("send-email") == [{"to": "bob@y.com", "body": ""}]
+
+
+def test_only_the_restored_arguments_are_checked_for_placeholders_that_cannot_be_restored():
+    from dynamiq.nodes.agents.hooks import HookContext, ToolCall
+
+    hook = PIIHook(entities=["email"], restore_in_tools={"send-email": ["to"]})
+    ctx = HookContext(hook_key="pii")
+    known = hook._mask(ctx, "bob@x.com", "input")
+
+    kept = hook.before_tool(ctx, ToolCall(name="send-email", input={"to": known, "body": "cc <EMAIL_7>"}))
+    assert kept.value == {"to": "bob@x.com", "body": "cc <EMAIL_7>"}
+    # A placeholder of an entity the hook does not detect is not its to restore.
+    assert hook.before_tool(ctx, ToolCall(name="send-email", input={"to": "<PHONE_3>"})) is ALLOW
+    blocked = hook.before_tool(ctx, ToolCall(name="send-email", input={"to": "<EMAIL_7>"}))
+    assert isinstance(blocked, Block) and "<EMAIL_7>" in blocked.reason
