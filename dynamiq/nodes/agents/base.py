@@ -1954,7 +1954,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         )
         if parent is not None:
             ctx.lock = parent.lock
-            ctx.pending_approvals = parent.pending_approvals
+            ctx.pending_calls = parent.pending_calls
         if inherited:
             with parent.lock:
                 parent_slices = parent.state.setdefault("hooks", {})
@@ -1997,7 +1997,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         with ctx.lock:
             snapshot = ctx.for_call(state=deepcopy(ctx.state))
             own_slices = ctx.state.get("hooks", {})
-            for pending_ctx, call in ctx.pending_approvals.values():
+            for pending_ctx, call in ctx.pending_calls.values():
                 pending_slices = pending_ctx.state.get("hooks", {})
                 pairs = [
                     (key, hook)
@@ -2395,7 +2395,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     approval_ctx = current_hook_ctx.get() or HookContext()
                     reservation_id = uuid4().hex
                     with approval_ctx.lock:
-                        approval_ctx.pending_approvals[reservation_id] = (approval_ctx, hook_call(merged_input))
+                        approval_ctx.pending_calls[reservation_id] = (approval_ctx, hook_call(merged_input))
                     try:
                         merged_input = self._request_tool_approval(
                             tool.name,
@@ -2410,11 +2410,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     except BaseException:
                         with approval_ctx.lock:
                             self._hook_runner().refund(approval_ctx, hook_call(merged_input))
-                            approval_ctx.pending_approvals.pop(reservation_id, None)
+                            approval_ctx.pending_calls.pop(reservation_id, None)
                         raise
                     finally:
                         with approval_ctx.lock:
-                            approval_ctx.pending_approvals.pop(reservation_id, None)
+                            approval_ctx.pending_calls.pop(reservation_id, None)
 
             check_cancellation(config)
             # Parked in a delegate call we can't drive the page — hand it to the subagent. Skipped
@@ -2429,6 +2429,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     HookPoint.ON_OUTPUT, HookPoint.AFTER_MODEL
                 )
                 hold_token = _hold_answer_stream.set(True) if hold_stream else None
+                # An approval or feedback request inside the tool may pause the run: the checkpoint it takes must
+                # not keep the slots this call took, since the call is replayed on resume.
+                run_ctx = None if isinstance(tool, ContextManagerTool) else current_hook_ctx.get()
+                reservation_id = uuid4().hex
+                if run_ctx is not None:
+                    with run_ctx.lock:
+                        run_ctx.pending_calls[reservation_id] = (run_ctx, hook_call(merged_input))
                 try:
                     tool_result = tool_to_run.run(
                         input_data=merged_input,
@@ -2437,6 +2444,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                         **child_kwargs,
                     )
                 finally:
+                    if run_ctx is not None:
+                        with run_ctx.lock:
+                            run_ctx.pending_calls.pop(reservation_id, None)
                     if hold_token is not None:
                         _hold_answer_stream.reset(hold_token)
             dependency_node = tool_to_run if tool_to_run is not tool else tool

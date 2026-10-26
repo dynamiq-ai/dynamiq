@@ -51,7 +51,7 @@ def setup_multi_tool_streaming_agent() -> Agent:
     tool_code = E2BInterpreterTool(connection=conn_code)
     tool_search = ExaTool(connection=conn_search)
 
-    llm = setup_llm(model_provider="gpt", model_name="o3-mini", temperature=0.2)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-5.6-sol")
 
     agent = Agent(
         name="MultiToolStreamingAgent",

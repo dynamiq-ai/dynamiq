@@ -60,7 +60,7 @@ def pipedream_configuration(json_input_schema: dict):
 
 def agent_jira_create_task():
     pipedream_tool = pipedream_configuration(json_input_schema=JIRA_CREATE_ISSUE_PROPS)
-    llm = setup_llm(model_provider="gpt", model_name="o3-mini", max_tokens=100000)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-5.6-sol", max_tokens=100000)
 
     agent_software = Agent(
         name="Agent",

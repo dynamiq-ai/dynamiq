@@ -19,13 +19,13 @@ class GeminiDocumentEmbedder(DocumentEmbedder):
     Args:
         connection (Optional[GeminiConnection]): The connection to the Gemini API. A new connection
             is created if none is provided.
-        model (str): The model name to use for embedding. Defaults to 'gemini/gemini-embedding-exp-03-07'.
+        model (str): The model name to use for embedding. Defaults to 'gemini/gemini-embedding-001'.
         input_type (str): Specifies the type of embedding task. Defaults to "search_document".
     """
 
     name: str = "gemini-document-embedder"
     connection: GeminiConnection | None = None
-    model: str = "gemini/gemini-embedding-exp-03-07"
+    model: str = "gemini/gemini-embedding-001"
     input_type: str = "search_document"
     document_embedder: GeminiEmbedderComponent | None = None
 
@@ -70,7 +70,7 @@ class GeminiTextEmbedder(TextEmbedder):
         connection (Optional[GeminiConnection]): An existing connection to Gemini API. If not
             provided, a new connection will be established using environment variables.
         model (str): The identifier of the Gemini model for text embeddings. Defaults to
-            'gemini/gemini-embedding-exp-03-07'.
+            'gemini/gemini-embedding-001'.
         input_type (str): Specifies the type of embedding task. Defaults to "search_query".
 
     Attributes:
@@ -82,7 +82,7 @@ class GeminiTextEmbedder(TextEmbedder):
 
     name: str = "gemini-text-embedder"
     connection: GeminiConnection | None = None
-    model: str = "gemini/gemini-embedding-exp-03-07"
+    model: str = "gemini/gemini-embedding-001"
     input_type: str = "search_query"
     text_embedder: GeminiEmbedderComponent = None
 

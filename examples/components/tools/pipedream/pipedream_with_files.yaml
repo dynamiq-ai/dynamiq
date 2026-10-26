@@ -41,9 +41,8 @@ nodes:
             streaming:
                 enabled: false
             error_handling: {}
-            model: claude-sonnet-4-5
+            model: claude-sonnet-5-5
             connection: 9a57c7de-20ed-4370-a8bd-a44a58b58b42
-            temperature: 0
             max_tokens: 64000
             inference_mode: DEFAULT
         tools:
