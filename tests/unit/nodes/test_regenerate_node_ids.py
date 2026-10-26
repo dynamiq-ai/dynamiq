@@ -461,3 +461,40 @@ def test_the_nodes_waiting_for_a_reply_are_the_feedback_tools_and_the_approval_g
     node = SubWorkflow(id="sub", name="sub", flow=Flow(id="flow", nodes=[ask, notify, gate, plain]))
 
     assert {waiting.id for waiting in reply_waiting_nodes(node)} == {"ask", "gate"}
+
+
+def test_the_agents_a_hook_approval_is_asked_under_wait_for_a_reply():
+    from dynamiq.nodes.agents.hooks import ALLOW, Hook, ToolPolicyHook
+    from dynamiq.nodes.tools.agent_tool import SubAgentTool
+    from dynamiq.types.feedback import FeedbackMethod
+    from tests.helpers.agent_hooks import build_agent
+
+    class Screen(Hook):
+        """A custom hook acting before tool calls, which may answer with an Ask."""
+
+        def before_tool(self, ctx, call):
+            return ALLOW
+
+    def asking(**kwargs):
+        return ToolPolicyHook(tools=["search"], approval=True, feedback_method=FeedbackMethod.STREAM, **kwargs)
+
+    def waiting(node):
+        return {node.id for node in reply_waiting_nodes(node)}
+
+    def sub_agent(agent):
+        return SubAgentTool(agent=agent, name=agent.id, description="helps")
+
+    assert waiting(build_agent([asking()], id="asks")) == {"asks"}
+    assert waiting(build_agent([Screen()], id="custom")) == {"custom"}
+    # A console approval is not asked through the input stream, and a deny never asks.
+    assert waiting(build_agent([ToolPolicyHook(tools=["search"], approval=True)], id="console")) == set()
+    assert waiting(build_agent([ToolPolicyHook(tools=["search"], deny=True)], id="denies")) == set()
+
+    # A sub-agent without an input stream of its own asks under the agent that runs it.
+    parent = build_agent([], id="parent", tools=[sub_agent(build_agent([asking()], id="child"))])
+    assert waiting(parent) == {"parent", "child"}
+    other = build_agent([], id="parent", tools=[sub_agent(build_agent([], id="quiet"))])
+    assert waiting(other) == set()
+    # An inherited hook asks in every agent beneath the one that has it.
+    inheriting = build_agent([asking(inherit=True)], id="parent", tools=[sub_agent(build_agent([], id="helper"))])
+    assert waiting(inheriting) == {"parent", "helper"}
