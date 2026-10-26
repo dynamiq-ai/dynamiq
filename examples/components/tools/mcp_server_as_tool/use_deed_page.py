@@ -32,12 +32,12 @@ def main():
     parser.add_argument("--file", type=Path, help="HTML file to publish as index.html (default: a sample page)")
     parser.add_argument("--slug", help="Optional subdomain to claim, e.g. my-team-report")
     parser.add_argument("--ttl", type=int, default=3600, help="Seconds until the page expires; 0 keeps it")
-    parser.add_argument("--delete", metavar="SLUG", help="Delete a page using the token in DEED_PAGE_TOKEN")
+    parser.add_argument("--delete", metavar="SLUG", help="Delete a page using the token in DEEDPAGE_TOKEN")
     args = parser.parse_args()
     if args.delete:
-        token = os.environ.get("DEED_PAGE_TOKEN")
+        token = os.environ.get("DEEDPAGE_TOKEN")
         if not token:
-            parser.error("--delete needs the owner token from the first publish in DEED_PAGE_TOKEN")
+            parser.error("--delete needs the owner token from the first publish in DEEDPAGE_TOKEN")
         output = run_tool("delete_site", {"slug": args.delete, "token": token})
     else:
         if args.ttl < 0:

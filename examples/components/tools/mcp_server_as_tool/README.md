@@ -73,7 +73,7 @@ page. The printed `publish_site` result contains the public URL and, on the firs
 publish, an owner `token`. Save that token to update or delete the page later:
 
 ```sh
-DEED_PAGE_TOKEN=deed_tok_... uv run --python 3.12 --no-default-groups \
+DEEDPAGE_TOKEN=deed_tok_... uv run --python 3.12 --no-default-groups \
   python -m examples.components.tools.mcp_server_as_tool.use_deed_page --delete <slug>
 ```
 
