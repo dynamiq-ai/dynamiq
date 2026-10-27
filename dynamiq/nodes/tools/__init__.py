@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .file_tools import FileListTool, FileReadTool, FileWriteTool
     from .firecrawl import FirecrawlTool
     from .firecrawl_search import FirecrawlSearchTool
+    from .fxmacrodata import FXMacroDataTool
     from .http_api_call import HttpApiCall, ResponseType
     from .human_feedback import HumanFeedbackTool
     from .jina import JinaResponseFormat, JinaScrapeTool, JinaSearchTool
@@ -59,6 +60,7 @@ _LAZY_EXPORTS = {
     "FileWriteTool": ".file_tools",
     "FirecrawlTool": ".firecrawl",
     "FirecrawlSearchTool": ".firecrawl_search",
+    "FXMacroDataTool": ".fxmacrodata",
     "HttpApiCall": ".http_api_call",
     "ResponseType": ".http_api_call",
     "HumanFeedbackTool": ".human_feedback",
@@ -117,6 +119,7 @@ __all__ = [
     "FileWriteTool",
     "FirecrawlTool",
     "FirecrawlSearchTool",
+    "FXMacroDataTool",
     "HttpApiCall",
     "ResponseType",
     "HumanFeedbackTool",
