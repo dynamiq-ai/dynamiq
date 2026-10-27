@@ -37,7 +37,7 @@ Ready to dive in? Here's how you can get started with Dynamiq:
 
 ### Installation
 
-First, let's get Dynamiq installed. You'll need Python 3.10 or later, so make sure that's set up on your machine. Then run:
+First, let's get Dynamiq installed. You'll need Python 3.11 or later, so make sure that's set up on your machine. Then run:
 
 ```sh
 pip install dynamiq
