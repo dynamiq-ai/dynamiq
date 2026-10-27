@@ -1,7 +1,7 @@
 # Dynamiq
 
 Dynamiq is a Python framework for agentic AI and LLM applications: nodes, workflows, agents and tools, serialized to
-YAML and run by the Dynamiq platform. It supports Python 3.10 and later, uses Pydantic 2, and is managed with uv.
+YAML and run by the Dynamiq platform. It supports Python 3.11 and later, uses Pydantic 2, and is managed with uv.
 
 ## Set up and check
 
