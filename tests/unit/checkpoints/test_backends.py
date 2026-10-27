@@ -1,6 +1,7 @@
 """Unit tests for checkpoint storage backends (InMemory, FileSystem)."""
 
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -256,6 +257,64 @@ class BackendTestMixin:
         results = backend.get_list_by_run(wf_run_id)
         assert len(results) == 2
         assert {r.run_id for r in results} == {"run-a", "run-b"}
+
+    def test_get_list_by_run_matches_flow_run_in_workflow_directory(self, backend: CheckpointBackend):
+        """A workflow directory must not hide the checkpoint's flow-level run ID."""
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        checkpoints = [
+            FlowCheckpoint(
+                flow_id=f"flow-{i}",
+                run_id="flow-run",
+                wf_run_id=f"workflow-{i}",
+                created_at=start + timedelta(seconds=i),
+            )
+            for i in range(3)
+        ]
+        for checkpoint in checkpoints:
+            backend.save(checkpoint)
+        backend.save(FlowCheckpoint(flow_id="flow-0", run_id="other-run", wf_run_id="workflow-0"))
+
+        assert [cp.id for cp in backend.get_list_by_run("flow-run")] == [cp.id for cp in reversed(checkpoints)]
+        assert [cp.id for cp in backend.get_list_by_run("flow-run", limit=1)] == [checkpoints[-1].id]
+
+    def test_get_list_by_flow_and_run_matches_flow_run_in_workflow_directory(self, backend: CheckpointBackend):
+        """Flow-run lookup preserves status, ordering, limits, and flow isolation."""
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        older = FlowCheckpoint(
+            flow_id="flow",
+            run_id="flow-run",
+            wf_run_id="workflow-run",
+            created_at=start,
+        )
+        newer = FlowCheckpoint(
+            flow_id="flow",
+            run_id="flow-run",
+            wf_run_id="workflow-run",
+            created_at=start + timedelta(seconds=1),
+            status=CheckpointStatus.COMPLETED,
+        )
+        for checkpoint in [older, newer]:
+            backend.save(checkpoint)
+        backend.save(FlowCheckpoint(flow_id="other-flow", run_id="flow-run", wf_run_id="workflow-run"))
+        backend.save(FlowCheckpoint(flow_id="flow", run_id="other-run", wf_run_id="workflow-run"))
+
+        assert [cp.id for cp in backend.get_list_by_flow_and_run("flow", "flow-run")] == [newer.id, older.id]
+        assert [cp.id for cp in backend.get_list_by_flow_and_run("flow", "flow-run", limit=1)] == [newer.id]
+        active = backend.get_list_by_flow_and_run("flow", "flow-run", status=CheckpointStatus.ACTIVE)
+        assert [cp.id for cp in active] == [older.id]
+        latest = backend.get_latest_by_flow_and_run("flow", "flow-run")
+        assert latest is not None
+        assert latest.id == newer.id
+
+    def test_get_list_by_flow_and_run_matches_both_ids_across_directories(self, backend: CheckpointBackend):
+        """An explicit workflow ID adds matches without discarding flow-run matches."""
+        flow_checkpoint = FlowCheckpoint(flow_id="flow", run_id="flow-run")
+        workflow_checkpoint = FlowCheckpoint(flow_id="flow", run_id="other-run", wf_run_id="workflow-run")
+        for checkpoint in [flow_checkpoint, workflow_checkpoint]:
+            backend.save(checkpoint)
+
+        matches = backend.get_list_by_flow_and_run("flow", "flow-run", wf_run_id="workflow-run")
+        assert {cp.id for cp in matches} == {flow_checkpoint.id, workflow_checkpoint.id}
 
     def test_get_list_by_flow_and_run(self, backend: CheckpointBackend):
         """get_list_by_flow_and_run returns checkpoints matching both flow_id and run_id."""
