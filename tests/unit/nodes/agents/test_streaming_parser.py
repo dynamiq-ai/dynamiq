@@ -232,6 +232,43 @@ def test_parallel_tool_calls_get_unique_ids():
     assert agent._streaming_tool_run_ids == [id_tool_0, id_tool_1]
 
 
+def test_parallel_tool_calls_in_one_chunk_all_get_ids():
+    """Two tool calls delivered in the same chunk must both be tracked, not only the first."""
+    agent = MagicMock()
+    agent.streaming.enabled = True
+    agent.streaming.mode = StreamingMode.ALL
+    agent.streaming.min_chunk_chars = 0
+    agent.inference_mode.name = InferenceMode.FUNCTION_CALLING.value
+    agent.name = "test-agent"
+    agent._streaming_tool_run_id = None
+    agent._streaming_tool_run_ids = []
+    agent.tool_by_names = {}
+    agent.sanitize_tool_name = lambda name: name
+    agent.llm = MagicMock()
+    agent.llm.id = "llm-1"
+
+    cb = AgentStreamingParserCallback(agent=agent, config=None, loop_num=1)
+    serialized = {"group": "llms", "id": "llm-1"}
+
+    chunk = {
+        "choices": [
+            {
+                "delta": {
+                    "tool_calls": [
+                        {"index": 0, "type": "function", "function": {"name": "exa_search", "arguments": ""}},
+                        {"index": 1, "type": "function", "function": {"name": "tavily_search", "arguments": ""}},
+                    ]
+                }
+            }
+        ]
+    }
+    cb.on_node_execute_stream(serialized, chunk)
+
+    assert len(agent._streaming_tool_run_ids) == 2
+    assert agent._streaming_tool_run_ids[0] != agent._streaming_tool_run_ids[1]
+    assert cb._current_action_name == "tavily_search"
+
+
 @pytest.mark.parametrize(
     "stream_tool_input, action_name, should_stream",
     [
