@@ -1,9 +1,10 @@
 import pytest
 
+from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import ScaleSerp, ZenRows
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.nodes.tools.zenrows import ZenRowsTool
-from dynamiq.runnables import RunnableStatus
+from dynamiq.runnables import RunnableConfig, RunnableStatus
 
 # Nothing listens on port 9, so the request fails at once with an error that quotes the URL and its query.
 UNREACHABLE = "http://127.0.0.1:9"
@@ -17,7 +18,12 @@ UNREACHABLE = "http://127.0.0.1:9"
     ],
 )
 def test_request_errors_leave_out_the_api_key(tool, input_data):
-    result = tool.run(input_data=input_data)
+    tracing = TracingCallbackHandler()
+    result = tool.run(input_data=input_data, config=RunnableConfig(callbacks=[tracing]))
 
     assert result.status == RunnableStatus.FAILURE
     assert "scale-secret" not in str(result.error.message)
+    # The traced traceback includes chained exceptions, so the original request error must not be chained.
+    tracebacks = [run.error["traceback"] for run in tracing.runs.values() if run.error]
+    assert tracebacks
+    assert all("scale-secret" not in tb for tb in tracebacks)

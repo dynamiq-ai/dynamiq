@@ -233,7 +233,7 @@ class ScaleSerpTool(ConnectionNode):
         except ToolExecutionException:
             raise
         except Exception as e:
-            raise self._wrap_request_exception(e)
+            raise self._wrap_request_exception(e) from None
 
     async def execute_async(
         self, input_data: ScaleSerpInputSchema, config: RunnableConfig | None = None, **kwargs
@@ -252,7 +252,7 @@ class ScaleSerpTool(ConnectionNode):
         except ToolExecutionException:
             raise
         except Exception as e:
-            raise self._wrap_request_exception(e)
+            raise self._wrap_request_exception(e) from None
 
     def get_params(
         self,

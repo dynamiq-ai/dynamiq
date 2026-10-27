@@ -114,7 +114,7 @@ class ZenRowsTool(ConnectionNode):
         except ToolExecutionException:
             raise
         except Exception as e:
-            raise self._wrap_request_exception(e)
+            raise self._wrap_request_exception(e) from None
 
     async def execute_async(
         self, input_data: ZenRowsInputSchema, config: RunnableConfig = None, **kwargs
@@ -131,4 +131,4 @@ class ZenRowsTool(ConnectionNode):
         except ToolExecutionException:
             raise
         except Exception as e:
-            raise self._wrap_request_exception(e)
+            raise self._wrap_request_exception(e) from None
