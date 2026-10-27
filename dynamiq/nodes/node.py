@@ -1767,7 +1767,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 except Exception as e:
                     error = e
                     self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
-                    logger.error(self._node_run_log(f"execution error: {e}"), exc_info=True)
+                    logger.error(self._node_run_log(f"execution error: {e}"))
 
                 # a permanent failure fails the same way on every attempt
                 if not is_retryable_error(error):
@@ -1887,7 +1887,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             except Exception as e:
                 error = e
                 self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
-                logger.error(self._node_run_log(f"execution error: {e}"), exc_info=True)
+                logger.error(self._node_run_log(f"execution error: {e}"))
 
             # a permanent failure fails the same way on every attempt
             if not is_retryable_error(error):
