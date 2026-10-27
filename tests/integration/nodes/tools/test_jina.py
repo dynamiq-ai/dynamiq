@@ -85,20 +85,16 @@ def test_jina_basic_search(mock_search_requests, mock_jina_search_response):
     assert input_dump["query"] == input_data["query"]
     assert input_dump["max_results"] == input_data["max_results"]
 
-    # Verify the correct API call was made
     mock_search_requests.assert_called_once()
     call_args = mock_search_requests.call_args
 
-    # Check method and URL (accessing kwargs)
     assert call_args.kwargs["method"] == "POST"
     assert call_args.kwargs["url"] == "https://s.jina.ai/"
 
-    # Check request body
     request_body = call_args.kwargs["json"]
     assert request_body["q"] == "artificial intelligence"
     assert request_body["num"] == 2
 
-    # Check headers
     headers = call_args.kwargs["headers"]
     assert "Content-Type" in headers
     assert headers["Content-Type"] == "application/json"
@@ -149,19 +145,15 @@ def test_jina_basic_scraping(mock_scrape_requests, mock_jina_scrape_response):
     assert content["links"] == mock_jina_scrape_response["data"]["links"]
     assert content["images"] == mock_jina_scrape_response["data"]["images"]
 
-    # Verify the correct API call was made
     mock_scrape_requests.assert_called_once()
     call_args = mock_scrape_requests.call_args
 
-    # Check method and URL
     assert call_args.kwargs["method"] == "POST"
     assert call_args.kwargs["url"] == "https://r.jina.ai/"
 
-    # Check request body
     request_body = call_args.kwargs["json"]
     assert request_body["url"] == "https://your-url"
 
-    # Check headers
     headers = call_args.kwargs["headers"]
     assert headers["X-Timeout"] == "60"
     assert "X-Return-Format" in headers
@@ -205,7 +197,6 @@ def test_jina_search_with_additional_parameters(mock_search_requests, mock_jina_
     assert isinstance(result, RunnableResult)
     assert result.status == RunnableStatus.SUCCESS
 
-    # Verify API call parameters
     call_args = mock_search_requests.call_args
     request_body = call_args.kwargs["json"]
     headers = call_args.kwargs["headers"]
@@ -236,7 +227,6 @@ def test_jina_scrape_with_selectors(mock_scrape_requests, mock_jina_scrape_respo
     assert isinstance(result, RunnableResult)
     assert result.status == RunnableStatus.SUCCESS
 
-    # Verify headers contain selector information
     call_args = mock_scrape_requests.call_args
     headers = call_args.kwargs["headers"]
 

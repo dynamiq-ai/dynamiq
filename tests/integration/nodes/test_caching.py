@@ -25,14 +25,14 @@ def node_with_caching(openai_node):
 @pytest.mark.parametrize(
     ("first_input_data", "first_kwargs", "second_input_data", "second_kwargs", "is_second_use_cache"),
     [
-        # # Value of keys should count
+        # Value of keys should count
         ({"a": 1, "b": 2}, {}, {"a": 1, "b": 2}, {}, True),
         ({"a": 1, "b": 2}, {}, {"b": 2, "a": 2}, {}, False),
-        # # Order of keys should not count
+        # Order of keys should not count
         ({"a": 1, "b": 2}, {}, {"b": 2, "a": 1}, {}, True),
-        # # FUNC_KWARGS_TO_REMOVE should not count
+        # FUNC_KWARGS_TO_REMOVE should not count
         ({"a": 1, "b": 2}, {"run_id": 1}, {"a": 1, "b": 2}, {"run_id": 2}, True),
-        # # Value of kwargs should count
+        # Value of kwargs should count
         ({"a": 1, "b": 2}, {"run_id": 1, "test": 1}, {"a": 1, "b": 2}, {"run_id": 2, "test": 1}, True),
         ({"a": 1, "b": 2}, {"run_id": 1, "test": 1}, {"a": 1, "b": 2}, {"run_id": 2, "test": 2}, False),
         # Different types should count

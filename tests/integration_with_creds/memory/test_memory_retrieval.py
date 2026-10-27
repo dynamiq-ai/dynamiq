@@ -31,7 +31,7 @@ def test_single_assistant_message(memory_instance):
     """Test with a single ASSISTANT message."""
     msg = Message(role=MessageRole.ASSISTANT, content="Hello", metadata={"timestamp": 1.0})
     result = memory_instance._extract_valid_conversation([msg], 10)
-    assert result == []  # Should return empty list as no USER message
+    assert result == []  # no USER message
 
 
 def test_basic_conversation_order(memory_instance):

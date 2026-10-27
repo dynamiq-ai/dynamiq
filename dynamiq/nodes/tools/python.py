@@ -17,6 +17,7 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils import format_value
+from dynamiq.utils.lazy_imports import optional_dependency_error
 from dynamiq.utils.logger import logger
 
 ALLOWED_MODULES = [
@@ -143,6 +144,8 @@ def restricted_import(name: str, globals=None, locals=None, fromlist=(), level=0
         return module
     except ImportError as e:
         logger.error(f"Failed to import {name}: {str(e)}")
+        if optional_error := optional_dependency_error(e, name):
+            raise optional_error from e
         raise
 
 

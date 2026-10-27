@@ -4,7 +4,6 @@ from dynamiq.evaluations.metrics.answer_correctness import AnswerCorrectnessEval
 
 
 def test_answer_correctness_evaluator(openai_node):
-    # Sample data
     questions = ["What powers the sun and what is its primary function?", "What is the boiling point of water?"]
     answers = [
         (
@@ -107,7 +106,6 @@ def test_answer_correctness_evaluator(openai_node):
         ]
     )
 
-    # Run the evaluator
     correctness_scores = evaluator.run(
         questions=questions, answers=answers, ground_truth_answers=ground_truth_answers, verbose=False
     )

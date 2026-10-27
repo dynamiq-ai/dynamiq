@@ -62,7 +62,6 @@ class VertexAIEmbedder(BaseEmbedder):
         # Copy base parameters to avoid side effects
         params = super().embed_params.copy()
 
-        # Map our input types to Vertex AI task enums
         task_mapping = {
             "search_query": "RETRIEVAL_QUERY",
             "search_document": "RETRIEVAL_DOCUMENT",

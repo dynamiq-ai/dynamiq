@@ -94,7 +94,6 @@ class SharedSession:
             workdir = f"{self.sandbox.base_path.rstrip('/')}/work/{slugify(key)}"
             return self.sandbox.create_view(base_path=workdir, sandbox_id=sandbox_id)
 
-    # --- shared live session (intra-run) + persistent Context (cross-run) ---
     def browser_session_id(self) -> str | None:
         return self._browser_session_id
 
@@ -164,7 +163,6 @@ class SharedSession:
         except Exception as exc:  # noqa: BLE001 - best-effort teardown
             logger.warning("Failed to end the shared browser session: %s", exc)
 
-    # --- page control: agents share one page, so only one may drive it at a time ---
     def acquire_page_control(self, agent_run_key: str, timeout: float = 300.0) -> None:
         """Take control of the shared page, blocking until free.
 

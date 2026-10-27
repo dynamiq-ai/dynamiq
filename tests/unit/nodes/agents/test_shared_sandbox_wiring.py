@@ -92,7 +92,7 @@ def test_owner_warns_and_skips_session_when_backend_lacks_view_support(test_llm)
     agent = _sandboxed_agent(test_llm, share_sandbox_with_subagents=True)
     viewless = MagicMock()
     viewless.supports_views = False
-    agent.sandbox.backend = viewless  # swap in a view-incapable backend
+    agent.sandbox.backend = viewless
 
     with patch("dynamiq.nodes.agents.base.logger") as mock_logger:
         token = agent._maybe_enter_shared_session({"run_id": "r"})
@@ -368,10 +368,8 @@ def test_two_subagents_share_one_sandbox_distinct_workdirs(test_llm):
         shell1 = next(t for t in ov1 if isinstance(t, SandboxShellTool))
         shell2 = next(t for t in ov2 if isinstance(t, SandboxShellTool))
 
-        # same underlying sandbox
         assert shell1.sandbox.sandbox_id == "sbx-shared"
         assert shell2.sandbox.sandbox_id == "sbx-shared"
-        # isolated working directories
         assert shell1.sandbox.base_path != shell2.sandbox.base_path
         assert shell1.sandbox.base_path.startswith("/home/user/work/researcher-")
         assert shell2.sandbox.base_path.startswith("/home/user/work/researcher-")
@@ -482,7 +480,7 @@ def test_agent_records_its_own_sandbox_tool_ids(test_llm):
 
     agent = _sandboxed_agent(test_llm)  # has its own sandbox
     own_shell = next(t for t in agent.tools if isinstance(t, SandboxShellTool))
-    assert agent._own_sandbox_tool_ids  # non-empty
+    assert agent._own_sandbox_tool_ids
     assert own_shell.id in agent._own_sandbox_tool_ids
 
 

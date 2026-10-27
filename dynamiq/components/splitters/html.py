@@ -5,6 +5,7 @@ from typing import Any, ClassVar
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from dynamiq.types import Document
+from dynamiq.utils.lazy_imports import optional_dependency_error
 from dynamiq.utils.logger import logger
 
 
@@ -47,11 +48,10 @@ class HTMLHeaderSplitterComponent(BaseModel):
     def split_text(self, text: str) -> list[dict[str, Any]]:
         try:
             from bs4 import BeautifulSoup
-        except ImportError as exc:
-            raise ImportError(
-                "HTMLHeaderSplitter requires the 'beautifulsoup4' package. "
-                "Install with `pip install beautifulsoup4 lxml`."
-            ) from exc
+        except ImportError as e:
+            if optional_error := optional_dependency_error(e, type(self).__name__.removesuffix("Component")):
+                raise optional_error from e
+            raise
 
         soup = BeautifulSoup(text, "lxml" if _has_lxml() else "html.parser")
         header_tags = {tag for tag, _ in self.headers_to_split_on}

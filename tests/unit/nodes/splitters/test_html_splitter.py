@@ -1,7 +1,10 @@
+import sys
+
 import pytest
 
 from dynamiq.nodes.splitters.html import HTMLHeaderSplitter, HTMLSectionSplitter
 from dynamiq.types import Document
+from dynamiq.utils.lazy_imports import OptionalDependencyError
 
 pytest.importorskip("bs4")
 
@@ -52,3 +55,13 @@ def test_html_section_splitter_passes_return_each_element_to_component():
     splitter.init_components()
 
     assert splitter.splitter.return_each_element is True
+
+
+@pytest.mark.parametrize("splitter_class", [HTMLHeaderSplitter, HTMLSectionSplitter])
+def test_html_splitters_name_their_extra_without_beautifulsoup(splitter_class, monkeypatch):
+    monkeypatch.setitem(sys.modules, "bs4", None)
+    splitter = splitter_class()
+    splitter.init_components()
+
+    with pytest.raises(OptionalDependencyError, match=rf'{splitter_class.__name__} needs .*"dynamiq\[files\]"'):
+        splitter.execute(splitter.input_schema(documents=[Document(content="<h1>Title</h1>")]))

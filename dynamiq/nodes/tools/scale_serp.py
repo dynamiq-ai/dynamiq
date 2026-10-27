@@ -169,10 +169,12 @@ class ScaleSerpTool(ConnectionNode):
         return request_kwargs, search_type, query, url
 
     def _wrap_request_exception(self, exc: Exception) -> ToolExecutionException:
-        logger.error(f"Tool {self.name} - {self.id}: unexpected error occurred. Error: {str(exc)}")
+        # A request error quotes the URL, whose query carries the API key.
+        error = str(exc).replace(self.connection.api_key, "***") if self.connection.api_key else str(exc)
+        logger.error(f"Tool {self.name} - {self.id}: unexpected error occurred. Error: {error}")
         return ToolExecutionException(
             f"Tool '{self.name}' encountered an unexpected error. "
-            f"Error: {str(exc)}. Please analyze the error and take appropriate action.",
+            f"Error: {error}. Please analyze the error and take appropriate action.",
             recoverable=True,
         )
 
@@ -231,7 +233,7 @@ class ScaleSerpTool(ConnectionNode):
         except ToolExecutionException:
             raise
         except Exception as e:
-            raise self._wrap_request_exception(e)
+            raise self._wrap_request_exception(e) from None
 
     async def execute_async(
         self, input_data: ScaleSerpInputSchema, config: RunnableConfig | None = None, **kwargs
@@ -250,7 +252,7 @@ class ScaleSerpTool(ConnectionNode):
         except ToolExecutionException:
             raise
         except Exception as e:
-            raise self._wrap_request_exception(e)
+            raise self._wrap_request_exception(e) from None
 
     def get_params(
         self,

@@ -51,9 +51,6 @@ def commands_sent(client):
     return [call.kwargs["command"] for call in client.invoke_command.call_args_list]
 
 
-# --- session identity --------------------------------------------------------
-
-
 def test_ensure_started_derives_a_session_id():
     sandbox, _ = make_sandbox()
     assert sandbox.session_id is None
@@ -104,9 +101,6 @@ def test_current_sandbox_id_exposes_the_session():
     assert sandbox.current_sandbox_id == sandbox.session_id
 
 
-# --- path resolution ---------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
@@ -127,9 +121,6 @@ def test_resolve_path_is_idempotent():
     sandbox, _ = make_sandbox()
     once = sandbox._resolve_path("data.csv")
     assert sandbox._resolve_path(once) == once
-
-
-# --- views -------------------------------------------------------------------
 
 
 def test_supports_views():
@@ -174,9 +165,6 @@ def test_create_view_carries_the_session_env():
     assert view.session_env == {"TOKEN": "abc"}
     assert view.session_env_param == "/dq/conv-1"
     assert view.session_env_path == sandbox.session_env_path
-
-
-# --- session env -------------------------------------------------------------
 
 
 def bootstrap_commands(client):
@@ -385,9 +373,6 @@ def test_a_parameter_name_is_safe_to_serialize_either_way():
     assert sandbox.to_dict(for_tracing=True)["session_env_param"] == "/dq/conv-1"
 
 
-# --- command execution -------------------------------------------------------
-
-
 def test_run_command_shell_returns_stdout_and_exit_code():
     sandbox, client = make_sandbox()
     client.invoke_command.return_value = ok(stdout="hello\n", exit_code=0)
@@ -451,9 +436,6 @@ def test_run_command_shell_background_detaches():
     assert any("nohup" in cmd and "&" in cmd for cmd in commands_sent(client))
 
 
-# --- retries -----------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     "error", [AgentCoreRuntimeConflictError("provisioning"), AgentCoreRuntimeThrottlingError("slow down")]
 )
@@ -483,9 +465,6 @@ def test_retries_are_bounded():
 
     assert result.is_success is False
     assert client.invoke_command.call_count == 3
-
-
-# --- file upload -------------------------------------------------------------
 
 
 def test_upload_file_inline_encodes_base64():
@@ -560,9 +539,6 @@ def test_store_routes_through_upload():
     assert any("base64 -d" in cmd for cmd in commands_sent(client))
 
 
-# --- file retrieval ----------------------------------------------------------
-
-
 def test_retrieve_inline_decodes_base64():
     sandbox, client = make_started_sandbox()
     payload = base64.b64encode(b"file contents").decode()
@@ -610,9 +586,6 @@ def test_retrieve_large_without_relay_bucket_explains_why():
         sandbox.retrieve("big.bin")
 
 
-# --- listing / existence -----------------------------------------------------
-
-
 def test_list_files_parses_find_output():
     sandbox, client = make_started_sandbox()
     client.invoke_command.return_value = ok(stdout="/mnt/workspace/a.txt\n/mnt/workspace/b.txt\n\n")
@@ -657,9 +630,6 @@ def test_delete_file_uses_rm_and_reports_success():
 
     assert sandbox.delete_file("stale.txt") is True
     assert any("rm -f" in cmd and "/mnt/workspace/stale.txt" in cmd for cmd in commands_sent(client))
-
-
-# --- metadata / lifecycle ----------------------------------------------------
 
 
 def test_get_sandbox_info_reports_no_public_url_for_a_port():
@@ -721,15 +691,13 @@ def test_context_manager_starts_and_closes():
     client.stop_session.assert_not_called()
 
 
-# --- serialization -----------------------------------------------------------
-
-
-def test_to_dict_excludes_connection_secrets():
+def test_tracing_dict_excludes_connection_secrets():
     sandbox, _ = make_sandbox()
-    data = sandbox.to_dict()
+    data = sandbox.to_dict(for_tracing=True)
 
     assert data["agent_runtime_arn"] == ARN
     assert data["type"].endswith("BedrockAgentCoreRuntimeSandbox")
+    assert "secret_access_key" not in data["connection"]
 
 
 def test_get_tools_returns_shell_and_file_tools():

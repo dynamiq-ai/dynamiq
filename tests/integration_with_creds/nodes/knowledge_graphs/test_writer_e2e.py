@@ -40,7 +40,6 @@ def _counter(store):
     return _count
 
 
-# --- 1. Entity resolution / dedup --------------------------------------------------------------------
 # Two documents both mention "Acme"; the writer must resolve them to ONE organization node (identity is
 # uuid5(label:normalized_name), so a second document about the same entity adopts the same node) while each
 # document's "Acme uses <system>" claim stays its own edge.
@@ -92,7 +91,7 @@ def test_same_entity_across_documents_resolves_to_one_node(resolved_graph, graph
         store.close()
 
 
-# --- 2. Deletion (store-level write -> deterministic) ------------------------------------------------
+# Deletion (store-level write -> deterministic)
 
 FILTER_ORG = "org-w"
 
@@ -147,7 +146,6 @@ def test_delete_documents_removes_only_that_documents_edges(graph_connection):
         store.close()
 
 
-# --- 3. Embedding write (entity_embedder) ------------------------------------------------------------
 # With an entity_embedder the writer embeds each entity name and creates the Neo4j vector index — the
 # substrate the retriever's semantic seeding relies on (asserted end-to-end in test_retrieval_e2e.py).
 

@@ -4,7 +4,7 @@ import time
 import pytest
 
 from dynamiq import Workflow, connections, flows
-from dynamiq.callbacks.tracing import RunStatus, TracingCallbackHandler
+from dynamiq.callbacks.tracing import RunStatus, RunType, TracingCallbackHandler
 from dynamiq.checkpoints.checkpoint import CheckpointStatus
 from dynamiq.checkpoints.config import CheckpointConfig
 from dynamiq.nodes import llms
@@ -110,7 +110,7 @@ class TestPreCanceledAgent:
         assert result.output is None
         assert result.error is not None
         assert result.error.type is CanceledException
-        assert result.error.message  # has a descriptive message
+        assert result.error.message
         # LLM never called - agent stopped before its first iteration
         assert call_count["value"] == 0
 
@@ -250,8 +250,8 @@ class TestAgentCancellationTracing:
         wf.run_sync(input_data={"input": "test"}, config=config)
 
         canceled_runs = [r for r in tracing.runs.values() if r.status == RunStatus.CANCELED]
-        # Should have workflow + flow + agent all CANCELED
-        assert len(canceled_runs) >= 1
+        # The token is canceled before the run, so the agent never starts.
+        assert {run.type for run in canceled_runs} == {RunType.WORKFLOW, RunType.FLOW}
 
 
 class TestToolCancellationPropagation:

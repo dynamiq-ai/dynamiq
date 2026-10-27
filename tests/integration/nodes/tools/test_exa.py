@@ -63,20 +63,17 @@ def test_exa_node_parameters(mock_requests):
         include_domains=["example.com"],
     )
 
-    # Verify node parameters were set correctly
     assert exa_tool.include_full_content is True
     assert exa_tool.limit == 5
     assert exa_tool.query_type == QueryType.neural
     assert exa_tool.include_domains == ["example.com"]
 
-    # Test with minimal input (just query)
     input_data = {"query": "artificial intelligence"}
     result = exa_tool.run(input_data, None)
 
     assert isinstance(result, RunnableResult)
     assert result.status == RunnableStatus.SUCCESS
 
-    # Verify node parameters were used in the API call
     mock_requests.assert_called_once()
     call_args = mock_requests.call_args
     assert call_args[1]["json"]["query"] == "artificial intelligence"
@@ -96,7 +93,6 @@ def test_exa_parameter_override(mock_requests):
         query_type=QueryType.neural,
     )
 
-    # Override parameters in input
     input_data = {
         "query": "artificial intelligence",
         "limit": 2,
@@ -109,7 +105,6 @@ def test_exa_parameter_override(mock_requests):
     assert isinstance(result, RunnableResult)
     assert result.status == RunnableStatus.SUCCESS
 
-    # Verify input parameters override node parameters
     mock_requests.assert_called_once()
     call_args = mock_requests.call_args
     assert call_args[1]["json"]["query"] == "artificial intelligence"

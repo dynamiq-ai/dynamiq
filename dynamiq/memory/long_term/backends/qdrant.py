@@ -198,14 +198,14 @@ class QdrantLongTermMemoryBackend(LongTermMemoryBackend):
             raise ValueError("search requires a non-empty scope")
         if limit <= 0:
             return []
-        results = self._client.search(
+        results = self._client.query_points(
             collection_name=self.collection_name,
-            query_vector=list(query_embedding),
+            query=list(query_embedding),
             query_filter=_scope_to_filter(scope),
             limit=limit,
             with_payload=True,
             with_vectors=False,
-        )
+        ).points
         return [(_payload_to_fact(point.payload), float(point.score)) for point in results]
 
     def list_by_scope(self, scope: dict[str, str], limit: int = 100) -> list[Fact]:

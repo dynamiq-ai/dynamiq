@@ -21,8 +21,6 @@ from dynamiq.utils.workflow_generation import (
         (Input, {}),
         (Output, {}),
         (Agent, {"llms": {OpenAI: ["model1", "model2"]}, "tools": [E2BInterpreterTool]}),
-        (Agent, {"llms": {OpenAI: ["model1", "model2"]}, "tools": [E2BInterpreterTool]}),
-        (Agent, {"llms": {OpenAI: ["model1", "model2"]}, "tools": [E2BInterpreterTool]}),
         (OpenAI, {"models": ["model1", "model2"]}),
         (Gemini, {"models": ["model1", "model2"]}),
         (Anthropic, {"models": ["model1", "model2"]}),

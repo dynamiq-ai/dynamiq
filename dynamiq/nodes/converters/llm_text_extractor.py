@@ -25,6 +25,7 @@ from dynamiq.prompts import (
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types import Document
 from dynamiq.types.cancellation import check_cancellation
+from dynamiq.utils.lazy_imports import optional_dependency_error
 from dynamiq.utils.logger import logger
 
 DEFAULT_EXTRACTION_INSTRUCTION = """
@@ -310,7 +311,7 @@ class LLMImageConverter(Node):
         outputs = self.perform_llm_extraction(urls, config, **kwargs)
 
         if self.document_creation_mode == DocumentCreationMode.ONE_DOC_PER_FILE:
-            document_content = "".join(output["content"] for output in outputs)
+            document_content = "\n".join(output["content"] for output in outputs)
             return [Document(content=document_content, metadata=metadata)]
         else:
             documents = [
@@ -408,7 +409,7 @@ class LLMImageConverter(Node):
 
         buffered = BytesIO()
         image.save(buffered, format="JPEG")
-        buffered.seek(0)  # Ensure the buffer is at the beginning
+        buffered.seek(0)
         decoded_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
         url = f"data:image/jpeg;base64,{decoded_image}"
         return url
@@ -528,7 +529,12 @@ class LLMPDFConverter(LLMImageConverter):
         Args:
             **kwargs: Additional keyword arguments to be passed to the parent class constructor.
         """
-        from pdf2image import convert_from_bytes, convert_from_path
+        try:
+            from pdf2image import convert_from_bytes, convert_from_path  # files extra; this module loads with agents
+        except ImportError as e:
+            if optional_error := optional_dependency_error(e, "LLMPDFConverter"):
+                raise optional_error from e
+            raise
 
         super().__init__(**kwargs)
         self._convert_from_bytes = convert_from_bytes

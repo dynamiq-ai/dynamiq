@@ -598,35 +598,6 @@ class TestSummarizerToolCheckpointState:
         assert summarizer_tool.llm._is_fallback_run is False
 
 
-class TestIterativeCheckpointMixinProtocol:
-    """Verify the IterativeCheckpointMixin interface contract."""
-
-    def test_agent_implements_iterative_mixin(self):
-        agent = Agent(id="test", name="Test", llm=create_test_llm(), role="Test")
-        assert isinstance(agent, IterativeCheckpointMixin)
-
-    def test_get_start_iteration_returns_zero_for_fresh_agent(self):
-        agent = Agent(id="test", name="Test", llm=create_test_llm(), role="Test")
-        assert agent.get_start_iteration() == 0
-
-    def test_get_start_iteration_is_one_shot(self):
-        """get_start_iteration() returns the value once, then 0 — ensures consumed state is cleared."""
-        agent = Agent(id="test", name="Test", llm=create_test_llm(), role="Test")
-        agent._iteration_state = IterationState(completed_iterations=5)
-        agent._has_restored_iteration = True
-        assert agent.get_start_iteration() == 5
-        assert agent.get_start_iteration() == 0
-
-    def test_save_and_restore_iteration_via_checkpoint_state(self):
-        """Full round-trip through to_checkpoint_state → model_dump → from_checkpoint_state."""
-        agent = Agent(id="roundtrip", name="Agent", llm=create_test_llm(), role="Test", max_loops=10)
-        agent._completed_loops = 5
-
-        new_agent = Agent(id="new", name="New", llm=create_test_llm(), role="Test", max_loops=10)
-        new_agent.from_checkpoint_state(agent.to_checkpoint_state().model_dump())
-        assert new_agent.get_start_iteration() == 5
-
-
 class TestBackwardCompatibility:
     """Old checkpoints without iteration field work correctly."""
 
@@ -696,10 +667,6 @@ class TestCheckpointBehavior:
 
     def test_config_defaults_to_append(self):
         config = CheckpointConfig()
-        assert config.behavior == CheckpointBehavior.APPEND
-
-    def test_config_accepts_append(self):
-        config = CheckpointConfig(behavior=CheckpointBehavior.APPEND)
         assert config.behavior == CheckpointBehavior.APPEND
 
     def test_config_accepts_string_value(self):

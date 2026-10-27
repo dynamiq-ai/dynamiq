@@ -78,7 +78,6 @@ def test_orphan_tool_call_is_repaired_live():
     with patch.object(BaseLLM, "_sanitize_fc_messages", side_effect=capturing_sanitize):
         result = llm.run(input_data={}, config=RunnableConfig())
 
-    # Sanitizer was invoked and inserted a synthetic tool reply for the orphan.
     assert sanitized_holder, "Sanitizer was never called"
     sanitized = sanitized_holder[-1]
     tool_replies = [m for m in sanitized if m.get("role") == "tool"]
@@ -86,7 +85,6 @@ def test_orphan_tool_call_is_repaired_live():
         m.get("tool_call_id") == "call_orphan_live" for m in tool_replies
     ), "Sanitizer did not insert a synthetic tool reply for the orphan call"
 
-    # End-to-end call succeeded against the real provider.
     assert result.status == RunnableStatus.SUCCESS, f"Expected SUCCESS, got: {result.output}"
     content = result.output.get("content") or ""
     assert content, "Expected non-empty response content"

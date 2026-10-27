@@ -342,7 +342,7 @@ class DynamoDB(MemoryBackend):
 
         except ClientError as e:
             logger.error(f"Error scanning DynamoDB table '{self.table_name}': {e}")
-            logger.error(f"Scan parameters used: {scan_params}")  # Log params on error
+            logger.error(f"Scan parameters used: {scan_params}")
             raise DynamoDBMemoryError(f"Error scanning DynamoDB table: {e}") from e
         except Exception as e:
             logger.error(f"Unexpected error during scan processing: {e}")

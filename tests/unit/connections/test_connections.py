@@ -40,7 +40,9 @@ def test_qdrant_connect(mock_qdrant_client_class, mock_qdrant_env_vars):
     qdrant = QdrantConnection()
     client = qdrant.connect()
 
-    mock_qdrant_client_class.assert_called_once_with(url="http://mocked_qdrant_url", api_key="mocked_api_key")
+    mock_qdrant_client_class.assert_called_once_with(
+        url="http://mocked_qdrant_url", api_key="mocked_api_key", check_compatibility=False
+    )
     assert client == mock_qdrant_client_instance
 
 

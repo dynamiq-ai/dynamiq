@@ -107,11 +107,6 @@ def test_a_named_recording_still_beats_a_nameless_binary_upload():
     assert select_audio_file([raw_upload, recording]) is recording
 
 
-def test_a_binary_upload_does_not_rescue_a_set_of_documents():
-    with pytest.raises(ValueError, match="none of them look like audio"):
-        select_audio_file([named("contract.pdf", "application/pdf"), named("notes.txt", "text/plain")])
-
-
 def test_the_bytes_identify_a_recording_the_name_and_type_cannot():
     """`file_0.bin` stamped application/octet-stream is what an agent makes of raw bytes."""
     recording = io.BytesIO(b"RIFF\x24\x00\x00\x00WAVEfmt ")

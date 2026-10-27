@@ -54,21 +54,18 @@ def test_tavily_node_parameters(mock_requests):
         exclude_domains=["wikipedia.org"],
     )
 
-    # Verify node parameters were set correctly
     assert tavily_tool.search_depth == "advanced"
     assert tavily_tool.max_results == 3
     assert tavily_tool.include_answer is True
     assert tavily_tool.include_domains == ["example.com"]
     assert tavily_tool.exclude_domains == ["wikipedia.org"]
 
-    # Test with basic query
     input_data = {"query": "Latest developments in quantum computing"}
     result = tavily_tool.run(input_data, None)
 
     assert isinstance(result, RunnableResult)
     assert result.status == RunnableStatus.SUCCESS
 
-    # Verify node parameters were used in the API call
     mock_requests.assert_called_once()
     call_args = mock_requests.call_args
     assert call_args[1]["json"]["query"] == "Latest developments in quantum computing"
@@ -91,7 +88,6 @@ def test_tavily_parameter_override(mock_requests):
         exclude_domains=[],
     )
 
-    # Override parameters in input
     input_data = {
         "query": "Latest developments in quantum computing",
         "search_depth": "advanced",
@@ -105,7 +101,6 @@ def test_tavily_parameter_override(mock_requests):
     assert isinstance(result, RunnableResult)
     assert result.status == RunnableStatus.SUCCESS
 
-    # Verify input parameters override node parameters
     mock_requests.assert_called_once()
     call_args = mock_requests.call_args
     assert call_args[1]["json"]["query"] == "Latest developments in quantum computing"
@@ -114,14 +109,8 @@ def test_tavily_parameter_override(mock_requests):
     assert call_args[1]["json"]["include_answer"] is True
     assert call_args[1]["json"]["exclude_domains"] == ["wikipedia.org"]
 
-    # Check that the response is properly formatted
     output = result.output["content"]
-    if not tavily_tool.is_optimized_for_agents:
-        assert isinstance(output, dict)
-        assert "result" in output
-        assert "sources_with_url" in output
-        assert "raw_response" in output
-    else:
-        assert isinstance(output, str)
-        assert "<Sources with URLs>" in output
-        assert "<Search results for query" in output
+    assert isinstance(output, dict)
+    assert "result" in output
+    assert "sources_with_url" in output
+    assert "raw_response" in output
