@@ -2449,6 +2449,11 @@ class CuaDesktop(BaseConnection):
         if self.computer_name:
             connection_params["name"] = self.computer_name
 
+        # Computer reads the CUA_API_KEY environment variable when it is given no key, so the key this
+        # connection carries would otherwise go unused.
+        if self.provider_type == CuaProviderType.CLOUD:
+            connection_params["api_key"] = self.api_key
+
         if self.provider_type == CuaProviderType.DOCKER and self.image is not None:
             connection_params["image"] = self.image.value
 
