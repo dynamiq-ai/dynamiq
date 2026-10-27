@@ -636,6 +636,8 @@ class Stagehand(ConnectionNode):
                 self._steel_client = AsyncSteel(steel_api_key=self.connection.api_key)
             elif self.connection.environment == SteelBrowserEnvironment.SELF_HOSTED:
                 self._steel_client = AsyncSteel(base_url=self.connection.base_url)
+        elif self._is_browser_use_connection():
+            pass  # The Browser Use API client is created on first use.
         else:
             self._browserbase_client = AsyncBrowserbase(api_key=self.connection.browserbase_api_key)
         self.init_loop()

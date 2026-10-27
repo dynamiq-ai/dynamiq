@@ -610,6 +610,15 @@ class TestBrowserUse:
         assert connection.session_config == {"timeout": 60}
         assert connection.conn_params["X-Browser-Use-API-Key"] == "env-key"
 
+    def test_init_components_does_not_create_a_browserbase_client(self):
+        tool = Stagehand(
+            connection=BrowserUseConnection(api_key="bu-key", model_api_key="mk"),
+            model_name="anthropic/claude-sonnet-4-6",
+        )
+
+        assert tool._browserbase_client is None
+        assert tool._browser_use_client is None
+
     def test_init_client_creates_a_browser_and_drives_it_over_cdp(self, monkeypatch):
         requests = []
         created = {"id": "bu-1", "cdpUrl": "wss://cdp.browser-use.com/bu-1", "liveUrl": "https://live/bu-1"}
