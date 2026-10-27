@@ -49,13 +49,17 @@ _WORKSPACE_TIME_LIMIT_SECONDS = 300
 
 
 def _start_workspace_turn(run: object, time_limit_seconds: float) -> None:
-    """Wait for the turn, and take it over from a run that is past its time limit."""
+    """Wait for the turn, and take it over from a run that is past its time limit.
+
+    There is no limit on the wait itself: a run behind others that each finish within their own limits waits for all of
+    them, and only a run past its limit is taken over.
+    """
     global _workspace_owner, _workspace_deadline, _workspace_home
-    give_up_at = time.monotonic() + time_limit_seconds
     while True:
         with _WORKSPACE_OWNER_LOCK:
-            wait = min(_workspace_deadline, give_up_at) - time.monotonic()
-        acquired = _WORKSPACE_LOCK.acquire(timeout=max(wait, 0))
+            # Polls briefly while the deadline is stale: between one run ending its turn and the next taking it.
+            wait = max(_workspace_deadline - time.monotonic(), 0.01)
+        acquired = _WORKSPACE_LOCK.acquire(timeout=wait)
         with _WORKSPACE_OWNER_LOCK:
             if acquired or (_workspace_owner is not None and time.monotonic() >= _workspace_deadline):
                 if acquired:
@@ -65,10 +69,6 @@ def _start_workspace_turn(run: object, time_limit_seconds: float) -> None:
                         _workspace_home = None
                 _workspace_owner, _workspace_deadline = run, time.monotonic() + time_limit_seconds
                 return
-        if time.monotonic() >= give_up_at:
-            raise ToolExecutionException(
-                "Another Python code execution in this process is still running. Try again later.", recoverable=True
-            )
 
 
 def _end_workspace_turn(run: object) -> None:

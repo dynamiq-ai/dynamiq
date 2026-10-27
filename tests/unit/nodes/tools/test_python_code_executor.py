@@ -224,3 +224,13 @@ def test_a_run_past_its_time_limit_does_not_block_the_next_one():
 
     assert result.output["content"] == "next"
     assert time.monotonic() - started < 2
+
+
+def test_queued_runs_wait_for_runs_that_finish_within_their_time_limits():
+    def run(_):
+        with python_code_executor._workspace_directory(1):
+            time.sleep(0.4)
+
+    # The four runs take 1.6 s in all, more than each one's 1 s limit, but none of them is past its own limit.
+    with ThreadPoolExecutor(4) as pool:
+        list(pool.map(run, range(4)))
