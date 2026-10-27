@@ -37,7 +37,7 @@ SESSION_SEED = "agentcore-runtime-example-conversation"
 
 def build_agent(tool: BedrockAgentCoreRuntimeInterpreterTool) -> Agent:
     """Build a ReAct agent backed by the given interpreter tool."""
-    llm = setup_llm(model_provider="claude", model_name="claude-sonnet-4-5", temperature=0.1)
+    llm = setup_llm(model_provider="claude", model_name="claude-sonnet-5-5")
     return Agent(name="React Agent", inference_mode=InferenceMode.XML, llm=llm, tools=[tool], role=AGENT_ROLE)
 
 

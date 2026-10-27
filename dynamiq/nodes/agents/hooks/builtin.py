@@ -451,7 +451,7 @@ _PII_PATTERNS: dict[str, str] = {
     "phone": r"(?<![\w.])\+?\d[\d\s().\-]{7,}\d(?![\w])",
 }
 _VALIDATED_ENTITIES = {"credit_card", "phone"}
-_PLACEHOLDER = regex.compile(r"<[A-Z_]+_\d+(?:_\d+)?>")
+_PLACEHOLDER = regex.compile(r"<(?P<label>[A-Z_]+)_\d+(?:_\d+)?>")
 
 
 def _luhn_ok(digits: str) -> bool:
@@ -484,20 +484,41 @@ def _locked_store(ctx: HookContext) -> Iterator[dict]:
     """The placeholder mapping. With a ``session_id`` or ``user_id`` (the ids memory is keyed by) it is kept per
     user and session (in process), so that the placeholders of earlier turns, which the history holds, keep their
     meaning and numbering continues; otherwise per run.
-    The key has no ``agent_id``: an inherited hook runs in sub-agents under their own ids but shares one store."""
+    The key has no ``agent_id``: an inherited hook runs in sub-agents under their own ids but shares one store.
+    The run keeps a copy of the session mapping in its own state, which is checkpointed, and puts it back into a
+    store that lost it (another process after a resume, or an eviction while the run went on). Placeholders the
+    process numbers next take the namespace of its store, so they never repeat one numbered elsewhere."""
     if not (ctx.session_id or ctx.user_id):
         with ctx.lock:
             yield ctx.hook_state
         return
     key = (ctx.hook_key, ctx.user_id, ctx.session_id)
-    with _SESSION_STORES_LOCK:
+    with ctx.lock, _SESSION_STORES_LOCK:
         if key not in _SESSION_STORES:
             _SESSION_STORES[key] = {"namespace": str(uuid4().int)}
         store = _SESSION_STORES[key]
         _SESSION_STORES.move_to_end(key)
         while len(_SESSION_STORES) > _MAX_SESSION_STORES:
             _SESSION_STORES.popitem(last=False)
-        yield store
+        _merge_mapping(store, ctx.hook_state)
+        try:
+            yield store
+        finally:
+            _merge_mapping(ctx.hook_state, store)
+
+
+def _merge_mapping(target: dict, source: dict) -> None:
+    """Add to ``target`` the placeholders of ``source`` it lacks. A placeholder stands for one value wherever it is
+    held, so nothing ``target`` has is replaced, except that a value the user supplied stays marked as such."""
+    for placeholder, value in source.get("placeholder_to_value", {}).items():
+        target.setdefault("placeholder_to_value", {}).setdefault(placeholder, value)
+    for placeholder, origin in source.get("origin", {}).items():
+        origins = target.setdefault("origin", {})
+        if origin == "input" or placeholder not in origins:
+            origins[placeholder] = origin
+    for label, placeholders in source.get("value_to_placeholder", {}).items():
+        for value, placeholder in placeholders.items():
+            target.setdefault("value_to_placeholder", {}).setdefault(label, {}).setdefault(value, placeholder)
 
 
 def _sub_validated(pattern, text: str, replace, entity: str) -> str:
@@ -691,9 +712,38 @@ class PIIHook(TextGuardHook):
 
         if args and isinstance(call.input, dict):
             restored = {key: put_back(value) if key in args else value for key, value in call.input.items()}
+            checked = [value for key, value in restored.items() if key in args]
         else:
             restored = put_back(call.input)
+            checked = [restored]
+        if lost := self._lost_placeholders(ctx, checked):
+            # A tool that is meant to get the real value never gets the placeholder in its place.
+            if len(lost) == 1:
+                reason = f"the value behind {lost[0]} is no longer available. Ask the user for it again."
+            else:
+                reason = f"the values behind {', '.join(lost)} are no longer available. Ask the user for them again."
+            return Block(f"The call was not run: {reason}", BlockAs.OBSERVATION)
         return Modify(restored) if restored != call.input else ALLOW
+
+    def _lost_placeholders(self, ctx: HookContext, values: list) -> list[str]:
+        """The placeholders of this hook in ``values`` that no ``pii`` hook of the run can restore, such as one from
+        an earlier turn of the session that ran in another process."""
+        labels = {label for label, _, _ in self._detectors}
+        found: list[str] = []
+
+        def collect(text: str) -> str:
+            found.extend(match.group(0) for match in _PLACEHOLDER.finditer(text) if match.group("label") in labels)
+            return text
+
+        map_strings(values, collect)
+        if not found:
+            return []
+        known: set[str] = set()
+        for key, hook in [(ctx.hook_key, self), *ctx.hooks]:
+            if isinstance(hook, PIIHook):
+                with _locked_store(ctx.for_call(hook_key=key)) as store:
+                    known.update(store.get("placeholder_to_value", {}))
+        return list(dict.fromkeys(placeholder for placeholder in found if placeholder not in known))
 
     def on_output(self, ctx: HookContext, answer: Any) -> Decision:
         value = answer

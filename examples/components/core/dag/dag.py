@@ -33,7 +33,7 @@ ANTHROPIC_CONNECTION = connections.Anthropic(
 )
 OPENAI_NODE = OpenAI(
     name="OpenAI",
-    model="gpt-3.5-turbo",
+    model="gpt-5.6-terra",
     connection=OPENAI_CONNECTION,
     prompt=prompts.Prompt(
         messages=[
@@ -47,7 +47,7 @@ OPENAI_NODE = OpenAI(
 )
 OPENAI_2_NODE = OpenAI(
     name="OpenAI2",
-    model="gpt-3.5-turbo",
+    model="gpt-5.6-terra",
     connection=OPENAI_CONNECTION,
     prompt=prompts.Prompt(
         messages=[
@@ -139,7 +139,7 @@ ANTHROPIC_2_NODE = Anthropic(
 )
 OPENAI_3_NODE = OpenAI(
     name="OpenAI3",
-    model="gpt-3.5-turbo",
+    model="gpt-5.6-terra",
     connection=OPENAI_CONNECTION,
     prompt=prompts.Prompt(
         messages=[
@@ -157,7 +157,7 @@ OPENAI_3_NODE = OpenAI(
 )
 OPENAI_4_NODE = OpenAI(
     name="OpenAI4",
-    model="gpt-3.5-turbo",
+    model="gpt-5.6-terra",
     connection=OPENAI_CONNECTION,
     prompt=prompts.Prompt(
         messages=[

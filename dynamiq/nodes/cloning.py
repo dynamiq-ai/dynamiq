@@ -228,7 +228,8 @@ def _models(obj: Any, seen: set[int] | None = None) -> Iterator[BaseModel]:
 
 
 def reply_waiting_nodes(obj: Any) -> list["Node"]:
-    """The nodes in ``obj`` that wait for a human reply: asking feedback tools and approval-gated nodes.
+    """The nodes in ``obj`` that wait for a human reply: asking feedback tools, approval-gated nodes and the
+    agents that hook approvals are asked under.
 
     A reply finds its node by the id the node asked under, which is the id its caller registered the
     node's input queue for. A copy that renamed such a node would ask under an id nobody registered,
@@ -238,12 +239,60 @@ def reply_waiting_nodes(obj: Any) -> list["Node"]:
     from dynamiq.nodes.node import Node
     from dynamiq.nodes.tools.human_feedback import HumanFeedbackAction, HumanFeedbackTool
 
-    return [
+    nodes = [
         model
         for model in _models(obj)
         if (isinstance(model, HumanFeedbackTool) and model.action != HumanFeedbackAction.INFO)
         or (isinstance(model, Node) and model.approval.enabled)
     ]
+    return nodes + [agent for agent in _hook_approvers(obj) if all(agent is not node for node in nodes)]
+
+
+def _hook_approvers(obj: Any) -> list["Node"]:
+    """The agents in ``obj`` that a hook approval may be asked under.
+
+    An agent asks under its own id, or, without an input stream of its own, under the id of the agent that runs it.
+    So these are the agents whose hooks can ask, every agent beneath one whose asking hook is inherited, and the
+    agents above them.
+    """
+    # Imported here: the agent module imports this one.
+    from dynamiq.nodes.agents.base import Agent
+
+    approvers: dict[int, "Node"] = {}
+
+    def walk(value: Any, chain: tuple["Node", ...], inherited: bool, seen: set[int]) -> None:
+        if isinstance(value, BaseModel):
+            if id(value) in seen:
+                return
+            seen.add(id(value))
+            if isinstance(value, Agent):
+                asking = [hook for hook in value.hooks if _asks_over_stream(hook)]
+                chain = (*chain, value)
+                if inherited or asking:
+                    approvers.update((id(agent), agent) for agent in chain)
+                inherited = inherited or any(hook.inherit for hook in asking)
+            for field_name in type(value).model_fields:
+                walk(getattr(value, field_name, None), chain, inherited, seen)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                walk(item, chain, inherited, seen)
+        elif isinstance(value, dict):
+            for item in value.values():
+                walk(item, chain, inherited, seen)
+
+    walk(obj, (), False, set())
+    return list(approvers.values())
+
+
+def _asks_over_stream(hook: Any) -> bool:
+    """Whether ``hook`` can ask for an approval through the agent's input stream. Of the built-in hooks only an
+    approving ``tool_policy`` does; any other hook acting before tool calls may answer with an ``Ask``."""
+    from dynamiq.nodes.agents.hooks import HookPoint, ToolPolicyHook, builtin
+    from dynamiq.types.feedback import FeedbackMethod
+
+    if isinstance(hook, ToolPolicyHook):
+        return hook.approval and hook.feedback_method == FeedbackMethod.STREAM
+    return type(hook).__module__ != builtin.__name__ and HookPoint.BEFORE_TOOL in hook.points()
 
 
 def carry_mock_exclusions(config: "RunnableConfig", id_map: dict[str, set[str]]) -> "RunnableConfig":

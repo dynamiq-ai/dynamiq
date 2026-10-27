@@ -140,7 +140,7 @@ def create_retrieval_workflow(question: str) -> str:
     answer_generator = (
         OpenAI(
             connection=openai_connection,
-            model="gpt-4",
+            model="gpt-5.6-sol",
             prompt=prompt,
         )
         .inputs(

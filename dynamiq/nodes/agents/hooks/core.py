@@ -183,7 +183,9 @@ class HookContext:
     hooks: list[tuple[str, "Hook"]] = field(default_factory=list)
     memory_transforms: list = field(default_factory=list)
     approval_lock: Any = field(default_factory=threading.Lock)
-    pending_approvals: dict[str, tuple["HookContext", ToolCall]] = field(default_factory=dict)
+    # Calls that are waiting for an approval or running: a checkpoint taken meanwhile leaves out the slots they
+    # took (e.g. a call count), since such a call is replayed on resume and takes them again.
+    pending_calls: dict[str, tuple["HookContext", ToolCall]] = field(default_factory=dict)
     approver: Any = None  # the agent whose input stream carries this run's approval requests
     trusted: dict[str, Any] = field(default_factory=dict)
 

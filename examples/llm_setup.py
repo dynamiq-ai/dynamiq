@@ -56,7 +56,8 @@ def setup_llm(
             name="OpenAI LLM",
             connection=OpenAIConnection(),
             model=model_name,
-            temperature=temperature,
+            # gpt-5 / gpt-6 reasoning models do not take a custom temperature
+            temperature=None if model_name.startswith(("gpt-5", "gpt-6")) else temperature,
             max_tokens=max_tokens,
         )
     elif model_provider == "cohere":

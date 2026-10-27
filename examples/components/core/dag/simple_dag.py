@@ -27,7 +27,7 @@ with Workflow() as wf:
     # OpenAI node 1
     openai_node = OpenAI(
         name="openai",
-        model="gpt-3.5-turbo",
+        model="gpt-5.6-terra",
         connection=openai_connection,
         prompt=prompts.Prompt(
             messages=[
@@ -43,7 +43,7 @@ with Workflow() as wf:
     # OpenAI node 2 depending on OpenAI node 1
     openai_2_node = OpenAI(
         name="openai-2",
-        model="gpt-3.5-turbo",
+        model="gpt-5.6-terra",
         connection=openai_connection,
         prompt=prompts.Prompt(
             messages=[
@@ -126,7 +126,7 @@ with Workflow() as wf:
     # OpenAI node 3 depending on OpenAI node 2 and choice node's next date option
     openai_3_node = OpenAI(
         name="openai-3",
-        model="gpt-3.5-turbo",
+        model="gpt-5.6-terra",
         connection=openai_connection,
         prompt=prompts.Prompt(
             messages=[
@@ -142,7 +142,7 @@ with Workflow() as wf:
     # OpenAI node 4 depending on OpenAI node 3
     openai_4_node = OpenAI(
         name="openai-4",
-        model="gpt-3.5-turbo",
+        model="gpt-5.6-terra",
         connection=openai_connection,
         prompt=prompts.Prompt(
             messages=[
@@ -162,7 +162,7 @@ with Workflow() as wf:
     openai_5_node = (
         OpenAI(
             name="openai-5",
-            model="gpt-3.5-turbo",
+            model="gpt-5.6-terra",
             connection=openai_connection,
             prompt=prompts.Prompt(
                 messages=[

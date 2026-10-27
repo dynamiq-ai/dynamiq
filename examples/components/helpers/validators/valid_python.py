@@ -18,7 +18,7 @@ CM = ConnectionManager()
 
 OPENAI_NODE = OpenAI(
     name="OpenAI",
-    model="gpt-3.5-turbo",
+    model="gpt-5.6-terra",
     connection=OpenAIConnection(),
     prompt=prompts.Prompt(
         messages=[

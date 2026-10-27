@@ -29,7 +29,7 @@ nodes:
       id: summary-task-llm
       type: dynamiq.nodes.llms.OpenAI
       connection: openai-conn
-      model: o3-mini
+      model: gpt-5.6-sol
     tools:
       - id: pipedream-tool
         type: dynamiq.nodes.tools.pipedream.Pipedream

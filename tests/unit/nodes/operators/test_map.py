@@ -202,3 +202,45 @@ def test_an_approval_given_too_late_is_not_taken_for_another_items_request(max_w
     # A missed reply stops the asking only in the Map run that missed it.
     queue.get_nowait()
     assert run(Approve(queue)) == [{"refund": "A"}, {"refund": "B"}]
+
+
+class ApproveByAskingId(BaseCallbackHandler):
+    """Approves each approval request through the queue registered for the id it was asked under, echoing its
+    request id, as a client answering an agent hook's approval does."""
+
+    def __init__(self, queues: dict[str, Queue]):
+        self.queues = queues
+        self.asked_ids: list[str] = []
+
+    def on_node_execute_stream(self, serialized, chunk=None, **kwargs):
+        event = kwargs.get("event")
+        if not isinstance(event, ApprovalStreamingOutputEventMessage):
+            return
+        self.asked_ids.append(event.entity_id)
+        if queue := self.queues.get(event.entity_id):
+            answer = ApprovalInputData(feedback="", is_approved=True, request_id=event.data.request_id)
+            reply = ApprovalStreamingInputEventMessage(entity_id=event.entity_id, data=answer, event=event.event)
+            queue.put(reply.model_dump_json())
+
+
+def test_an_agent_whose_hook_asks_for_approvals_in_a_map_asks_under_its_registered_id():
+    from dynamiq.nodes.agents.hooks import ToolPolicyHook
+    from dynamiq.nodes.types import InferenceMode
+    from tests.helpers.agent_hooks import TOOL_CALLS, build_agent, final_step, scripted_stateless, tool_step
+
+    TOOL_CALLS.clear()
+    queue = Queue()
+    client = ApproveByAskingId({"agent": queue})
+    config = RunnableConfig(callbacks=[client], nodes_override={"agent": input_override(queue)})
+    agent = build_agent([ToolPolicyHook(tools=["search"], approval=True, feedback_method=FeedbackMethod.STREAM)])
+    steps = [tool_step("search", query="q"), final_step("done")]
+
+    with scripted_stateless(InferenceMode.STRUCTURED_OUTPUT, steps, agents=[agent]):
+        result = Workflow(flow=Flow(nodes=[Map(id="map", node=agent, max_workers=2)])).run(
+            input_data={"input": [{"input": "first"}, {"input": "second"}]}, config=config
+        )
+
+    # Each item's copy asked under the id its queue was registered for, so both approvals reached it.
+    assert client.asked_ids == ["agent", "agent"]
+    assert [output["content"] for output in result.output["map"]["output"]["output"]] == ["done", "done"]
+    assert [name for name, _ in TOOL_CALLS] == ["search", "search"]
