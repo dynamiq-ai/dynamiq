@@ -1,11 +1,11 @@
 from typing import Any, ClassVar, Literal
 
-from jinja2 import Environment, meta
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.node import ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.utils.jinja import compile_template, template_parameters
 
 
 class TextTemplateInputSchema(BaseModel):
@@ -23,13 +23,6 @@ class TextTemplate(Node):
 
     input_schema: ClassVar[type[TextTemplateInputSchema]] = TextTemplateInputSchema
 
-    def __init__(self, **data):
-        super().__init__(**data)
-
-        from jinja2 import Template
-
-        self._Template = Template
-
     @staticmethod
     def get_required_parameters(text: str) -> set[str]:
         """Extracts set of parameters required for messages.
@@ -37,12 +30,7 @@ class TextTemplate(Node):
         Returns:
             set[str]: Set of parameter names.
         """
-        parameters = set()
-
-        env = Environment(autoescape=True)
-        ast = env.parse(text)
-        parameters |= meta.find_undeclared_variables(ast)
-        return parameters
+        return set(template_parameters(text))
 
     def validate_input_fields(self, input_data: TextTemplateInputSchema):
         template = input_data.template or self.template
@@ -78,7 +66,7 @@ class TextTemplate(Node):
         try:
             if not template:
                 raise ValueError("Text template was not provided.")
-            result = self._Template(template).render(**dict(input_data))
+            result = compile_template(template).render(**dict(input_data))
             return {"content": result}
         except Exception as e:
             raise ValueError(f"Encountered an error while performing transforming. \nError details: {e}")
