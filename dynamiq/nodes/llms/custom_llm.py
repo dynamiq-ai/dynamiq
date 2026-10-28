@@ -52,7 +52,7 @@ class CustomLLM(BaseLLM):
     def _is_official_minimax_route(endpoint, protocol, model):
         return (
             endpoint.scheme == "https"
-            and endpoint.hostname in {"api.minimax.io", "api.minimax.cn"}
+            and endpoint.hostname in {"api.minimax.io", "api.minimaxi.com"}
             and endpoint.port in {None, 443}
             and endpoint.path.rstrip("/") == ("/anthropic" if protocol == "anthropic" else "/v1")
             and protocol in {"anthropic", "openai", "minimax"}

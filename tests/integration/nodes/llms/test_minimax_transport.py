@@ -46,8 +46,8 @@ def captured_requests(monkeypatch):
     return captured
 
 
-def run_model(model, region, protocol, prompt=None, **options):
-    base = f"https://api.minimax.{region}/" + ("anthropic" if protocol == "anthropic" else "v1")
+def run_model(model, host, protocol, prompt=None, **options):
+    base = f"https://{host}/" + ("anthropic" if protocol == "anthropic" else "v1")
     node = CustomLLM(
         model=model,
         provider_prefix=protocol,
@@ -63,14 +63,14 @@ def run_model(model, region, protocol, prompt=None, **options):
     return node
 
 
-@pytest.mark.parametrize("region", ["io", "cn"])
+@pytest.mark.parametrize("host", ["api.minimax.io", "api.minimaxi.com"])
 @pytest.mark.parametrize("protocol", ["openai", "anthropic", "minimax"])
 @pytest.mark.parametrize("model", ["MiniMax-M3.1-Flash", "MiniMax-M3"])
-def test_minimax_defaults_reach_http(captured_requests, region, protocol, model):
-    run_model(model, region, protocol)
+def test_minimax_defaults_reach_http(captured_requests, host, protocol, model):
+    run_model(model, host, protocol)
     assert len(captured_requests) == 1
     request, body = captured_requests[0]
-    assert request.url.host == f"api.minimax.{region}"
+    assert request.url.host == host
     expected_path = "/anthropic/v1/messages" if protocol == "anthropic" else "/v1/chat/completions"
     assert request.url.path == expected_path
     assert body["model"] == model
@@ -92,7 +92,7 @@ def test_minimax_flash_explicit_effort(captured_requests, protocol, effort):
     else:
         extra["reasoning_effort"] = effort
     options = extra if protocol == "anthropic" else {"extra_body": extra}
-    run_model("MiniMax-M3.1-Flash", "io", protocol, **options)
+    run_model("MiniMax-M3.1-Flash", "api.minimax.io", protocol, **options)
     body = captured_requests[0][1]
     for key, value in extra.items():
         assert body[key] == value
@@ -101,7 +101,7 @@ def test_minimax_flash_explicit_effort(captured_requests, protocol, effort):
 @pytest.mark.parametrize("protocol", ["openai", "anthropic"])
 @pytest.mark.parametrize("model", ["MiniMax-M3.1-Flash", "MiniMax-M3", "MiniMax-M2.7", "custom-deployment"])
 def test_saved_model_ids_are_preserved(captured_requests, model, protocol):
-    node = run_model(model, "cn", protocol)
+    node = run_model(model, "api.minimaxi.com", protocol)
     assert captured_requests[0][1]["model"] == model
     restored = CustomLLM.model_validate(node.model_dump())
     assert restored.model == model
@@ -115,7 +115,7 @@ def test_saved_model_ids_are_preserved(captured_requests, model, protocol):
 def test_minimax_m3_thinking_is_preserved(captured_requests, protocol, thinking):
     controls = {"thinking": {"type": thinking}}
     options = controls if protocol == "anthropic" else {"extra_body": controls}
-    run_model("MiniMax-M3", "io", protocol, **options)
+    run_model("MiniMax-M3", "api.minimax.io", protocol, **options)
     assert captured_requests[0][1]["thinking"] == {"type": thinking}
 
 
@@ -132,7 +132,7 @@ def test_minimax_image_content_survives_serialization(captured_requests, protoco
             )
         ]
     )
-    run_model("MiniMax-M3.1-Flash", "io", protocol, prompt=prompt)
+    run_model("MiniMax-M3.1-Flash", "api.minimax.io", protocol, prompt=prompt)
     content = captured_requests[0][1]["messages"][0]["content"]
     assert content[0] == {"type": "text", "text": "Describe this image"}
     image = content[1]
