@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from .openrouter import OpenRouter
     from .perplexity import Perplexity
     from .replicate import Replicate
+    from .runcrate import Runcrate
     from .sambanova import SambaNova
     from .togetherai import TogetherAI
     from .vertexai import VertexAI
@@ -63,6 +64,7 @@ _LAZY_EXPORTS = {
     "OpenRouter": ".openrouter",
     "Perplexity": ".perplexity",
     "Replicate": ".replicate",
+    "Runcrate": ".runcrate",
     "SambaNova": ".sambanova",
     "TogetherAI": ".togetherai",
     "VertexAI": ".vertexai",
@@ -101,6 +103,7 @@ __all__ = [
     "OpenRouter",
     "Perplexity",
     "Replicate",
+    "Runcrate",
     "SambaNova",
     "TogetherAI",
     "VertexAI",
