@@ -71,7 +71,6 @@ def test_python_evaluator_extra_keys():
 def evaluate(answer, expected):
     return 1.0 if answer == expected else 0.0
 """
-    # Extra key "extra"
     input_data = {"answer": "Paris", "expected": "Paris", "extra": "unexpected"}
     evaluator = PythonEvaluator(code=user_code)
     with pytest.raises(ValueError, match="Unexpected keys provided"):

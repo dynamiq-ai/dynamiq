@@ -57,7 +57,6 @@ def test_retrieve_workflow(
         index_name="test-collection",
     )
 
-    # Build the retriever flow
     retriever_flow = Flow(
         id="test_retriever_flow",
         nodes=[
@@ -65,7 +64,6 @@ def test_retrieve_workflow(
         ],
     )
 
-    # Run the retriever flow
     input_data = {"embedding": [0.1, 0.2, 0.3], "filters": mock_filters, "top_k": 5}
     config = RunnableConfig(callbacks=[TracingCallbackHandler()])
     response = retriever_flow.run(

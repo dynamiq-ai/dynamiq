@@ -40,9 +40,6 @@ def commands_run(sandbox):
     return [call.args[0] for call in sandbox.run_command_shell.call_args_list]
 
 
-# --- construction ------------------------------------------------------------
-
-
 def test_defaults_to_an_aws_connection():
     tool = BedrockAgentCoreRuntimeInterpreterTool(agent_runtime_arn=ARN)
     assert isinstance(tool.connection, AWSConnection)
@@ -87,9 +84,6 @@ def test_persistent_init_success_keeps_the_session():
 
     assert tool.persistent_sandbox is True
     assert tool._sandbox is sandbox
-
-
-# --- sandbox plumbing --------------------------------------------------------
 
 
 def test_create_sandbox_passes_configuration_through():
@@ -160,9 +154,6 @@ def test_destroy_sandbox_stops_the_session():
     sandbox.close.assert_called_once_with(kill=True)
 
 
-# --- shell command composition -----------------------------------------------
-
-
 def test_compose_shell_command_adds_cd_and_exports():
     tool = make_tool()
     composed = tool._compose_shell_command("ls", env={"TOKEN": "abc"}, cwd="/mnt/workspace/sub")
@@ -207,9 +198,6 @@ def test_execute_shell_command_honours_a_per_call_timeout():
     tool._execute_shell_command("sleep 5", sandbox, timeout=42)
 
     assert sandbox.run_command_shell.call_args.kwargs["timeout"] == 42
-
-
-# --- python execution --------------------------------------------------------
 
 
 def test_execute_python_code_uploads_then_runs_the_script():
@@ -279,9 +267,6 @@ def test_execute_python_code_wraps_upload_errors_as_recoverable():
     assert excinfo.value.recoverable is True
 
 
-# --- package installation ----------------------------------------------------
-
-
 def test_install_packages_quotes_version_pins():
     """An unquoted '>=' would be parsed as a redirection and silently install latest."""
     tool = make_tool()
@@ -321,9 +306,6 @@ def test_install_packages_raises_on_failure():
 
     with pytest.raises(ToolExecutionException, match="No matching distribution"):
         tool._install_packages(sandbox, "nonexistent-pkg")
-
-
-# --- file transfer -----------------------------------------------------------
 
 
 def test_upload_file_delegates_to_the_sandbox():
@@ -379,9 +361,6 @@ def test_run_shell_command_maps_a_missing_exit_code_to_failure():
 
     exit_code, _ = tool._run_shell_command("mkdir -p /x", sandbox)
     assert exit_code == 1
-
-
-# --- lifecycle ---------------------------------------------------------------
 
 
 def test_close_stops_a_persistent_session():

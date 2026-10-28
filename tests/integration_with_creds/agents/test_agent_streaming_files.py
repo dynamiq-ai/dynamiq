@@ -141,9 +141,6 @@ def _event_to_dict(event) -> dict:
     return {"raw": str(event)}
 
 
-# ---------------------------------------------------------------------------
-# Test 1: StreamingIteratorCallbackHandler (sync)
-# ---------------------------------------------------------------------------
 @pytest.mark.integration
 def test_streaming_files_sync_iterator(llm, file_tool):
     """Sync StreamingIteratorCallbackHandler correctly serializes BytesIO in tool results."""
@@ -195,9 +192,6 @@ def test_streaming_files_sync_iterator(llm, file_tool):
         json.dumps(run.to_dict(), default=str)
 
 
-# ---------------------------------------------------------------------------
-# Test 2: AsyncStreamingIteratorCallbackHandler (async)
-# ---------------------------------------------------------------------------
 @pytest.mark.integration
 def test_streaming_files_async_iterator(llm, file_tool):
     """Async StreamingIteratorCallbackHandler correctly serializes BytesIO in tool results."""
@@ -255,9 +249,6 @@ def test_streaming_files_async_iterator(llm, file_tool):
         json.dumps(run.to_dict(), default=str)
 
 
-# ---------------------------------------------------------------------------
-# Test 3: StreamingQueueCallbackHandler (raw queue)
-# ---------------------------------------------------------------------------
 @pytest.mark.integration
 def test_streaming_files_queue_handler(llm, file_tool):
     """Raw StreamingQueueCallbackHandler correctly serializes BytesIO in tool results."""

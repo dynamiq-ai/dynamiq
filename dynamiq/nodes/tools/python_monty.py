@@ -107,8 +107,7 @@ class PythonMonty(Node):
             import pydantic_monty
         except ImportError as e:
             raise ToolExecutionException(
-                "PythonMonty requires the 'pydantic-monty' package. "
-                "Install with: uv sync --extra monty (or pip install pydantic-monty)",
+                "PythonMonty requires the 'pydantic-monty' package. " 'Install it with: pip install "dynamiq[monty]"',
                 recoverable=False,
             ) from e
 

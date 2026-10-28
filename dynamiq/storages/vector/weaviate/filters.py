@@ -409,10 +409,7 @@ def _parse_comparison_condition(condition: dict[str, Any]) -> FilterReturn:
     field: str = condition["field"]
 
     if field.startswith("metadata."):
-        # Documents are flattened otherwise we wouldn't be able to properly query them.
-        # We're forced to flatten because Weaviate doesn't support querying of nested properties
-        # as of now. If we don't flatten the documents we can't filter them.
-        # As time of writing this they have it in their backlog, see:
+        # Documents are flattened because Weaviate does not support filtering on nested properties yet:
         # https://github.com/weaviate/weaviate/issues/3694
         field = field.replace("metadata.", "")
 

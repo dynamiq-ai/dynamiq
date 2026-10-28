@@ -72,7 +72,6 @@ def run_and_assert_agent(agent: Agent, agent_input, expected_length, run_config)
     """Helper function to run agent and perform common assertions."""
     logger.info(f"\n--- Running Agent: {agent.name} (Mode: {agent.inference_mode.value}) ---")
 
-    # Let exceptions propagate naturally - no try/except needed
     result = agent.run(input_data=agent_input, config=run_config)
     logger.info(f"Agent raw result object: {result}")
 

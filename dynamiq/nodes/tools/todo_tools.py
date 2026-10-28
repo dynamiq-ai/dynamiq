@@ -118,6 +118,15 @@ RULES:
     # the store) is trusted at face value instead of poisoning the next merge=true call.
     _list_created_this_run: bool = PrivateAttr(default=False)
 
+    @property
+    def to_dict_exclude_params(self):
+        return super().to_dict_exclude_params | {"file_store": True}
+
+    def to_dict(self, **kwargs) -> dict:
+        data = super().to_dict(**kwargs)
+        data["file_store"] = self.file_store.to_dict(**kwargs)
+        return data
+
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
@@ -270,7 +279,6 @@ RULES:
 
             final_todos = list(existing_by_id.values())
         else:
-            # Replace all
             final_todos = new_todos
 
         self._save_todos(final_todos)
@@ -281,7 +289,6 @@ RULES:
         # is correctly empty.
         self._list_created_this_run = bool(final_todos)
 
-        # Calculate stats
         stats = {
             "total": len(final_todos),
             TodoStatus.PENDING.value: sum(1 for t in final_todos if t.get("status") == TodoStatus.PENDING.value),

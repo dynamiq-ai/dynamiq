@@ -154,25 +154,20 @@ def test_fc_summarizer_input_preserves_all_substantive_info():
 
     body = tool._flatten_messages_to_single(_build_fc_history()).content
 
-    # User prompt
     assert USER_PROMPT in body, "user prompt missing from summarizer input"
 
     # Tool names (preserved via the assistant content label).
     assert TOOL_NAME in body, "tool name missing from summarizer input"
     assert "provide_final_answer" in body, "final-answer function name missing from summarizer input"
 
-    # Tool arguments — currently live in `tool_calls.function.arguments` which
-    # `_flatten_messages_to_single` does NOT inspect. This assertion FAILS on
-    # current code and surfaces the gap.
+    # Tool arguments live in `tool_calls.function.arguments`, outside `content`.
     assert '"city": "Paris"' in body, "Paris tool call arguments missing from summarizer input"
     assert '"city": "Tokyo"' in body, "Tokyo tool call arguments missing from summarizer input"
 
-    # Chain-of-thought emitted alongside each tool call — same root cause as
-    # tool arguments: lives in `tool_calls.function.arguments`.
+    # The thought emitted with each tool call is in its arguments too.
     assert "Need Paris first" in body, "tool-call thought missing from summarizer input"
     assert "Both readings in hand" in body, "final-answer thought missing from summarizer input"
 
-    # Tool outputs (this part already works).
     assert PARIS_OBSERVATION in body, "Paris tool output missing from summarizer input"
     assert TOKYO_OBSERVATION in body, "Tokyo tool output missing from summarizer input"
 
@@ -223,8 +218,6 @@ def test_fc_split_history_preserves_fc_protocol(monkeypatch):
         not to_preserve or to_preserve[0].role != MessageRole.TOOL
     ), f"preserve starts with role=TOOL (orphan): {to_preserve[0]}"
 
-    # Collect tool_call_ids that appear in preserve under either an
-    # assistant.tool_calls payload or a TOOL message.
     expected_tool_call_ids: set[str] = set()
     seen_tool_replies: set[str] = set()
     for msg in to_preserve:

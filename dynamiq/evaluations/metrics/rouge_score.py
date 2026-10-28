@@ -2,6 +2,8 @@ from enum import Enum
 from typing import Callable
 
 from pydantic import BaseModel, PrivateAttr, model_validator
+from rouge_score import rouge_scorer
+
 from dynamiq.evaluations import BaseEvaluator
 
 
@@ -105,8 +107,6 @@ class RougeScoreEvaluator(BaseEvaluator):
         self._initialize_rouge()
 
     def _initialize_rouge(self) -> None:
-        from rouge_score import rouge_scorer
-
         self._scorer = rouge_scorer.RougeScorer([self.rouge_type.value], use_stemmer=True)
 
     def run_single(self, ground_truth_answer: str, answer: str) -> float:
@@ -120,7 +120,6 @@ class RougeScoreEvaluator(BaseEvaluator):
         Returns:
             float: The computed ROUGE score.
         """
-        # Validate input.
         single_input = RunSingleInput(ground_truth_answer=ground_truth_answer, answer=answer)
         rouge_result = self._scorer.score(single_input.ground_truth_answer, single_input.answer)
         metric_value = getattr(rouge_result[self.rouge_type.value], self.measure_type.value)

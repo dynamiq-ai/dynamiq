@@ -100,7 +100,6 @@ class SandboxShellTool(Node):
         (case-insensitive): if the command contains any blocked string, it is rejected."""
         cmd_lower = command.strip().lower()
 
-        # Check blocked commands
         if self.blocked_commands:
             for blocked in self.blocked_commands:
                 if blocked.lower() in cmd_lower:
@@ -132,10 +131,8 @@ class SandboxShellTool(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         try:
-            # Validate command against security rules
             self._validate_command(input_data.command)
 
-            # Execute command via sandbox
             result = self.sandbox.run_command_shell(
                 command=input_data.command,
                 timeout=input_data.timeout,

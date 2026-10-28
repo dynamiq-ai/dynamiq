@@ -1,8 +1,11 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
+from qdrant_client import QdrantClient
 from qdrant_client.http import models as rest
+from qdrant_client.http.exceptions import UnexpectedResponse
 
 from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.qdrant.converters import convert_id
@@ -76,11 +79,6 @@ def test_replace_document_metadata_missing_id_fails_fast(qdrant_vector_store, mo
     mock_qdrant_client.set_payload.assert_not_called()
 
 
-def test_delete_documents(qdrant_vector_store, mock_qdrant_client):
-    qdrant_vector_store.delete_documents(document_ids=["1"])
-    mock_qdrant_client.delete.assert_called_once()
-
-
 def test_delete_documents_by_ids(qdrant_vector_store, mock_qdrant_client):
     document_ids = ["1", "2", "3"]
     qdrant_vector_store.delete_documents(document_ids=document_ids)
@@ -109,6 +107,30 @@ def test_delete_documents_by_filters(qdrant_vector_store, mock_qdrant_client, mo
         points_selector=[convert_id(doc.id) for doc in mock_documents],
         wait=qdrant_vector_store.wait_result_from_api,
     )
+
+
+def test_delete_documents_by_filters_without_matches_deletes_nothing(qdrant_vector_store, mock_qdrant_client):
+    with patch.object(qdrant_vector_store, "filter_documents", return_value=[]):
+        qdrant_vector_store.delete_documents_by_filters({"field": "file_id", "operator": "in", "value": ["missing"]})
+
+    mock_qdrant_client.delete.assert_not_called()
+
+
+def test_creating_a_missing_collection_keeps_one_another_writer_created(qdrant_vector_store, mock_qdrant_client):
+    mock_qdrant_client.collection_exists.side_effect = [False, True]
+    mock_qdrant_client.create_collection.side_effect = UnexpectedResponse(409, "Conflict", b"", httpx.Headers())
+
+    qdrant_vector_store._set_up_collection(
+        "Docs",
+        3,
+        create_if_not_exist=True,
+        recreate_collection=False,
+        similarity="cosine",
+        use_sparse_embeddings=False,
+        sparse_idf=False,
+    )
+
+    mock_qdrant_client.delete_collection.assert_not_called()
 
 
 def test_delete_documents_by_filters_raises_value_error(qdrant_vector_store):
@@ -178,3 +200,18 @@ def test_handle_duplicate_documents(qdrant_vector_store):
 def test_drop_duplicate_documents(qdrant_vector_store):
     documents = [Document(id="1", content="Document 1"), Document(id="1", content="Document 1")]
     assert qdrant_vector_store._drop_duplicate_documents(documents) == [documents[0]]
+
+
+def test_write_and_query_against_local_qdrant():
+    store = QdrantVectorStore(
+        client=QdrantClient(location=":memory:"), index_name="docs", dimension=3, create_if_not_exist=True
+    )
+    store.write_documents(
+        [
+            Document(id="1", content="tea", embedding=[1.0, 0.0, 0.0]),
+            Document(id="2", content="chess", embedding=[0.0, 1.0, 0.0]),
+        ]
+    )
+
+    assert store.count_documents() == 2
+    assert [document.content for document in store._query_by_embedding([1.0, 0.1, 0.0], top_k=1)] == ["tea"]

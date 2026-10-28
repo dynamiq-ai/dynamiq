@@ -5,8 +5,6 @@ from dataclasses import field
 from types import GenericAlias
 from typing import Any, ForwardRef, Literal, Union
 
-from mcp import ClientSession
-from mcp.types import PaginatedRequestParams
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, create_model
 
 from dynamiq.connections import MCPSse, MCPStdio, MCPStreamableHTTP
@@ -546,6 +544,8 @@ class MCPTool(ConnectionNode):
         Returns:
             dict[str, Any]: A dictionary containing the tool's output.
         """
+        from mcp import ClientSession  # deferred: the MCP SDK loads a web server stack, which takes 0.3 s
+
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
@@ -650,6 +650,9 @@ Usage Strategy:
 
     async def _list_tools(self, headers: dict[str, Any] | None = None) -> dict[str, MCPTool]:
         """Lists the server's tools over one session, following every page of tools/list."""
+        from mcp import ClientSession  # deferred: the MCP SDK loads a web server stack, which takes 0.3 s
+        from mcp.types import PaginatedRequestParams
+
         discovered: dict[str, MCPTool] = {}
         try:
             # Without headers this is the same connect() call as before, so build-time discovery is unchanged.

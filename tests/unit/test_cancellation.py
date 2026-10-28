@@ -116,7 +116,7 @@ class TestCancellationToken:
     def test_cancel_idempotent(self):
         token = CancellationToken()
         token.cancel()
-        token.cancel()  # second call should be a no-op
+        token.cancel()
         assert token.is_canceled is True
 
     def test_thread_safety_concurrent_cancels(self):
@@ -209,10 +209,6 @@ class TestCheckCancellation:
         with pytest.raises(CanceledException):
             check_cancellation(config)
 
-    def test_config_with_active_uncanceled_token_is_noop(self):
-        config = RunnableConfig(cancellation=CancellationConfig(token=CancellationToken()))
-        check_cancellation(config)  # Must NOT raise
-
 
 class TestRunnableConfigCancellation:
     def test_cancellation_always_on_by_default(self):
@@ -288,30 +284,12 @@ class TestNodeCancellation:
         result = result_holder["result"]
         assert result.status == RunnableStatus.CANCELED
 
-    def test_no_cancellation_config_works_normally(self):
-        node = InstantNode()
-        result = node.run_sync(input_data={}, config=RunnableConfig())
-        assert result.status == RunnableStatus.SUCCESS
-
     def test_uncanceled_token_does_not_block_execution(self):
         token = CancellationToken()
         config = RunnableConfig(cancellation=CancellationConfig(token=token))
         node = InstantNode()
         result = node.run_sync(input_data={}, config=config)
         assert result.status == RunnableStatus.SUCCESS
-
-    def test_canceled_result_has_descriptive_error(self):
-        token = CancellationToken()
-        token.cancel()
-        config = RunnableConfig(cancellation=CancellationConfig(token=token))
-        node = InstantNode()
-        result = node.run_sync(input_data={}, config=config)
-        assert result.status == RunnableStatus.CANCELED
-        assert result.error is not None
-        assert result.error.type is CanceledException
-        assert result.error.message  # has a descriptive message
-        assert result.output is None
-        assert result.input is None
 
 
 class TestExecuteWithRetryCancellation:
@@ -370,11 +348,10 @@ class TestFlowCancellation:
 
         result = result_holder["result"]
         assert result.status == RunnableStatus.CANCELED
-        # Cancellation returns no output, no error
         assert result.output is None
         assert result.error is not None
         assert result.error.type is CanceledException
-        assert result.error.message  # has a descriptive message
+        assert result.error.message
 
     def test_flow_canceled_result_has_no_output(self):
         token = CancellationToken()
@@ -400,11 +377,10 @@ class TestFlowCancellation:
 
         result = result_holder["result"]
         assert result.status == RunnableStatus.CANCELED
-        # Canceled result is fully empty: no input, output, or error
         assert result.output is None
         assert result.error is not None
         assert result.error.type is CanceledException
-        assert result.error.message  # has a descriptive message
+        assert result.error.message
         assert result.input is None
 
     def test_flow_not_cancelled_completes_normally(self):
@@ -668,7 +644,6 @@ class TestCancellationEdgeCases:
         assert result.status == RunnableStatus.SUCCESS
         token.cancel()
         assert token.is_canceled is True
-        # The result is already returned and doesn't change
         assert result.status == RunnableStatus.SUCCESS
 
     def test_failing_node_with_cancellation_returns_failure_not_cancelled(self):

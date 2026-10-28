@@ -264,7 +264,6 @@ class FirecrawlTool(ConnectionNode):
                 location.model_dump(exclude_none=True) if isinstance(location, BaseModel) else location
             )
 
-        # Filter out None values and merge with base data
         filtered_fields = {k: v for k, v in conditional_fields.items() if v is not None}
         return {**base_data, **filtered_fields}
 

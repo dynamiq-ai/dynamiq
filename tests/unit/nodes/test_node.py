@@ -482,7 +482,7 @@ def test_workflow_cancellation_while_waiting_for_input_does_not_hang():
 
     assert result.status == RunnableStatus.FAILURE
 
-    # Critical: main flow should return quickly, NOT wait for streaming timeout
+    # Main flow should return quickly, NOT wait for streaming timeout
     assert elapsed_time < EXECUTE_TIMEOUT + MAX_ELAPSED_TIME, (
         f"run took {elapsed_time:.2f}s, expected < {EXECUTE_TIMEOUT + MAX_ELAPSED_TIME}s. "
         f"If it took ~{STREAMING_TIMEOUT_LONG}s, the executor.shutdown is waiting for the blocked thread."
@@ -671,16 +671,13 @@ def test_background_thread_runs_until_streaming_timeout_after_execute_timeout():
     result = node.run(input_data=TEST_INPUT_DATA, config=RunnableConfig())
     main_flow_elapsed = time.time() - start_time
 
-    # Main flow returns quickly with timeout
     assert result.status == RunnableStatus.FAILURE
     assert main_flow_elapsed < MAX_ELAPSED_TIME
 
-    # Background thread should NOT have finished yet (it's waiting on streaming timeout)
     assert (
         not finished_event.is_set()
     ), "Background thread finished too early. It should still be waiting on streaming timeout."
 
-    # Wait for background thread to finish (streaming timeout)
     finished = finished_event.wait(timeout=BACKGROUND_THREAD_WAIT)
     background_elapsed = time.time() - start_time
 
@@ -689,7 +686,6 @@ def test_background_thread_runs_until_streaming_timeout_after_execute_timeout():
         "It might be stuck or streaming timeout is not working."
     )
 
-    # Background should have waited for the streaming timeout
     assert background_elapsed >= SHORT_STREAMING_TIMEOUT - TIMING_TOLERANCE, (
         f"Background thread finished in {background_elapsed:.2f}s, "
         f"expected to wait for streaming timeout (~{SHORT_STREAMING_TIMEOUT}s)."
@@ -728,12 +724,10 @@ def test_background_thread_can_be_unblocked_by_done_event():
     assert result.status == RunnableStatus.FAILURE
     assert main_flow_elapsed < MAX_ELAPSED_TIME
 
-    # Background thread should still be waiting
     assert not finished_event.is_set()
 
     done_event.set()
 
-    # Background thread should finish quickly after done_event is set
     finished = finished_event.wait(timeout=BACKGROUND_THREAD_WAIT)
     background_elapsed = time.time() - start_time
 
@@ -796,12 +790,8 @@ def test_done_event_response_time_within_poll_interval():
     )
 
 
-def test_longer_poll_interval_delays_done_event_detection():
-    """
-    Verifies that a longer poll_interval delays done_event detection.
-
-    This confirms the polling mechanism is actually using the configured interval.
-    """
+def test_long_poll_interval_detects_done_event_within_one_poll():
+    """Verifies that a long poll_interval still detects done_event within one poll."""
     node = BlockingQueueNode()
     input_queue = Queue()
     done_event = Event()
@@ -828,8 +818,7 @@ def test_longer_poll_interval_delays_done_event_detection():
     elapsed_time = time.time() - start_time
 
     assert "completed" in str(exc_info.value).lower()
-    # With longer poll interval, detection should take longer (at least close to poll interval)
-    # We set done_event after 0.1s, but detection happens after the current poll completes
+    # The config's cancellation token caps each wait at 0.5s, so detection comes sooner than the interval.
     assert (
         elapsed_time < LONG_POLL_INTERVAL + 0.5
     ), f"Took {elapsed_time:.2f}s, expected less than poll_interval ({LONG_POLL_INTERVAL}s) + tolerance."

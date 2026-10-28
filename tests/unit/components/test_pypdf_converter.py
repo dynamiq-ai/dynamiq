@@ -65,3 +65,40 @@ def test_pdf_metadata_normalization_disambiguates_colliding_keys():
         "pdf_custom_field": "first",
         "pdf_custom_field_2": "second",
     }
+
+
+@pytest.mark.parametrize("extraction_mode", ["plain", "layout"])
+def test_pdf_pages_are_separated_in_one_document(extraction_mode):
+    canvas = pytest.importorskip("reportlab.pdfgen.canvas")
+    output = BytesIO()
+    pdf = canvas.Canvas(output)
+    for text in ("Filter QF-03", "Page two"):
+        pdf.drawString(72, 720, text)
+        pdf.showPage()
+    pdf.save()
+    output.seek(0)
+    output.name = "two_pages.pdf"
+
+    documents = PyPDFFileConverter(extraction_mode=extraction_mode).run(files=[output])["documents"]
+
+    assert "QF-03Page" not in documents[0].content
+    assert documents[0].content.split() == ["Filter", "QF-03", "Page", "two"]
+
+
+def test_unreadable_pdf_is_skipped(tmp_path):
+    broken = tmp_path / "broken.pdf"
+    broken.write_bytes(b"not a pdf")
+    valid = tmp_path / "valid.pdf"
+    valid.write_bytes(build_pdf_with_metadata().getvalue())
+
+    documents = PyPDFFileConverter().run(file_paths=[str(broken), str(valid)])["documents"]
+
+    assert [document.metadata["file_path"] for document in documents] == [str(valid)]
+
+
+def test_only_unreadable_pdfs_raise():
+    broken = BytesIO(b"not a pdf")
+    broken.name = "broken.pdf"
+
+    with pytest.raises(ValueError, match="No documents were created"):
+        PyPDFFileConverter().run(files=[broken])

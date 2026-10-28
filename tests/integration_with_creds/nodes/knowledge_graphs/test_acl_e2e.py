@@ -33,8 +33,10 @@ from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.storages.graph.neo4j import Neo4jGraphStore
 from dynamiq.types import Document
 
-# The extractor still needs the ontology to constrain extraction; the retriever no longer does — it seeds
-# on explicit entities/entity_ids + a text_embedder, so it needs neither an llm nor an ontology.
+# The extractor needs the ontology to constrain extraction; the retriever seeds on explicit entities/entity_ids
+# + a text_embedder, so it needs neither an llm nor an ontology.
+# Only the extractor uses the ontology: the retriever seeds on explicit entities and a text embedder, so it needs
+# neither an LLM nor an ontology.
 ONTOLOGY = Ontology(entity_types=["Organization", "System"], relationship_types=["USES"])
 
 
@@ -50,7 +52,7 @@ def _text_embedder():
     return OpenAITextEmbedder(connection=OpenAIConnection())
 
 
-# --- Isolation: a caller sees its own edges and nothing else -----------------------------------------
+# Isolation: a caller sees its own edges and nothing else.
 
 ORG = "Acme"
 SYS_A = "Helios"  # only group:a may see this
@@ -151,7 +153,7 @@ def test_same_fact_from_two_docs_keeps_both_acls(ingested, graph_connection):
     assert SHARED not in _facts_by_name(graph_connection, ["group:nobody"]), "unknown principal must not see SHARED"
 
 
-# --- Name provenance: endpoint names render from the edge snapshot, not the shared node --------------
+# Name provenance: endpoint names render from the edge snapshot, not the shared node.
 
 ORG_ID = "org-1"
 NODE_NAME = "Acme Secret Division"  # the shared node's stored (secret-encoded) name — MUST NOT leak
@@ -234,7 +236,7 @@ def test_name_leak_unknown_principal_sees_nothing(shared_node_graph, graph_conne
     assert SYS_PUBLIC not in content and SYS_SECRET not in content, f"unknown principal must see nothing: {content}"
 
 
-# --- No widening: caller filters can only narrow within the locked ACL -------------------------------
+# No widening: caller filters can only narrow within the locked ACL.
 
 FILTER_ORG = "org-acl"
 

@@ -75,7 +75,6 @@ class MilvusDocumentWriter(Writer, MilvusWriterVectorStoreParams):
         content_key = input_data.content_key
         embedding_key = input_data.embedding_key
 
-        # Write documents to Milvus
         upserted_count = self.vector_store.write_documents(
             documents, content_key=content_key, embedding_key=embedding_key
         )

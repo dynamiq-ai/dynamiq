@@ -29,7 +29,6 @@ def openai_llm():
     )
 
 
-# Path fixtures
 @pytest.fixture(scope="module")
 def data_folder_path():
     return os.path.join(os.path.dirname(ROOT_PATH), "examples", "components", "data")
@@ -50,10 +49,9 @@ def image_bytes(image_file_path):
     with open(image_file_path, "rb") as f:
         image_data = f.read()
 
-    # Create BytesIO object with the image data
     image_file = BytesIO(image_data)
     image_file.name = "img.jpeg"
-    image_file.seek(0)  # Reset position to beginning
+    image_file.seek(0)
     return image_file
 
 
@@ -141,7 +139,6 @@ def _run_and_assert_sandbox_agent(
     [
         InferenceMode.XML,
         InferenceMode.DEFAULT,
-        # InferenceMode.FUNCTION_CALLING,
         InferenceMode.STRUCTURED_OUTPUT,
     ],
 )
@@ -215,7 +212,6 @@ def test_agent_sandbox_with_input_files_returns_output(openai_llm, e2b_connectio
             verbose=True,
         )
 
-        # Provide an input file
         input_file = BytesIO(b"name,score\nAlice,95\nBob,87\nCharlie,92\n")
         input_file.name = "scores.csv"
         input_file.seek(0)

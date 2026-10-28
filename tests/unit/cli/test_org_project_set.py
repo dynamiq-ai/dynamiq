@@ -36,7 +36,6 @@ def test_org_set_with_env_token_does_not_persist_it(configured, requests_mock, m
     assert result.exit_code == 0, result.stderr
     assert requests_mock.last_request.headers["Authorization"] == "Bearer env-token-0123456789"
     assert configured.creds() == {"api_host": HOST, "api_key": "tok-file-0123456789"}
-    # The override warning goes to stderr, once.
     assert result.stderr.count("DYNAMIQ_API_TOKEN overrides api_key from credentials file") == 1
 
 

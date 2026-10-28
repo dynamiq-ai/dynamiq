@@ -7,11 +7,12 @@ from typing import Any, ClassVar
 
 import filetype
 from jinja2 import Environment, meta
-from litellm import token_counter
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_serializer
 
 from dynamiq.types.llm_tool import Tool
 from dynamiq.utils import generate_uuid
+from dynamiq.utils.jinja import compile_template, template_parameters
+from dynamiq.utils.litellm import token_counter
 
 
 class MessageRole(str, enum.Enum):
@@ -50,11 +51,9 @@ def get_parameters_for_template(template: str, env: Environment | None = None) -
         set: Set of required parameters.
     """
     if not env:
-        env = Environment(autoescape=True)
-    # Parse the template to get its Abstract Syntax Tree
+        return set(template_parameters(template))
     ast = env.parse(template)
 
-    # Find and return set of undeclared variables in the template
     return meta.find_undeclared_variables(ast)
 
 
@@ -85,17 +84,11 @@ class Message(BaseModel):
 
     message_type: ClassVar[MessageType] = MessageType.MESSAGE
 
-    def __init__(self, **data):
-        super().__init__(**data)
-        from jinja2 import Template
-
-        self._Template = Template
-
     def format_message(self, **kwargs) -> "Message":
         "Returns formated copy of message"
         return Message(
             role=self.role,
-            content=self._Template(self.content).render(**kwargs),
+            content=compile_template(self.content).render(**kwargs),
             tool_calls=self.tool_calls,
             tool_call_id=self.tool_call_id,
             name=self.name,
@@ -268,7 +261,6 @@ class VisionMessage(BaseModel):
 
             value = kwargs[param]
 
-            # Initialize as unchanged; will be modified if image data is detected
             processed_value = value
 
             if isinstance(value, io.BytesIO):
@@ -282,10 +274,8 @@ class VisionMessage(BaseModel):
                 pass  # No action needed; assuming it's a regular URL or already a Data URL
 
             else:
-                # Unsupported data type for image parameter
                 raise ValueError(f"Unsupported data type for parameter '{param}': {type(value)}")
 
-            # Update the parameter with the processed value
             kwargs[param] = processed_value
 
     def format_message(self, **kwargs):
@@ -295,7 +285,7 @@ class VisionMessage(BaseModel):
                 if not self.static:
                     out_msg_content.append(
                         VisionMessageTextContent(
-                            text=self._Template(content.text).render(**kwargs),
+                            text=compile_template(content.text).render(**kwargs),
                         )
                     )
                 else:
@@ -305,7 +295,7 @@ class VisionMessage(BaseModel):
                 out_msg_content.append(
                     VisionMessageImageContent(
                         image_url=VisionMessageImageURL(
-                            url=self._Template(content.image_url.url).render(**kwargs),
+                            url=compile_template(content.image_url.url).render(**kwargs),
                             detail=content.image_url.detail,
                         )
                     )
@@ -315,7 +305,7 @@ class VisionMessage(BaseModel):
                 out_msg_content.append(
                     VisionMessageFileContent(
                         file=VisionMessageFileData(
-                            file_data=self._Template(content.file.file_data).render(**kwargs),
+                            file_data=compile_template(content.file.file_data).render(**kwargs),
                             video_metadata=content.file.video_metadata,
                         )
                     )
@@ -327,13 +317,6 @@ class VisionMessage(BaseModel):
             return Message(role=self.role, content=out_msg_content[0].text)
 
         return VisionMessage(role=self.role, content=out_msg_content)
-
-    def __init__(self, **data):
-        super().__init__(**data)
-        # Import and initialize Jinja2 Template here
-        from jinja2 import Template
-
-        self._Template = Template
 
     def to_dict(self) -> dict:
         return {
@@ -430,20 +413,19 @@ class Prompt(BasePrompt):
         """
         parameters = set()
 
-        env = Environment(autoescape=True)
         for msg in self.messages:
             if isinstance(msg, Message):
                 if not msg.static:
-                    parameters |= get_parameters_for_template(msg.content, env=env)
+                    parameters |= template_parameters(msg.content)
             elif isinstance(msg, VisionMessage):
                 for content in msg.content:
                     if isinstance(content, VisionMessageTextContent):
                         if not msg.static:
-                            parameters |= get_parameters_for_template(content.text, env=env)
+                            parameters |= template_parameters(content.text)
                     elif isinstance(content, VisionMessageImageContent):
-                        parameters |= get_parameters_for_template(content.image_url.url, env=env)
+                        parameters |= template_parameters(content.image_url.url)
                     elif isinstance(content, VisionMessageFileContent):
-                        parameters |= get_parameters_for_template(content.file.file_data, env=env)
+                        parameters |= template_parameters(content.file.file_data)
                     else:
                         raise ValueError(f"Invalid content type: {content.type}")
             else:

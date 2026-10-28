@@ -133,3 +133,18 @@ def test_postgres_get_all_returns_oldest_first(postgres_backend, mocker):
     result = backend.get_all(limit=LIMIT)
 
     assert [m.content for m in result] == ["msg-7", "msg-8", "msg-9"]
+
+
+def test_postgres_backends_of_one_process_create_their_table_once(mocker):
+    """Every run builds its own backend, and concurrent CREATE TABLE IF NOT EXISTS for a new table can fail."""
+    from dynamiq.connections import PostgreSQL as PostgreSQLConnection
+    from dynamiq.memory.backends.postgresql import PostgreSQL
+
+    mocker.patch.object(PostgreSQLConnection, "connect")
+    executed = mocker.patch.object(PostgreSQL, "_execute_sql")
+
+    for _ in range(3):
+        PostgreSQL(table_name="conversations_created_once")
+
+    assert executed.call_count == 4  # the lock, the table and its two indices
+    assert "pg_advisory_xact_lock" in executed.call_args_list[0].args[0]

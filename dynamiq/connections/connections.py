@@ -52,6 +52,8 @@ class BaseConnection(BaseModel, ABC):
     """
 
     id: str = Field(default_factory=generate_uuid)
+    # A node's clone, such as a Map item's or a parallel tool call's, keeps the id: the client cache is keyed by it.
+    keeps_id: ClassVar[bool] = True
 
     @computed_field
     @cached_property
@@ -924,6 +926,8 @@ class Qdrant(BaseApiKeyConnection):
         qdrant_client = QdrantClient(
             url=self.url,
             api_key=self.api_key,
+            # The server version check costs a request per client and warns for any server more than a minor away.
+            check_compatibility=False,
         )
 
         return qdrant_client
@@ -1231,6 +1235,42 @@ class Serply(Http):
         """Setup headers after model validation."""
         if self.api_key:
             self.headers.update({"X-Api-Key": self.api_key, "User-Agent": "dynamiq"})
+        return self
+
+
+class FXMacroData(Http):
+    """
+    Connection class for the FXMacroData API.
+
+    The API key is optional. USD release data, the USD release calendar and the data catalogue
+    answer without one; other currencies and FX rates need a key.
+    """
+
+    url: str = "https://api.fxmacrodata.com"
+    api_key: str | None = Field(default_factory=partial(get_env_var, "FXMACRODATA_API_KEY"))
+    method: str = HTTPMethod.GET
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @property
+    def has_valid_api_key(self) -> bool:
+        """True when the key is printable ASCII with no whitespace (checked without echoing it)."""
+        key = self.api_key
+        return bool(key) and key.isascii() and key.isprintable() and " " not in key
+
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Setup headers after model validation.
+
+        The key is stripped, and only a well-formed key is put in the header. A malformed key is
+        reported by the tool at call time, so the HTTP library never sees it (its errors would
+        include the header value).
+        """
+        self.headers.update({"User-Agent": "dynamiq"})
+        if self.api_key is not None:
+            self.api_key = self.api_key.strip() or None
+        if self.has_valid_api_key:
+            self.headers.update({"X-API-Key": self.api_key})
         return self
 
 
@@ -1673,9 +1713,9 @@ class Snowflake(BaseConnection):
     snowflake_schema: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_SCHEMA", "schema"), alias="schema")
 
     def connect(self):
-        try:
-            import snowflake.connector
+        import snowflake.connector
 
+        try:
             conn = snowflake.connector.connect(
                 user=self.user,
                 password=self.password,
@@ -1771,10 +1811,8 @@ class Elasticsearch(BaseConnection):
         from elasticsearch import Elasticsearch
         from elasticsearch.exceptions import AuthenticationException
 
-        # Build connection params
         conn_params = {}
 
-        # Handle authentication
         if self.api_key is not None:
             if self.api_key_id is not None:
                 conn_params["api_key"] = (self.api_key_id, self.api_key)
@@ -1785,19 +1823,16 @@ class Elasticsearch(BaseConnection):
         elif self.cloud_id is None:  # Only require auth for non-cloud deployments
             raise ValueError("Either API key or username/password must be provided")
 
-        # Handle SSL/TLS
         if self.use_ssl:
             if self.ca_path is not None:
                 conn_params["ca_certs"] = self.ca_path
             conn_params["verify_certs"] = self.verify_certs
 
-        # Handle cloud deployment
         if self.cloud_id is not None:
             conn_params["cloud_id"] = self.cloud_id
         else:
             conn_params["hosts"] = [self.url]
 
-        # Create client
         try:
             es_client = Elasticsearch(**conn_params)
         except Exception as e:
@@ -2068,9 +2103,9 @@ class DatabricksSQL(BaseConnection):
     access_token: str = Field(default_factory=partial(get_env_var, "DATABRICKS_TOKEN"))
 
     def connect(self):
-        try:
-            from databricks import sql
+        from databricks import sql
 
+        try:
             conn = sql.connect(
                 server_hostname=self.server_hostname,
                 http_path=self.http_path,
@@ -2430,6 +2465,11 @@ class CuaDesktop(BaseConnection):
 
         if self.computer_name:
             connection_params["name"] = self.computer_name
+
+        # Computer reads the CUA_API_KEY environment variable when it is given no key, so the key this
+        # connection carries would otherwise go unused.
+        if self.provider_type == CuaProviderType.CLOUD:
+            connection_params["api_key"] = self.api_key
 
         if self.provider_type == CuaProviderType.DOCKER and self.image is not None:
             connection_params["image"] = self.image.value
