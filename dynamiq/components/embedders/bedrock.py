@@ -26,5 +26,7 @@ class BedrockEmbedder(BaseEmbedder):
             params["input_type"] = self.input_type
             if self.truncate:
                 params["truncate"] = self.truncate
+            if self.dimensions:
+                params["dimensions"] = self.dimensions
 
         return params
