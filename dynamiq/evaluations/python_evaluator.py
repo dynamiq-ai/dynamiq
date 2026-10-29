@@ -87,6 +87,15 @@ class PythonEvaluator(BaseEvaluator):
     """
     name: str = "python_metric"
     code: str = Field(..., description="User-defined Python code as a string.")
+    extra_allowed_modules: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Extra top-level packages the metric code may import on top of the standard library and the "
+            "data-science set, for example 'operator' or 'yaml' (both dropped from the default set). "
+            "str.format/format_map are refused under the guards regardless of this field; use f-strings "
+            "or %-formatting. Metric code is developer-authored, so these are a trusted-code decision."
+        ),
+    )
 
     def __init__(self, **data: Any):
         super().__init__(**data)
@@ -98,8 +107,11 @@ class PythonEvaluator(BaseEvaluator):
         globals and parse the "evaluate" function's parameter names.
         """
         # Evaluator code is authored by developers, not end users, so it keeps the data-science libraries
-        # the safe default omits. It still runs under the hardened import and attribute guards.
-        self._compiled_globals: dict = get_restricted_globals(DEFAULT_ALLOWED_MODULES | EXTENDED_ALLOWED_MODULES)
+        # the safe default omits, plus anything in extra_allowed_modules. It still runs under the hardened
+        # import and attribute guards, so operator and yaml are no longer in the base set (opt in through
+        # extra_allowed_modules) and str.format is refused (use f-strings).
+        allowed = DEFAULT_ALLOWED_MODULES | EXTENDED_ALLOWED_MODULES | set(self.extra_allowed_modules)
+        self._compiled_globals: dict = get_restricted_globals(allowed)
         try:
             compile_and_execute(self.code, self._compiled_globals)
         except Exception as compile_error:

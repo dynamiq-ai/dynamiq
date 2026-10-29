@@ -148,21 +148,15 @@ def test_custom_description_is_preserved():
     assert executor.description == custom
 
 
-def test_pre_pr_generated_description_is_refreshed():
-    """A description generated before this change (main began it 'Runs dynamic Python code safely via
-    RestrictedPython.') must be recognised as generated and refreshed, not kept as a custom description —
-    otherwise a saved workflow keeps promising pd.read_csv/open that the new default refuses."""
-    legacy = (
-        "Runs dynamic Python code safely via RestrictedPython. Before your code runs, every uploaded file "
-        "is mirrored into the temporary workspace (so even module-level pd.read_csv('foo.csv') and "
-        "open('notes.txt') calls just work)."
-    )
+def test_edited_default_opening_description_is_preserved():
+    """A custom description that reuses the default's opening words (the common way to customize, or a UI
+    user appending instructions to the pre-filled text) must not be overwritten — only a description that
+    is byte-for-byte a generated one is refreshed."""
+    custom = "Runs dynamic Python code for the finance team. Only use it for CSV reports."
 
-    reloaded = PythonCodeExecutor(file_store=InMemoryFileStore(), description=legacy)
+    executor = PythonCodeExecutor(file_store=InMemoryFileStore(), description=custom)
 
-    assert reloaded.description != legacy
-    assert "just work" not in reloaded.description
-    assert "`open('notes.txt')` is refused" in reloaded.description
+    assert executor.description == custom
 
 
 def test_description_names_real_write_helpers():

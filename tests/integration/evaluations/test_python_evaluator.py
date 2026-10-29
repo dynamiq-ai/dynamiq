@@ -98,3 +98,22 @@ def evaluate(answer, expected):
     evaluator = PythonEvaluator(code=user_code)
     with pytest.raises(ValueError, match="non-numeric"):
         evaluator.run_single(input_data)
+
+
+def test_python_evaluator_operator_opt_in_via_extra_allowed_modules():
+    """operator and yaml are no longer in the evaluator's base set (they are escape-prone), so metric
+    code that needs them opts in through extra_allowed_modules; without it the import is refused."""
+    user_code = """
+import operator
+
+def evaluate(answer, expected):
+    return 1.0 if operator.eq(answer, expected) else 0.0
+"""
+
+    with pytest.raises(ValueError, match="operator"):
+        PythonEvaluator(code=user_code)
+
+    evaluator = PythonEvaluator(code=user_code, extra_allowed_modules=["operator"])
+    scores = evaluator.run(input_data_list=[{"answer": "Paris", "expected": "Paris"}])
+
+    assert abs(scores[0] - 1.0) < 0.01
