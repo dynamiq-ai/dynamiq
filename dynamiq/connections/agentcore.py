@@ -350,9 +350,12 @@ class _GatewaySessionBase:
         self._protocol_version = initialize_result.get("protocolVersion") or GATEWAY_MCP_PROTOCOL_VERSION
 
     @staticmethod
-    def _collect_tool_names(result: dict[str, Any], names: list[str]) -> str | None:
-        """Add the tool names of a tools/list page to names and return the cursor of the next page."""
-        names.extend(tool["name"] for tool in result.get("tools") or [] if isinstance(tool, dict) and tool.get("name"))
+    def _collect_tools(result: dict[str, Any], tools: dict[str, dict[str, Any]]) -> str | None:
+        """Add the input schemas of a tools/list page to tools by name and return the cursor of the next page."""
+        for tool in result.get("tools") or []:
+            if isinstance(tool, dict) and tool.get("name"):
+                input_schema = tool.get("inputSchema")
+                tools[tool["name"]] = input_schema if isinstance(input_schema, dict) else {}
         return result.get("nextCursor") or None
 
 
@@ -372,14 +375,15 @@ class AgentCoreGatewaySession(_GatewaySessionBase):
         self._set_protocol_version(self.request("initialize", self._initialize_params()))
         self.request("notifications/initialized")
 
-    def list_tool_names(self) -> list[str]:
-        names: list[str] = []
+    def list_tools(self) -> dict[str, dict[str, Any]]:
+        """Return the input schema of every tool on the gateway by tool name."""
+        tools: dict[str, dict[str, Any]] = {}
         cursor = None
         for _ in range(MAX_TOOL_LIST_PAGES):
             result = self.request("tools/list", {"cursor": cursor} if cursor else {})
-            cursor = self._collect_tool_names(result, names)
+            cursor = self._collect_tools(result, tools)
             if not cursor:
-                return names
+                return tools
         raise AgentCoreGatewayError(f"Gateway tools/list did not end within {MAX_TOOL_LIST_PAGES} pages.")
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -402,14 +406,15 @@ class AsyncAgentCoreGatewaySession(_GatewaySessionBase):
         self._set_protocol_version(await self.request("initialize", self._initialize_params()))
         await self.request("notifications/initialized")
 
-    async def list_tool_names(self) -> list[str]:
-        names: list[str] = []
+    async def list_tools(self) -> dict[str, dict[str, Any]]:
+        """Return the input schema of every tool on the gateway by tool name."""
+        tools: dict[str, dict[str, Any]] = {}
         cursor = None
         for _ in range(MAX_TOOL_LIST_PAGES):
             result = await self.request("tools/list", {"cursor": cursor} if cursor else {})
-            cursor = self._collect_tool_names(result, names)
+            cursor = self._collect_tools(result, tools)
             if not cursor:
-                return names
+                return tools
         raise AgentCoreGatewayError(f"Gateway tools/list did not end within {MAX_TOOL_LIST_PAGES} pages.")
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:

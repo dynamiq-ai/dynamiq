@@ -33,6 +33,19 @@ SEARCH_PAYLOAD = {
 }
 
 
+WEB_SEARCH_SCHEMA = {
+    "type": "object",
+    "properties": {"query": {"type": "string"}, "maxResults": {"type": "integer"}, "filters": {"type": "object"}},
+    "required": ["query"],
+}
+# Connector versions before 1.2.0 list no filters and ignore any that are sent.
+LEGACY_WEB_SEARCH_SCHEMA = {
+    "type": "object",
+    "properties": {"query": {"type": "string"}, "maxResults": {"type": "integer"}},
+    "required": ["query"],
+}
+
+
 def tool_result(payload: dict | str, is_error: bool = False) -> dict:
     text = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
     return {"content": [{"type": "text", "text": text}], "isError": is_error}
@@ -43,6 +56,8 @@ class FakeGateway:
 
     def __init__(self):
         self.tool_pages = [["web-search___WebSearch"]]
+        self.legacy_tools: set[str] = set()
+        self.session_id: str | None = "session-1"
         self.call_result = tool_result(SEARCH_PAYLOAD)
         self.event_stream = False
         self.error_status = None
@@ -64,14 +79,19 @@ class FakeGateway:
             return httpx.Response(202)
         if message["method"] == "initialize":
             result = {"protocolVersion": "2025-03-26", "capabilities": {"tools": {}}, "serverInfo": {"name": "gw"}}
-            return self._reply(message, result, headers={"mcp-session-id": "session-1"})
+            return self._reply(
+                message, result, headers={"mcp-session-id": self.session_id} if self.session_id else None
+            )
         if message["method"] == "tools/list":
             page = int(message["params"].get("cursor", 0))
-            result = {"tools": [{"name": name} for name in self.tool_pages[page]]}
+            result = {"tools": [{"name": name, "inputSchema": self._schema(name)} for name in self.tool_pages[page]]}
             if page + 1 < len(self.tool_pages):
                 result["nextCursor"] = str(page + 1)
             return self._reply(message, result)
         return self._reply(message, self.call_result)
+
+    def _schema(self, name: str) -> dict:
+        return LEGACY_WEB_SEARCH_SCHEMA if name in self.legacy_tools else WEB_SEARCH_SCHEMA
 
     def _reply(self, message: dict, result: dict, headers: dict | None = None) -> httpx.Response:
         reply = json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}, ensure_ascii=False)
@@ -187,6 +207,31 @@ def test_finds_the_web_search_tool_when_target_name_is_unset(gateway):
     assert gateway.messages[-1]["params"]["name"] == "search___WebSearch"
 
 
+def test_gateway_without_session_ids_is_supported(gateway):
+    gateway.session_id = None
+
+    result = web_search_tool(target_name="web-search").run({"query": "influenza activity this week"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert all("mcp-session-id" not in request.headers for request in gateway.requests)
+
+
+def test_unknown_published_dates_are_left_out(gateway):
+    payload = {"results": [{"title": "Report", "url": "https://www.cdc.gov/a", "publishedDate": "unknown"}]}
+    gateway.call_result = tool_result(payload)
+
+    result = web_search_tool(target_name="web-search", is_optimized_for_agents=True).run(
+        {"query": "influenza activity this week"}
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "Published" not in result.output["content"]
+    assert (
+        web_search_tool(is_optimized_for_agents=True)._format_search_response(payload)["sources"][0]["published_date"]
+        == ""
+    )
+
+
 @pytest.mark.parametrize(
     ("tool_names", "error"),
     [
@@ -222,6 +267,32 @@ def test_filters_are_sent_only_when_set(gateway):
         "domainFilter": {"include": ["cdc.gov"], "exclude": ["example.com"]},
         "publishedDateFilter": {"from": "2026-10-01T00:00:00Z", "to": "2026-10-31T23:59:59Z"},
     }
+
+
+@pytest.mark.parametrize("target_name", ["web-search", None])
+def test_filters_fail_on_a_connector_that_would_ignore_them(gateway, target_name):
+    gateway.legacy_tools = {"web-search___WebSearch"}
+    tool = web_search_tool(target_name=target_name)
+
+    result = tool.run({"query": "influenza activity this week", "include_domains": ["cdc.gov"]})
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "does not support domain or date filters" in result.error.message
+    assert "tools/call" not in [message["method"] for message in gateway.messages]
+
+    assert tool.run({"query": "influenza activity this week"}).status == RunnableStatus.SUCCESS
+
+
+def test_filter_support_is_checked_once_per_target(gateway):
+    tool = web_search_tool(target_name="web-search")
+
+    tool.run({"query": "influenza activity this week"})
+    for _ in range(2):
+        tool.run({"query": "influenza activity this week", "include_domains": ["cdc.gov"]})
+
+    methods = [message["method"] for message in gateway.messages]
+    assert methods.count("tools/list") == 1
+    assert methods.count("tools/call") == 3
 
 
 @pytest.mark.parametrize(

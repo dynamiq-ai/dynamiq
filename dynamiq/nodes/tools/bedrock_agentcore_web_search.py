@@ -1,5 +1,6 @@
 import asyncio
 import json
+from collections.abc import Iterable
 from datetime import date
 from typing import Any, ClassVar, Literal
 
@@ -39,6 +40,8 @@ MAX_QUERY_LENGTH = 200
 MAX_RESULTS = 25
 MAX_DOMAIN_FILTER_ENTRIES = 100
 DEFAULT_RESULT_TITLE = "Untitled result"
+# The connector sends this instead of a date when it has none.
+UNKNOWN_PUBLISHED_DATE = "unknown"
 
 
 class BedrockAgentCoreWebSearchInputSchema(BaseModel):
@@ -88,8 +91,9 @@ class BedrockAgentCoreWebSearchTool(ConnectionNode):
 
     AWS serves the searches: the gateway calls the AWS-managed Web Search connector with its own IAM role, so no
     third-party search provider or API key is involved. The connection's credentials sign every request and need
-    bedrock-agentcore:InvokeGateway on the gateway. Filters need the target's connector version 1.2.0 or later, and
-    domain filters set on the target apply to every search: a request can narrow them but never widen them.
+    bedrock-agentcore:InvokeGateway on the gateway. Filters need the target's connector version 1.2.0 or later: older
+    connectors ignore them, so a filtered search on such a target fails instead of returning unfiltered results.
+    Domain filters set on the target apply to every search: a request can narrow them but never widen them.
 
     Attributes:
         connection (AWS): AWS credentials and region used to sign the gateway requests.
@@ -125,6 +129,7 @@ class BedrockAgentCoreWebSearchTool(ConnectionNode):
     )
 
     _gateway_client: AgentCoreGatewayClient | None = PrivateAttr(default=None)
+    _tools_with_filters: set[str] = PrivateAttr(default_factory=set)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[BedrockAgentCoreWebSearchInputSchema]] = BedrockAgentCoreWebSearchInputSchema
@@ -149,7 +154,7 @@ class BedrockAgentCoreWebSearchTool(ConnectionNode):
         return None
 
     @staticmethod
-    def _find_tool_name(tool_names: list[str]) -> str:
+    def _find_tool_name(tool_names: Iterable[str]) -> str:
         """Return the one Web Search tool among the tools the gateway lists."""
         suffix = f"{GATEWAY_TOOL_NAME_DELIMITER}{WEB_SEARCH_TOOL_NAME}"
         candidates = sorted(name for name in tool_names if name == WEB_SEARCH_TOOL_NAME or name.endswith(suffix))
@@ -187,7 +192,7 @@ class BedrockAgentCoreWebSearchTool(ConnectionNode):
         if input_data.end_published_date:
             published_date_filter["to"] = f"{input_data.end_published_date.isoformat()}T23:59:59Z"
 
-        # Targets before connector version 1.2.0 accept no filters, so the key is only sent when a filter is set.
+        # Targets before connector version 1.2.0 have no filters, so the key is only sent when a filter is set.
         filters = {}
         if domain_filter:
             filters["domainFilter"] = domain_filter
@@ -196,6 +201,29 @@ class BedrockAgentCoreWebSearchTool(ConnectionNode):
         if filters:
             arguments["filters"] = filters
         return arguments
+
+    def _resolve_tool_name(self, tools: dict[str, dict[str, Any]] | None) -> str:
+        """Return the Web Search tool to call, from the gateway's tool list when target_name is unset."""
+        if tool_name := self._get_tool_name():
+            return tool_name
+        return self._find_tool_name(tools or {})
+
+    def _check_filter_support(self, tool_name: str, tools: dict[str, dict[str, Any]]) -> None:
+        """Fail a filtered search on a connector without filters, which would ignore them and return any result."""
+        if tool_name not in tools:
+            # An unknown target fails on the call itself with the gateway's own error.
+            return
+        if "filters" not in (tools[tool_name].get("properties") or {}):
+            raise AgentCoreGatewayError(
+                f"The Web Search tool {tool_name} does not support domain or date filters, so they would be ignored. "
+                "Upgrade the target's connector to version 1.2.0 or later, or search without filters."
+            )
+        self._tools_with_filters.add(tool_name)
+
+    def _needs_tool_list(self, arguments: dict[str, Any]) -> bool:
+        if not self.target_name:
+            return True
+        return "filters" in arguments and self._get_tool_name() not in self._tools_with_filters
 
     @staticmethod
     def _decode_payload(tool_result: dict[str, Any]) -> dict[str, Any]:
@@ -221,8 +249,8 @@ class BedrockAgentCoreWebSearchTool(ConnectionNode):
             raise AgentCoreGatewayError(f"Web Search returned text that is not a JSON object: {text[:200]}")
         return payload
 
-    @staticmethod
-    def _format_search_results(results: list[dict[str, Any]]) -> str:
+    @classmethod
+    def _format_search_results(cls, results: list[dict[str, Any]]) -> str:
         if not results:
             return "No results returned by web search."
 
@@ -231,13 +259,18 @@ class BedrockAgentCoreWebSearchTool(ConnectionNode):
             url = result.get("url")
             formatted_results.append(f"### Result {index}: {result.get('title') or DEFAULT_RESULT_TITLE}")
             formatted_results.append(f"- URL: [{url}]({url})" if url else "- URL: Not available")
-            if published_date := result.get("publishedDate"):
+            if published_date := cls._published_date(result):
                 formatted_results.append(f"- Published: {published_date}")
             if text := (result.get("text") or "").strip():
                 formatted_results.append(f"- Content: {text}")
             formatted_results.append("")
 
         return "\n".join(formatted_results).strip()
+
+    @staticmethod
+    def _published_date(result: dict[str, Any]) -> str:
+        published_date = str(result.get("publishedDate") or "").strip()
+        return "" if published_date.lower() == UNKNOWN_PUBLISHED_DATE else published_date
 
     @staticmethod
     def _format_sources(results: list[dict[str, Any]]) -> list[str]:
@@ -260,7 +293,7 @@ class BedrockAgentCoreWebSearchTool(ConnectionNode):
                 {
                     "url": result.get("url") or "",
                     "title": result.get("title") or "",
-                    "published_date": result.get("publishedDate") or "",
+                    "published_date": self._published_date(result),
                     "text": result.get("text") or "",
                 }
                 for result in results
@@ -296,7 +329,10 @@ class BedrockAgentCoreWebSearchTool(ConnectionNode):
         arguments = self._build_arguments(input_data)
         try:
             with self._get_gateway_client().session() as session:
-                tool_name = self._get_tool_name() or self._find_tool_name(session.list_tool_names())
+                tools = session.list_tools() if self._needs_tool_list(arguments) else None
+                tool_name = self._resolve_tool_name(tools)
+                if tools is not None and "filters" in arguments:
+                    self._check_filter_support(tool_name, tools)
                 payload = self._decode_payload(session.call_tool(tool_name, arguments))
         except Exception as e:
             raise self._wrap_search_exception(e)
@@ -316,7 +352,10 @@ class BedrockAgentCoreWebSearchTool(ConnectionNode):
             # Creating the client reads the AWS configuration files.
             gateway_client = self._gateway_client or await asyncio.to_thread(self._get_gateway_client)
             async with gateway_client.async_session() as session:
-                tool_name = self._get_tool_name() or self._find_tool_name(await session.list_tool_names())
+                tools = await session.list_tools() if self._needs_tool_list(arguments) else None
+                tool_name = self._resolve_tool_name(tools)
+                if tools is not None and "filters" in arguments:
+                    self._check_filter_support(tool_name, tools)
                 payload = self._decode_payload(await session.call_tool(tool_name, arguments))
         except Exception as e:
             raise self._wrap_search_exception(e)
