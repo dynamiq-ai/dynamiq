@@ -4,7 +4,7 @@ import io
 import typing
 from collections import UserString
 from copy import deepcopy
-from functools import update_wrapper, wraps
+from functools import singledispatch, singledispatchmethod, update_wrapper, wraps
 from types import BuiltinFunctionType, FunctionType, MethodType, ModuleType
 from typing import Any, Callable, ClassVar, Literal
 
@@ -183,9 +183,11 @@ def make_safe_print(printer: Callable[..., Any]):
 # io.open_code are separate objects). collections.UserString.format delegates to str.format in library
 # code, past the str.format guard, so the class itself is refused. functools.update_wrapper and wraps run
 # a caller-named getattr/setattr in library code, which copies arbitrary dunders (including __code__ of a
-# shared function and __globals__ into the snippet), so both are refused. typing.get_type_hints,
-# ForwardRef and evaluate_forward_ref evaluate string annotations with the real eval, which CPython
-# compiles outside RestrictedPython, so all three are refused; typing is otherwise safe.
+# shared function and __globals__ into the snippet), so both are refused, and singledispatch and
+# singledispatchmethod are refused because their register() runs typing.get_type_hints on the registered
+# function, evaluating its string annotations. typing.get_type_hints, ForwardRef and evaluate_forward_ref
+# evaluate string annotations with the real eval, which CPython compiles outside RestrictedPython, so all
+# three are refused; typing is otherwise safe.
 _FORBIDDEN_BUILTINS = frozenset(
     obj
     for obj in (
@@ -201,6 +203,8 @@ _FORBIDDEN_BUILTINS = frozenset(
         UserString,
         update_wrapper,
         wraps,
+        singledispatch,
+        singledispatchmethod,
         typing.get_type_hints,
         typing.ForwardRef,
         getattr(typing, "evaluate_forward_ref", None),
