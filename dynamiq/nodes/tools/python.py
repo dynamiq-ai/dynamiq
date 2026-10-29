@@ -2,7 +2,7 @@ import ast
 import builtins
 import io
 from copy import deepcopy
-from types import ModuleType
+from types import BuiltinFunctionType, FunctionType, MethodType, ModuleType
 from typing import Any, Callable, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -22,9 +22,11 @@ from dynamiq.utils.lazy_imports import optional_dependency_error
 from dynamiq.utils.logger import logger
 
 # Modules exposed to restricted code by default: pure-Python standard library only. These are safe to
-# offer to untrusted code because they grant no process, filesystem or native-code access. "operator" is
-# deliberately excluded: operator.attrgetter and methodcaller call C getattr, bypassing every guard.
-# "io" is kept for StringIO and BytesIO, but its file openers are refused through _FORBIDDEN_BUILTINS.
+# offer to untrusted code because they grant no process, filesystem or native-code access. Some stdlib
+# modules are deliberately excluded because they resolve attributes or eval code in C, outside every
+# guard: "operator" (attrgetter, methodcaller), "string" (Formatter walks dunder fields) and "typing"
+# (get_type_hints and ForwardRef eval string annotations). "io" is kept for StringIO and BytesIO, but its
+# file openers are refused through _FORBIDDEN_BUILTINS.
 DEFAULT_ALLOWED_MODULES = frozenset(
     {
         "base64",
@@ -42,9 +44,7 @@ DEFAULT_ALLOWED_MODULES = frozenset(
         "random",
         "re",
         "statistics",
-        "string",
         "time",
-        "typing",
         "uuid",
     }
 )
@@ -209,30 +209,36 @@ def _is_blocked_attr_name(name: str) -> bool:
 def _is_shared_write_target(obj: Any) -> bool:
     """Report whether obj is shared across runs, so mutating it would leak state between them.
 
-    A module, and any class that an allowed module defines, live in the process rather than in a single
-    run's globals, so writing to them would affect every run and tenant. A class the running snippet
-    defines has __module__ "__main__" and is recreated for each run, so writing to it is allowed; its
-    instances are always writable. A snippet cannot disguise a shared class as its own, since changing that
-    class's __module__ is itself a blocked write.
+    A module, and the classes and functions an allowed module defines, live in the process rather than in
+    a single run's globals, so writing to them would affect every run and tenant (for example changing
+    json.dumps.__defaults__). A class or function the running snippet defines has __module__ "__main__"
+    and is recreated for each run, so writing to it is allowed; instances are always writable. A snippet
+    cannot disguise a shared object as its own, since changing its __module__ is itself a blocked write.
     """
     if isinstance(obj, ModuleType):
         return True
-    if isinstance(obj, type):
+    if isinstance(obj, (type, FunctionType, MethodType, BuiltinFunctionType)):
         return getattr(obj, "__module__", None) != "__main__"
     return False
 
 
 def guarded_write(obj, value=None):
-    """RestrictedPython write guard. Writing to a shared module or class is refused (see above)."""
+    """RestrictedPython write guard. Writing to a shared module, class or function is refused (see above)."""
     if _is_shared_write_target(obj):
-        raise TypeError("Writing attributes on a module or class is not allowed")
+        raise TypeError("Writing attributes on a shared module, class or function is not allowed")
     return value if value is not None else obj
 
 
 def safe_setattr(obj: Any, name: str, value: Any) -> None:
-    """setattr builtin that refuses to mutate a shared module or class (see _is_shared_write_target)."""
+    """setattr builtin: refuses a private name and any shared module, class or function target.
+
+    The compiler rejects a private name and a shared target in attribute-write syntax, but the setattr
+    builtin bypasses both, so both checks are repeated here.
+    """
+    if _is_blocked_attr_name(name):
+        raise AttributeError(f'"{name}" is not an allowed attribute name')
     if _is_shared_write_target(obj):
-        raise TypeError("Setting attributes on a module or class is not allowed")
+        raise TypeError("Setting attributes on a shared module, class or function is not allowed")
     setattr(obj, name, value)
 
 
@@ -251,7 +257,9 @@ def _forbidden_value_reason(value: Any, allowed_modules: frozenset[str]) -> str 
     """Return why value is off limits, or None if it is allowed to cross into restricted code.
 
     A module is refused unless its top-level package is in allowed_modules and not forbidden; a process,
-    filesystem or code-execution builtin (open, eval, ...) is refused by identity. Everything else passes.
+    filesystem or code-execution builtin (open, eval, ...) is refused by identity; a ctypes object is
+    refused by its type, so a native handle from any path (numpy.ctypeslib.load_library) cannot be used.
+    Everything else passes.
     """
     if isinstance(value, ModuleType):
         root_module_name = (getattr(value, "__name__", "") or "").split(".")[0]
@@ -260,6 +268,8 @@ def _forbidden_value_reason(value: Any, allowed_modules: frozenset[str]) -> str 
         return None
     if any(value is forbidden for forbidden in _FORBIDDEN_BUILTINS):
         return "builtin"
+    if (getattr(type(value), "__module__", "") or "").split(".")[0] in ("ctypes", "_ctypes"):
+        return "ctypes object"
     return None
 
 
@@ -312,21 +322,45 @@ def _expand_fromlist(module: ModuleType, fromlist: tuple[str, ...]) -> list[str]
     return names
 
 
+def _is_str_type(obj: Any) -> bool:
+    """Report whether obj is a str (or str subclass, or the str type itself)."""
+    return isinstance(obj, str) or (isinstance(obj, type) and issubclass(obj, str))
+
+
 def _make_guarded_getattr(allowed_modules: frozenset[str]) -> Callable[..., Any]:
-    """Build a _getattr_ that forbids reaching a forbidden module or builtin through an attribute.
+    """Build a _getattr_ that forbids reaching a forbidden module, builtin or ctypes object by attribute.
 
     RestrictedPython's import guard only checks the "import" statement, but allow-listed modules re-export
     other modules and builtins as plain attributes (numpy.ctypeslib.ctypes, urllib.request.os, io.open).
-    Enforcing the allow-list on every attribute closes that whole class without naming each path.
+    Enforcing the allow-list on every attribute closes that whole class without naming each path. str.format
+    and format_map are refused too: their replacement fields resolve attributes in C, past every guard.
     """
 
     def guarded_getattr(obj: Any, name: str, *args: Any, **kwargs: Any) -> Any:
+        if name in ("format", "format_map") and _is_str_type(obj):
+            raise AttributeError("str.format and str.format_map are not allowed; use an f-string")
         value = default_guarded_getattr(obj, name, *args, **kwargs)
         if reason := _forbidden_value_reason(value, allowed_modules):
             raise ImportError(f"Access to {reason} through '{name}' is not allowed")
         return value
 
     return guarded_getattr
+
+
+def _make_guarded_getitem(allowed_modules: frozenset[str]) -> Callable[..., Any]:
+    """Build a _getitem_ that applies the same forbidden-value check as attribute access.
+
+    Subscription can also hand back a forbidden object (a CDLL function by ordinal, a module from a
+    __dict__-like mapping), and RestrictedPython's default getitem does not look at the result.
+    """
+
+    def guarded_getitem(obj: Any, index: Any) -> Any:
+        value = default_guarded_getitem(obj, index)
+        if reason := _forbidden_value_reason(value, allowed_modules):
+            raise ImportError(f"Access to {reason} by subscription is not allowed")
+        return value
+
+    return guarded_getitem
 
 
 def get_restricted_globals(allowed_modules: list[str] | frozenset[str] | None = None) -> dict:
@@ -343,6 +377,7 @@ def get_restricted_globals(allowed_modules: list[str] | frozenset[str] | None = 
 
     restricted_import = _make_restricted_import(allowed)
     guarded_getattr = _make_guarded_getattr(allowed)
+    guarded_getitem = _make_guarded_getitem(allowed)
 
     def safe_getattr(obj: Any, name: str, default=None) -> Any:
         """Guarded getattr builtin: the allow-list and dunder rules apply as in compiled attribute access.
@@ -428,7 +463,7 @@ def get_restricted_globals(allowed_modules: list[str] | frozenset[str] | None = 
             "zip": zip,
             "__import__": restricted_import,
             "_getattr_": guarded_getattr,
-            "_getitem_": default_guarded_getitem,
+            "_getitem_": guarded_getitem,
             "_getiter_": default_guarded_getiter,
             "__metaclass__": type,
             "__name__": "__main__",
