@@ -793,6 +793,21 @@ def test_python_node_allows_dotted_submodule_import_within_allow_list():
     assert result.output["content"] == "json.decoder"
 
 
+def test_python_node_forwardref_class_attribute_access_blocked():
+    """A ForwardRef reached as a class via type(f)/f.__class__ cannot expose evaluate(): attribute access
+    on the ForwardRef class is refused, so the 3.14 eval entry point stays closed on the default config."""
+    code = (
+        "import typing\n"
+        "def run(input_data):\n"
+        "    for f in typing.get_args(typing.List['1+1']):\n"
+        "        return str(type(f).evaluate)\n"
+    )
+
+    result = Python(code=code).run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+
+
 def test_python_node_description_is_honest_about_imports_and_requests():
     """The agent-facing description must not claim the whole stdlib imports or present requests as opt-in,
     while a caller-supplied description (used as a tool label elsewhere) is still respected."""

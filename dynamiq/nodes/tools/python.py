@@ -212,6 +212,8 @@ _FORBIDDEN_BUILTINS = frozenset(
         typing.get_type_hints,
         typing.ForwardRef,
         getattr(typing, "evaluate_forward_ref", None),
+        getattr(typing.ForwardRef, "evaluate", None),
+        getattr(typing.ForwardRef, "_evaluate", None),
     )
     if obj is not None
 )
@@ -442,9 +444,10 @@ def _make_guarded_getattr(allowed_modules: frozenset[str]) -> Callable[..., Any]
     """
 
     def guarded_getattr(obj: Any, name: str, *args: Any, **kwargs: Any) -> Any:
-        # Backstop for a ForwardRef instance smuggled past the value check (e.g. by unpacking get_args):
-        # refuse any attribute access on it, so evaluate() / _evaluate() cannot be reached.
-        if isinstance(obj, typing.ForwardRef):
+        # Backstop for a ForwardRef smuggled past the value check: an instance unpacked from get_args, or
+        # the class itself reached through type(f) or the whitelisted f.__class__. Refuse attribute access
+        # on both, so evaluate()/_evaluate() cannot be reached on 3.14 (type(f).evaluate(f)).
+        if obj is typing.ForwardRef or isinstance(obj, typing.ForwardRef):
             raise ImportError("Access to typing.ForwardRef is not allowed")
         value = default_guarded_getattr(obj, name, *args, **kwargs)
         if reason := _forbidden_value_reason(value, allowed_modules):
