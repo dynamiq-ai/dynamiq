@@ -13,7 +13,7 @@ from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig, Che
 from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.node import NodeDependency
-from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.human_feedback import (
     HFStreamingInputEventMessage,
     HFStreamingInputEventMessageData,
@@ -62,11 +62,11 @@ def make_pipeline():
 
 
 def make_pipeline_with_python():
-    """Input -> Python -> LLM -> Output pipeline."""
+    """Input -> PythonMonty -> LLM -> Output pipeline."""
     inp = Input(id="input", name="Input")
-    py = Python(
+    py = PythonMonty(
         id="python",
-        name="Python",
+        name="PythonMonty",
         code='def run(input_data): return {"processed": input_data.get("value", 0) * 10}',
         depends=[NodeDependency(inp)],
     )
@@ -83,7 +83,7 @@ def make_agent_pipeline():
         connection=connections.OpenAI(api_key=TEST_API_KEY),
         is_postponed_component_init=True,
     )
-    calc_tool = Python(
+    calc_tool = PythonMonty(
         id=CALC_TOOL_ID,
         name="calculator",
         description="Calculator tool for math operations",
@@ -189,7 +189,7 @@ class TestWorkflowSuccessCheckpoint:
 
     @pytest.mark.parametrize("backend_type", ["in_memory", "file"])
     def test_multi_step_pipeline_preserves_intermediate_outputs(self, mocker, backend_factory, backend_type):
-        """Input -> Python -> LLM -> Output: verify intermediate node outputs are captured."""
+        """Input -> PythonMonty -> LLM -> Output: verify intermediate node outputs are captured."""
         backend = backend_factory(backend_type)
         mock_llm_success(mocker)
 
@@ -264,13 +264,13 @@ class TestWorkflowFailureCheckpoint:
 
     @pytest.mark.parametrize("backend_type", ["in_memory", "file"])
     def test_python_failure_in_multi_step(self, mocker, backend_factory, backend_type):
-        """Python node fails after Input succeeds: checkpoint captures Input as completed."""
+        """PythonMonty node fails after Input succeeds: checkpoint captures Input as completed."""
         backend = backend_factory(backend_type)
 
         inp = Input(id="input", name="Input")
-        failing_py = Python(
+        failing_py = PythonMonty(
             id="failing-python",
-            name="Failing Python",
+            name="Failing PythonMonty",
             code='def run(input_data): raise ValueError("Data validation failed")',
             depends=[NodeDependency(inp)],
         )
@@ -760,11 +760,11 @@ class TestInputStreamingTimeoutCheckpoint:
         assert second.status == RunnableStatus.SUCCESS
 
     def test_streaming_approval_timeout_checkpoint_recoverable(self, mocker):
-        """A Python node opens a stream wait only because of ApprovalConfig(STREAM);
+        """A PythonMonty node opens a stream wait only because of ApprovalConfig(STREAM);
         on timeout, on_input_timeout fires, the checkpoint is saved, and resume completes."""
         spy = mocker.spy(CheckpointContext, "save_on_input_timeout")
         queue = Queue()
-        node = Python(
+        node = PythonMonty(
             id=INPUT_TIMEOUT_NODE_ID,
             name="approval-gated-python",
             code='def run(input_data): return {"result": "ran"}',

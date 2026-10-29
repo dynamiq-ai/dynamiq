@@ -8,8 +8,8 @@ from pydantic import BaseModel
 
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
-from dynamiq.nodes.tools.python import Python
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.feedback import ApprovalConfig, FeedbackMethod
 from dynamiq.types.streaming import StreamingConfig
@@ -53,7 +53,7 @@ def run_agent(request: str, input_queue: Queue, send_handler: AsyncStreamingIter
     """
     llm = setup_llm(model_name="gpt-5.1")
 
-    email_sender_tool = Python(
+    email_sender_tool = PythonMonty(
         name="EmailSenderTool",
         description="Sends email to the user. Put all email in string under 'email' key.",
         code=PYTHON_TOOL_CODE,

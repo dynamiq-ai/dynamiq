@@ -25,14 +25,14 @@ from dynamiq.nodes.agents.hooks import (
 from dynamiq.nodes.detectors import PromptInjectionDetector
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.operators.operators import Map
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
-from dynamiq.nodes.tools.python import Python
 from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader, WorkflowYAMLLoaderException
 from dynamiq.types.feedback import FeedbackMethod
 
 
 class DenyForbidden(Hook):
-    """A Python hook referenced from YAML by its dotted path."""
+    """A PythonMonty hook referenced from YAML by its dotted path."""
 
     forbidden: str = "DROP TABLE"
 
@@ -78,7 +78,9 @@ def make_agent(agent_id="agent", hooks=None) -> Agent:
         name=f"agent {agent_id}",
         llm=OpenAI(id=f"llm-{agent_id}", connection=OpenAIConnection(id="conn", api_key="k"), model="gpt-4o"),
         role="helper",
-        tools=[Python(id=f"py-{agent_id}", name="python-tool", code="def run(input_data): return {'content': 'ok'}")],
+        tools=[
+            PythonMonty(id=f"py-{agent_id}", name="python-tool", code="def run(input_data): return {'content': 'ok'}")
+        ],
         hooks=make_hooks() if hooks is None else hooks,
     )
 

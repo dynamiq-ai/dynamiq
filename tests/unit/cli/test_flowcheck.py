@@ -393,7 +393,7 @@ def test_a_judgement_node_is_checked_the_way_the_platform_checks_it():
     found = errors_of(
         flow_with(
             judgement(
-                judge={"type": "dynamiq.nodes.tools.Python"},
+                judge={"type": "dynamiq.nodes.tools.PythonMonty"},
                 questions=[
                     {"id": "q1", "name": "is urgent", "type": "maybe", "instructions": " "},
                     {
@@ -423,7 +423,7 @@ def test_a_judgement_node_is_checked_the_way_the_platform_checks_it():
     assert [e for e in sampled if "sampling needs an LLM or agent judge" in e], sampled
 
     for fragment in (
-        "`judge` must be a System One, an LLM or an agent node object, got 'dynamiq.nodes.tools.Python'",
+        "`judge` must be a System One, an LLM or an agent node object, got 'dynamiq.nodes.tools.PythonMonty'",
         "question 'is urgent' has a name that is not an identifier",
         "type 'maybe' is not one of noul, choice, score",
         "question 'is urgent' has no `instructions`",
@@ -537,7 +537,7 @@ def test_a_judgement_that_judges_an_agent_answer_is_not_told_to_become_a_tool():
     python = {
         "id": "after",
         "name": "after",
-        "type": "dynamiq.nodes.tools.Python",
+        "type": "dynamiq.nodes.tools.PythonMonty",
         "depends": [{"node": "writer"}],
     }
     assert [w for w in warnings_of(flow_with(agent, python)) if "standalone step" in w]

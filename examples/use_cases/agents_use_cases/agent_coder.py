@@ -10,7 +10,7 @@ from dynamiq.callbacks import DynamiqTracingCallbackHandler, TracingCallbackHand
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import Anthropic as AnthropicLLM
-from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file import FileStoreConfig
@@ -24,9 +24,9 @@ AGENT_ROLE = """Senior Data Scientist and Programmer who plans before coding.
 
 Your workflow for every request:
 1. Inspect any uploaded files before heavy processing.
-Use the Python code executor to list files
+Use the PythonMonty code executor to list files
 and read small samples so you understand available sheets, columns, and data quality issues.
-2. When running Python inside the executor,
+2. When running PythonMonty inside the executor,
 ALWAYS load files through the injected helper functions (`read_file`, `list_files`, `describe_file`, etc.).
  Uploaded artifacts are not present on disk, so direct `open()` calls will fail.
 3. Start with lightweight exploration (head(), dtypes, unique values)
@@ -35,7 +35,7 @@ and describe findings in thoughts before jumping into aggregations.
 and guard your code accordingly by using pandas' tolerant parsing
 and explicit error handling. Explain how you resolved issues.
 5. When you have a clean understanding of the dataset, build well-structured,
-well-commented Python that produces the requested analytics.
+well-commented PythonMonty that produces the requested analytics.
 Return both the structured results and a concise narrative
 that highlights key insights, caveats, and any generated files.
 """
@@ -76,7 +76,7 @@ def read_file_as_bytesio(file_path: str, filename: str = None, description: str 
 
 def create_agent():
     """
-    Create and configure the agent with the Python code executor tool.
+    Create and configure the agent with the PythonMonty code executor tool.
 
     Returns:
         Agent: A configured Dynamiq agent ready to run.
@@ -93,7 +93,7 @@ def create_agent():
     file_store_backend = InMemoryFileStore()
     file_store_config = FileStoreConfig(enabled=True, backend=file_store_backend, agent_file_write_enabled=True)
 
-    tool = PythonCodeExecutor(name="code-executor")
+    tool = PythonMonty(name="code-executor")
 
     agent_software = Agent(
         name="Agent",

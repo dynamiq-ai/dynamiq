@@ -1,7 +1,7 @@
 """
 Example: Memory snapshot with the Dynamiq remote memory backend.
 
-Uses a Python tool so the agent produces tool-call / observation messages,
+Uses a PythonMonty tool so the agent produces tool-call / observation messages,
 then verifies snapshot semantics across two turns.
 
 Set the following environment variables (or replace the defaults below):
@@ -23,7 +23,7 @@ from dynamiq.memory import Memory, MemorySaveMode
 from dynamiq.memory.backends.dynamiq import Dynamiq as DynamiqBackend
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import MessageRole
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -49,7 +49,7 @@ def main():
         save_mode=MemorySaveMode.FULL,
     )
 
-    lookup_tool = Python(
+    lookup_tool = PythonMonty(
         name="company-lookup",
         description="Look up which company a person works at. Input: {'person': '<name>'}",
         code=(

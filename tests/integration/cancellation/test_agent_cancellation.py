@@ -1,5 +1,6 @@
 import threading
 import time
+from typing import ClassVar
 
 import pytest
 
@@ -10,7 +11,8 @@ from dynamiq.checkpoints.config import CheckpointConfig
 from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.node import NodeDependency
-from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools.function_tool import FunctionTool
+from dynamiq.nodes.tools.python import PythonInputSchema
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.cancellation import CanceledException, CancellationConfig
 
@@ -36,27 +38,37 @@ def make_agent_llm(node_id: str = AGENT_LLM_ID) -> llms.OpenAI:
     )
 
 
-SLOW_TOOL_CODE = """
-import time
-def run(input_data):
-    # Sleep in small increments. The agent's check_cancellation runs between
-    # tool calls (in _run_agent loop), so a cancel signal during this sleep
-    # will be caught at the next loop iteration.
-    sleep_total = 1.5
-    elapsed = 0.0
-    while elapsed < sleep_total:
-        time.sleep(0.05)
-        elapsed += 0.05
-    return {"content": f"step {input_data.get('step', '?')} done"}
-"""
+SLOW_TOOL_SECONDS = 1.5
 
 
-def make_calc_tool() -> Python:
-    return Python(
+class SlowCalculatorTool(FunctionTool):
+    """A calculator tool that blocks in-process for ~1.5s so a cancel can land mid-run.
+
+    FunctionTool runs a real in-process Python function, so time.sleep actually blocks; the Monty
+    subset has no time module and cannot sleep. The agent's check_cancellation runs between tool
+    calls, so a cancel during this sleep is caught at the next loop iteration.
+    """
+
+    name: str = "calculator"
+    description: str = "Calculator tool. Input: {'step': <n>}."
+    # Empty schema with extra allowed, like PythonMonty: the agent coerces the tool input through it
+    # but keeps "step" as an extra, and its empty model_fields add nothing to the ReAct prompt.
+    input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
+
+    def run_func(self, input_data, config=None, **kwargs):
+        step = dict(input_data).get("step", "?")
+        elapsed = 0.0
+        while elapsed < SLOW_TOOL_SECONDS:
+            time.sleep(0.05)
+            elapsed += 0.05
+        return f"step {step} done"
+
+
+def make_calc_tool() -> SlowCalculatorTool:
+    return SlowCalculatorTool(
         id=CALC_TOOL_ID,
         name="calculator",
         description="Calculator tool. Input: {'step': <n>}.",
-        code=SLOW_TOOL_CODE,
     )
 
 
@@ -285,7 +297,7 @@ class TestMultiAgentFlowCancellation:
             id="agent-1",
             name="Agent 1",
             llm=make_agent_llm("llm-1"),
-            tools=[Python(id="tool-1", name="calculator", description="calc", code=SLOW_TOOL_CODE)],
+            tools=[SlowCalculatorTool(id="tool-1", name="calculator", description="calc")],
             role="Test agent 1",
             max_loops=10,
         )
@@ -293,7 +305,7 @@ class TestMultiAgentFlowCancellation:
             id="agent-2",
             name="Agent 2",
             llm=make_agent_llm("llm-2"),
-            tools=[Python(id="tool-2", name="calculator", description="calc", code=SLOW_TOOL_CODE)],
+            tools=[SlowCalculatorTool(id="tool-2", name="calculator", description="calc")],
             role="Test agent 2",
             max_loops=10,
             depends=[NodeDependency(node=agent1)],

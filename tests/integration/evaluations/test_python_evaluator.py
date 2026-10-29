@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from dynamiq.evaluations import PythonEvaluator
@@ -98,3 +100,52 @@ def evaluate(answer, expected):
     evaluator = PythonEvaluator(code=user_code)
     with pytest.raises(ValueError, match="non-numeric"):
         evaluator.run_single(input_data)
+
+
+def test_python_evaluator_stdlib_and_comprehension():
+    # A realistic token-overlap metric: lower-case split, set intersection, a comprehension and math.
+    user_code = """
+import math
+
+def evaluate(answer, reference):
+    a = set(answer.lower().split())
+    r = set(reference.lower().split())
+    overlap = len([w for w in a if w in r])
+    return math.sqrt(overlap) / math.sqrt(max(len(r), 1))
+"""
+    evaluator = PythonEvaluator(code=user_code)
+    score = evaluator.run_single({"answer": "the cat sat", "reference": "the cat ran"})
+    assert abs(score - (math.sqrt(2) / math.sqrt(3))) < 0.01
+
+
+def test_python_evaluator_type_annotations():
+    user_code = """
+def evaluate(answer: int, expected: int) -> float:
+    return 1.0 if answer >= expected else 0.0
+"""
+    evaluator = PythonEvaluator(code=user_code)
+    assert evaluator.run_single({"answer": 10, "expected": 5}) == 1.0
+    assert evaluator.run_single({"answer": 3, "expected": 5}) == 0.0
+
+
+def test_python_evaluator_requires_evaluate_function():
+    user_code = """
+def score(answer):
+    return 1.0
+"""
+    with pytest.raises(ValueError, match="No function named 'evaluate'"):
+        PythonEvaluator(code=user_code)
+
+
+def test_python_evaluator_third_party_import_is_rejected():
+    # numpy is unavailable inside Monty; such a metric belongs in the runtime OS sandbox. The error is
+    # surfaced as a ValueError at run time rather than crashing the evaluator.
+    user_code = """
+import numpy as np
+
+def evaluate(values):
+    return float(np.mean(values))
+"""
+    evaluator = PythonEvaluator(code=user_code)
+    with pytest.raises(ValueError):
+        evaluator.run_single({"values": [1, 2, 3]})

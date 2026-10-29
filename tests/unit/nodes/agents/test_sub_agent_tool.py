@@ -13,9 +13,9 @@ from dynamiq.nodes.agents.base import ToolParams
 from dynamiq.nodes.agents.components import schema_generator
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.llms.base import ModelInfo
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME
-from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableResult, RunnableStatus
 from dynamiq.sandboxes.e2b import E2BSandbox
@@ -300,7 +300,7 @@ class TestAutoWrapping:
         assert SubAgentTool.INITIALIZED_HINT in wrapper.description
 
     def test_non_agent_tools_not_wrapped(self, test_llm):
-        python_tool = Python(code="def run(input_data): return input_data")
+        python_tool = PythonMonty(code="def run(input_data): return input_data")
         parent = Agent(
             name="Manager",
             llm=test_llm,
@@ -524,7 +524,7 @@ class TestDelegation:
         assert result is False
 
     def test_delegate_final_non_agent_tool(self, test_llm):
-        python_tool = Python(code="def run(input_data): return input_data")
+        python_tool = PythonMonty(code="def run(input_data): return input_data")
         parent = Agent(
             name="Manager",
             llm=test_llm,
@@ -723,7 +723,7 @@ class TestYamlRoundtrip:
                 "role": "You are a research agent.",
                 "tools": [
                     {
-                        "type": "dynamiq.nodes.tools.python.Python",
+                        "type": "dynamiq.nodes.tools.PythonMonty",
                         "code": "def run(input_data): return input_data",
                     },
                 ],
@@ -790,8 +790,8 @@ class TestYamlRoundtrip:
         assert agent_a.sandbox is not agent_b.sandbox, "Each factory agent must get its own sandbox"
         assert agent_a.sandbox.backend is not agent_b.sandbox.backend, "Each factory agent must get its own backend"
 
-        a_py_tools = [t for t in agent_a.tools if isinstance(t, Python)]
-        b_py_tools = [t for t in agent_b.tools if isinstance(t, Python)]
+        a_py_tools = [t for t in agent_a.tools if isinstance(t, PythonMonty)]
+        b_py_tools = [t for t in agent_b.tools if isinstance(t, PythonMonty)]
         assert len(a_py_tools) >= 1 and len(b_py_tools) >= 1
         assert a_py_tools[0] is not b_py_tools[0], "Each factory agent must get its own tool instances"
 

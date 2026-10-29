@@ -19,7 +19,7 @@ nodes:
       max_tokens: 2000
     tools:
       - id: py-tool
-        type: dynamiq.nodes.tools.Python
+        type: dynamiq.nodes.tools.PythonMonty
         name: Sum Calculator
         description: Computes the sum of the first n integers; expects input json input (n,"int")
         code: |
@@ -62,7 +62,7 @@ nodes:
           max_tokens: 2000
         tools:
           - id: py-tool
-            type: dynamiq.nodes.tools.Python
+            type: dynamiq.nodes.tools.PythonMonty
             name: Sum Calculator
             description: Computes the sum of the first n integers; expects json input ("n", int)
             code: |

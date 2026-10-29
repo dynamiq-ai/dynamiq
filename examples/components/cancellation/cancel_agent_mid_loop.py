@@ -4,7 +4,7 @@ import time
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.runnables import RunnableConfig
 from dynamiq.workflow import Workflow
 from examples.llm_setup import setup_llm
@@ -20,7 +20,7 @@ CANCEL_AFTER_SECONDS = 15.0
 def build_workflow():
     llm = setup_llm()
 
-    slow_tool = Python(
+    slow_tool = PythonMonty(
         name="slow-research",
         description="Performs deep research on a topic. Input: {'topic': '<topic>'}. Returns research results.",
         code="""

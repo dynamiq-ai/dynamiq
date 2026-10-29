@@ -33,7 +33,7 @@ nodes:
     max_loops: 6
     tools:
       - id: lookup-customer-tool
-        type: dynamiq.nodes.tools.python.Python
+        type: dynamiq.nodes.tools.PythonMonty
         name: lookup-customer
         description: Look up a customer by customer_id. Returns their profile.
         code: |
@@ -42,7 +42,7 @@ nodes:
               flag = input_data.get("include_internal")
               return '{"public": {"name": "Ann Lee", "plan": "pro", "contact": "ann.lee@example.com"}, "internal": {"notes": "SECRET-INTERNAL-NOTE", "include_internal": "%s"}}' % flag
       - id: delete-customer-tool
-        type: dynamiq.nodes.tools.python.Python
+        type: dynamiq.nodes.tools.PythonMonty
         name: delete-customer
         description: Delete a customer by customer_id.
         code: |

@@ -9,7 +9,7 @@ from dynamiq.checkpoints.types import CheckpointStatus
 from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, AgentCheckpointState
-from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.llm_summarizer import SummarizerTool
 from dynamiq.nodes.tools.thinking_tool import ThinkingTool
 from dynamiq.sandboxes.base import SandboxConfig
@@ -422,7 +422,7 @@ class TestNodeApprovalCheckpoint:
     """Tests for Node approval response checkpoint persistence."""
 
     def test_node_saves_approval_response(self):
-        node = Python(id="n", name="N", code="def run(input_data): return {}")
+        node = PythonMonty(id="n", name="N", code="def run(input_data): return {}")
         node._pending_approval_response = ApprovalInputData(feedback="approved", is_approved=True, data={"k": "v"})
 
         state = node.to_checkpoint_state().model_dump()
@@ -430,7 +430,7 @@ class TestNodeApprovalCheckpoint:
         assert state["approval_response"]["is_approved"] is True
 
     def test_node_restores_approval_response(self):
-        node = Python(id="n", name="N", code="def run(input_data): return {}")
+        node = PythonMonty(id="n", name="N", code="def run(input_data): return {}")
         node.from_checkpoint_state(
             {
                 "approval_response": {"feedback": "yes", "is_approved": True, "data": {"r": "ok"}},
@@ -442,7 +442,7 @@ class TestNodeApprovalCheckpoint:
         assert node.is_resumed is True
 
     def test_node_without_approval_has_no_response(self):
-        node = Python(id="n", name="N", code="def run(input_data): return {}")
+        node = PythonMonty(id="n", name="N", code="def run(input_data): return {}")
         state = node.to_checkpoint_state().model_dump()
         assert "approval_response" not in state or state.get("approval_response") is None
 

@@ -20,7 +20,7 @@ from dynamiq.checkpoints.checkpoint import CheckpointStatus
 from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig
 from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableStatus
@@ -58,15 +58,15 @@ def create_parallel_agent_flow(
     behavior: CheckpointBehavior = CheckpointBehavior.APPEND,
     max_loops: int = 5,
 ):
-    """Agent with two Python tools and parallel_tool_calls_enabled."""
-    adder = Python(
+    """Agent with two PythonMonty tools and parallel_tool_calls_enabled."""
+    adder = PythonMonty(
         id=ADDER_TOOL_ID,
         name="adder",
         description='Adds two numbers a and b. Expects {"a": int, "b": int}.',
         code='def run(input_data): return {"result": input_data.get("a", 0) + input_data.get("b", 0)}',
         is_parallel_execution_allowed=True,
     )
-    multiplier = Python(
+    multiplier = PythonMonty(
         id=MULTIPLIER_TOOL_ID,
         name="multiplier",
         description='Multiplies two numbers x and y. Expects {"x": int, "y": int}.',
@@ -106,7 +106,7 @@ def create_subagent_flow(
 ):
     """Parent agent with a SubAgentTool wrapping a child agent."""
     child_llm = make_llm(node_id=CHILD_LLM_ID)
-    calc_tool = Python(
+    calc_tool = PythonMonty(
         id=CALC_TOOL_ID,
         name="calculator",
         description="Calculator tool for math.",
@@ -594,7 +594,7 @@ class TestSubAgentToolCheckpointState:
     def test_to_checkpoint_state_captures_call_count(self):
         """to_checkpoint_state returns SubAgentToolCheckpointState with call_count."""
         child_llm = make_llm(node_id=CHILD_LLM_ID)
-        calc = Python(
+        calc = PythonMonty(
             id=CALC_TOOL_ID,
             name="calculator",
             description="Calculator",
@@ -624,7 +624,7 @@ class TestSubAgentToolCheckpointState:
     def test_from_checkpoint_state_restores_call_count(self):
         """from_checkpoint_state restores _call_count from dict."""
         child_llm = make_llm(node_id=CHILD_LLM_ID)
-        calc = Python(
+        calc = PythonMonty(
             id=CALC_TOOL_ID,
             name="calculator",
             description="Calculator",
@@ -654,7 +654,7 @@ class TestSubAgentToolCheckpointState:
     def test_roundtrip_checkpoint_state(self):
         """to_checkpoint_state → dict → from_checkpoint_state roundtrip preserves call_count."""
         child_llm = make_llm(node_id=CHILD_LLM_ID)
-        calc = Python(
+        calc = PythonMonty(
             id=CALC_TOOL_ID,
             name="calculator",
             description="Calculator",

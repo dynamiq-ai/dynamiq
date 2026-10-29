@@ -9,7 +9,7 @@ finished credit check and the time to resume, and the run returns. The platform 
 run when it comes; this example moves the clock forward instead. The resumed run does not repeat the credit check,
 and when the payout fails for good, the error edge hands it to operations instead of failing the loan run.
 
-Runs offline: every step is a Python node and the checkpoint backend is in memory.
+Runs offline: every step is a PythonMonty node and the checkpoint backend is in memory.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -21,7 +21,7 @@ from dynamiq.checkpoints.config import CheckpointConfig
 from dynamiq.nodes import DependencyTrigger, ErrorHandling
 from dynamiq.nodes.operators import Delay
 from dynamiq.nodes.operators import delay as delay_module
-from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.utils import Input
 
 COOLING_OFF = timedelta(days=14)
@@ -50,18 +50,18 @@ def run(input_data):
 
 def build_flow(backend: InMemory) -> flows.Flow:
     application = Input(id="application")
-    credit_check = Python(id="credit-check", name="credit check", code=CREDIT_CHECK)
+    credit_check = PythonMonty(id="credit-check", name="credit check", code=CREDIT_CHECK)
     credit_check.depends_on(application)
     cooling_off = Delay(id="cooling-off", name="cooling-off period", duration_seconds=COOLING_OFF.total_seconds())
     cooling_off.depends_on(credit_check)
-    disburse = Python(
+    disburse = PythonMonty(
         id="disburse",
         name="disburse",
         code=DISBURSE,
         error_handling=ErrorHandling(max_retries=1, retry_interval_seconds=1),
     )
     disburse.depends_on([application, cooling_off])
-    notify_ops = Python(id="notify-ops", name="notify operations", code=NOTIFY_OPS)
+    notify_ops = PythonMonty(id="notify-ops", name="notify operations", code=NOTIFY_OPS)
     notify_ops.depends_on(disburse, trigger=DependencyTrigger.FAILURE)
     return flows.Flow(
         id="loan-disbursement",

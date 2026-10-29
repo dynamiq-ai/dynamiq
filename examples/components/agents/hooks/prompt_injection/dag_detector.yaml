@@ -29,7 +29,7 @@ nodes:
     max_loops: 5
     tools:
       - id: fetch-page-tool
-        type: dynamiq.nodes.tools.python.Python
+        type: dynamiq.nodes.tools.PythonMonty
         name: fetch-page
         description: Fetch a web page by url and return its text.
         code: |

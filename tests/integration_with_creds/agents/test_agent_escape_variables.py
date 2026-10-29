@@ -3,7 +3,7 @@ import pytest
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
@@ -58,8 +58,8 @@ def llm_instance():
 
 @pytest.fixture
 def string_length_tool_instance(python_tool_code):
-    logger.info("--- Creating Python tool (StringLengthTool) (Fixture) ---")
-    tool = Python(
+    logger.info("--- Creating PythonMonty tool (StringLengthTool) (Fixture) ---")
+    tool = PythonMonty(
         name="StringLengthTool",
         description="""Calculates the length of a given string. Input parameter: 'text' (string).""",
         code=python_tool_code,

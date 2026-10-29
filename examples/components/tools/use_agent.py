@@ -1,7 +1,7 @@
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.http_api_call import HttpApiCall, ResponseType
-from dynamiq.nodes.tools.python import Python
 from examples.llm_setup import setup_llm
 
 PYTHON_TOOL_CODE = """
@@ -16,7 +16,7 @@ if __name__ == "__main__":
     llm = setup_llm()
 
     # Create the PythonTool for web requests
-    web_request_tool = Python(
+    web_request_tool = PythonMonty(
         name="WebRequestTool",
         description="Makes a GET request to example.com and returns the response text",
         code=PYTHON_TOOL_CODE,

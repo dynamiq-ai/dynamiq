@@ -11,7 +11,7 @@ from dynamiq.connections import TogetherAI as TogetherAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms.togetherai import TogetherAI
-from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file import FileStoreConfig
@@ -22,7 +22,7 @@ from dynamiq.utils.logger import logger
 LOGGER = logging.getLogger(__name__)
 
 AGENT_ROLE = """
-You are a Senior Product Analytics Engineer. Use the Python code executor to inspect structured feedback datasets,
+You are a Senior Product Analytics Engineer. Use the PythonMonty code executor to inspect structured feedback datasets,
 surface key trends, and propose actionable follow-ups. Always:
 - Summarize the methodology and findings in markdown.
 """
@@ -62,7 +62,7 @@ def _create_agent() -> Agent:
     file_store_backend = InMemoryFileStore()
     file_store_config = FileStoreConfig(enabled=True, backend=file_store_backend, agent_file_write_enabled=True)
 
-    code_tool = PythonCodeExecutor(name="code-executor")
+    code_tool = PythonMonty(name="code-executor")
 
     return Agent(
         name="Feedback Analyst",

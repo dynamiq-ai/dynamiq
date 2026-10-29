@@ -18,7 +18,7 @@ from dynamiq.nodes.agents.prompts.overrides.gpt import (
 )
 from dynamiq.nodes.agents.prompts.secondary_instructions import DELEGATION_INSTRUCTIONS, DELEGATION_INSTRUCTIONS_XML
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import InferenceMode
 
 
@@ -56,7 +56,7 @@ def test_variables_refreshed_on_reset():
 )
 def test_agent_initialization_with_model_specific_prompts(test_llm, inference_mode, expected_delegation_text):
     """Test that Agent properly initializes with GPT model-specific prompts for all inference modes."""
-    python_tool = Python(code="def run(input_data): return input_data")
+    python_tool = PythonMonty(code="def run(input_data): return input_data")
     agent = Agent(
         name="TestAgent",
         id="test_agent",
@@ -212,7 +212,7 @@ def test_agent_serialization_excludes_system_prompt_manager(test_llm):
 
 def test_instructions_field(test_llm):
     """Test that instructions render in prompt, coexist with other operational instructions, and handle Jinja syntax."""
-    python_tool = Python(code="def run(input_data): return input_data")
+    python_tool = PythonMonty(code="def run(input_data): return input_data")
     agent = Agent(
         name="TestAgent",
         llm=test_llm,

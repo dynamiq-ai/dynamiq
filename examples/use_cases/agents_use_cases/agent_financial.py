@@ -6,7 +6,7 @@ from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
 AGENT_ROLE = (
-    "A helpful and general-purpose AI assistant with strong skills in language, Python, "
+    "A helpful and general-purpose AI assistant with strong skills in language, PythonMonty, "
     "and Linux command-line operations. The goal is to provide concise answers to users. "
     "Additionally, generate code to solve tasks and run it accurately. "
     "Before answering, create a plan to solve the task. You can search for any API and "

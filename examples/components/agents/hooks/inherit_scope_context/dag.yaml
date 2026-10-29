@@ -34,14 +34,14 @@ nodes:
       mode: final
     tools:
       - id: crm-lookup-tool
-        type: dynamiq.nodes.tools.python.Python
+        type: dynamiq.nodes.tools.PythonMonty
         name: crm-lookup
         description: Look up a customer. Input fields - query, tenant.
         code: |
           def run(input_data):
               return "record for %s in tenant %s" % (input_data.get("query"), input_data.get("tenant"))
       - id: send-email-tool
-        type: dynamiq.nodes.tools.python.Python
+        type: dynamiq.nodes.tools.PythonMonty
         name: send-email
         description: Send an email. Input fields - to, subject, body.
         code: |
@@ -62,7 +62,7 @@ nodes:
             model: gpt-4o-mini
           max_loops: 6
           tools:
-            - type: dynamiq.nodes.tools.python.Python
+            - type: dynamiq.nodes.tools.PythonMonty
               name: crm-lookup
               description: Look up a customer. Input fields - query, tenant.
               code: |

@@ -34,14 +34,14 @@ nodes:
     max_loops: 6
     tools:
       - id: lookup-customer-tool
-        type: dynamiq.nodes.tools.python.Python
+        type: dynamiq.nodes.tools.PythonMonty
         name: lookup-customer
         description: Look up a customer by customer_id. Returns their record as JSON text.
         code: |
           def run(input_data):
               return '{"name": "Ann Lee", "account_manager": "boss@example.com", "plan": "pro"}'
       - id: send-email-tool
-        type: dynamiq.nodes.tools.python.Python
+        type: dynamiq.nodes.tools.PythonMonty
         name: send-email
         description: Send an email. Input fields - to, subject, body.
         code: |

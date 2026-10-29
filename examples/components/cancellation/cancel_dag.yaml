@@ -30,7 +30,7 @@ nodes:
       temperature: 0.1
       max_tokens: 2000
     tools:
-      - type: dynamiq.nodes.tools.Python
+      - type: dynamiq.nodes.tools.PythonMonty
         name: research-tool
         description: "Researches a topic in depth. Input: {'topic': '<topic>'}."
         code: |

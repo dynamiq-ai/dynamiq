@@ -15,7 +15,7 @@ from dynamiq.nodes.llms.base import FallbackConfig, FallbackTrigger
 from dynamiq.nodes.llms.mistral import Mistral, MistralConnection
 from dynamiq.nodes.node import ErrorHandling, InputTransformer, NodeDependency
 from dynamiq.nodes.operators import Choice, ChoiceOption
-from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import Behavior, ChoiceCondition, ConditionOperator
 from dynamiq.nodes.utils import Output
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
@@ -1139,7 +1139,7 @@ def run(input_data):
         python_return_if_openai_success=python_return_if_openai_success,
         python_return_if_openai_failed_or_skipped=python_return_if_openai_failed_or_skipped,
     )
-    python_node = Python(
+    python_node = PythonMonty(
         id="python",
         code=python_code,
         depends=[NodeDependency(choice_node)],

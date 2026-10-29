@@ -1,6 +1,6 @@
 from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
-from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.types.feedback import ApprovalConfig, FeedbackMethod
 from examples.llm_setup import setup_llm
@@ -20,7 +20,7 @@ def run_agent(query) -> dict:
     """
     llm = setup_llm()
 
-    email_sender_tool = Python(
+    email_sender_tool = PythonMonty(
         name="EmailSenderTool",
         description="Sends email. Put all email in string under 'email' key. ",
         code=PYTHON_TOOL_CODE,

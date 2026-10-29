@@ -17,7 +17,7 @@ from dynamiq.memory import Memory
 from dynamiq.memory.backends import InMemory
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import MessageRole
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
@@ -28,7 +28,7 @@ SESSION_ID = "session-1"
 
 
 def _slow_tool_factory():
-    return Python(
+    return PythonMonty(
         id=str(uuid.uuid4()),
         name="search_tool",
         description="Pretend search tool",
@@ -142,7 +142,7 @@ def test_fc_agent_recovers_when_tool_call_arguments_are_malformed_json():
         connection=conn,
         prompt=prompts.Prompt(messages=[prompts.Message(role="user", content="{{input}}")]),
     )
-    tool = Python(
+    tool = PythonMonty(
         id=str(uuid.uuid4()),
         name="search_tool",
         description="Pretend search tool",

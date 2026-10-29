@@ -11,10 +11,10 @@ from dynamiq.nodes import Behavior
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.operators import Map
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME
-from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
@@ -73,7 +73,7 @@ def mock_tools_http(mocker):
 
 
 def test_map_react_agent_parallel_streams_isolated(mock_llm_executor, mock_tools_http):
-    python_tool = Python(
+    python_tool = PythonMonty(
         name="noop-tool",
         description="Simple tool returning static content",
         code="""

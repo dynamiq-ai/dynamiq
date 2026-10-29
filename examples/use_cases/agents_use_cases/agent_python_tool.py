@@ -4,7 +4,7 @@ import os
 
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import Anthropic as AnthropicLLM
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.storages.file import FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
@@ -12,16 +12,16 @@ from dynamiq.utils.logger import logger
 
 AGENT_ROLE = """
 Senior Data Scientist and Programmer with the ability to write well-structured Python code.
-You have access to Python tools to analyze data and generate statistics from uploaded files.
+You have access to PythonMonty tools to analyze data and generate statistics from uploaded files.
 Generally, you follow these rules:
     - ALWAYS FORMAT YOUR RESPONSE IN MARKDOWN.
     - Use double quotes for property names.
     - Ensure the code is correct and runnable; reiterate if it does not work.
-    - When files are provided, use the Python tool to analyze them and generate reports.
+    - When files are provided, use the PythonMonty tool to analyze them and generate reports.
 """
 
 PROMPT = """
-Analyze the provided CSV file and compute comprehensive statistics using the Python tool.
+Analyze the provided CSV file and compute comprehensive statistics using the PythonMonty tool.
 Generate a detailed markdown report with statistical analysis including
  mean, standard deviation, min, max, and count for all numeric columns.
 """
@@ -160,7 +160,7 @@ def create_agent():
     Returns:
         Agent: A configured Dynamiq agent ready to run.
     """
-    statistics_tool = Python(
+    statistics_tool = PythonMonty(
         name="statistics_tool",
         code=statistics_requirements,
         description="Get required statistics from the file.",

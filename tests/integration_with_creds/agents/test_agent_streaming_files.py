@@ -2,7 +2,7 @@
 
 Verifies that BytesIO objects produced by tools are correctly serialized (base64)
 in streaming events and never leak as raw binary or SerializationIterator strings.
-Uses a Python tool that generates dummy files.
+Uses a PythonMonty tool that generates dummy files.
 """
 
 import asyncio
@@ -24,7 +24,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
@@ -71,7 +71,7 @@ def llm():
 
 @pytest.fixture(scope="module")
 def file_tool():
-    return Python(
+    return PythonMonty(
         name="FileCreator",
         description=(
             "Creates a binary file from text content. "

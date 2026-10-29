@@ -87,8 +87,6 @@ from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileSearc
 from dynamiq.nodes.tools.mcp import MCP_HTTP_HEADERS_FIELD, MCPServer
 from dynamiq.nodes.tools.memory_store_tool import MemoryStoreTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsTool
-from dynamiq.nodes.tools.python import Python
-from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.nodes.tools.skills_tool import SkillsTool
 from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.nodes.types import InferenceMode
@@ -1877,18 +1875,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
         Sandbox files are only collected when the LLM explicitly references paths
         in ``map_from_storage`` fields.  Otherwise the file store is used, which
-        means ``Python`` and ``PythonCodeExecutor`` tools always receive files
-        from the file store (never from the sandbox).
+        means a file-enabled tool always receives files from the file store (never from the sandbox).
         """
         if not tool.is_files_allowed:
             return
-
-        # Wiring the store is independent of whether anything is in it: a
-        # PythonCodeExecutor refuses to run without one, and the store is empty
-        # on any run where the user uploaded no files — which is most of them.
-        if isinstance(tool, PythonCodeExecutor) and not tool.file_store and self.file_store_backend:
-            tool.file_store = self.file_store_backend
-            logger.debug(f"Agent {self.name} - {self.id}: injected file_store into PythonCodeExecutor tool {tool.name}")
 
         file_paths = self._extract_file_paths_from_input(tool, merged_input)
 
@@ -1918,9 +1908,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 merged_input[field_name] = [files_map.get(v, v) if isinstance(v, str) else v for v in value]
             elif isinstance(value, str):
                 merged_input[field_name] = files_map.get(value, value)
-
-        if isinstance(tool, Python):
-            merged_input["files"] = files
 
     def _own_hook_pairs(self) -> list[tuple[str, Hook]]:
         """``(state key, hook)``: the key is the hook's name and its rank among the hooks of that name, not its list

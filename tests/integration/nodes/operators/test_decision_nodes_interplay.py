@@ -6,7 +6,7 @@ from dynamiq.nodes import InputTransformer
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.operators import Choice, ChoiceOption, DecisionTable, Expression, Map
-from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import ChoiceCondition, ConditionOperator, DecisionRule, ExpressionItem, NamedField
 from dynamiq.nodes.utils import Input, Output
 from dynamiq.nodes.validators import ValidChoices
@@ -47,9 +47,9 @@ def eligibility_table(**overrides) -> DecisionTable:
 
 
 def letter_workflow() -> Workflow:
-    """Input → Python (features) → table → Choice → LLM, only when approved → Output."""
+    """Input → PythonMonty (features) → table → Choice → LLM, only when approved → Output."""
     start = Input(id="start", name="start")
-    features = Python(id="features", name="features", code=FEATURES, depends=[NodeDependency(node=start)])
+    features = PythonMonty(id="features", name="features", code=FEATURES, depends=[NodeDependency(node=start)])
     table = eligibility_table(
         depends=[NodeDependency(node=features)], input_transformer=InputTransformer(selector=FEATURE_SELECTOR)
     )

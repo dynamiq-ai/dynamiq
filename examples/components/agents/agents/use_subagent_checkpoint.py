@@ -1,7 +1,7 @@
 """Example: Explicit SubAgentTool with checkpointing and resume (multi-node flow).
 
 Demonstrates:
-- Multi-node flow: Input → Agent (with SubAgentTool) → Python post-processor → Output
+- Multi-node flow: Input → Agent (with SubAgentTool) → PythonMonty post-processor → Output
 - pending_node_ids populated and shrinking as nodes complete
 - node_states filled per node with input_data, output_data, internal_state
 - SubAgentTool._call_count persisted in tool_states
@@ -21,9 +21,8 @@ from dynamiq.flows import Flow
 from dynamiq.nodes import Behavior
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.node import ErrorHandling, NodeDependency
-from dynamiq.nodes.tools import ExaTool
+from dynamiq.nodes.tools import ExaTool, PythonMonty
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
-from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.nodes.utils.utils import Input, Output
 from dynamiq.runnables import RunnableConfig
@@ -41,7 +40,7 @@ FLOW_ID = "subagent-checkpoint-flow"
 
 def make_researcher_agent(llm):
     """Child agent that has a lookup tool and a summarize tool."""
-    lookup_tool = Python(
+    lookup_tool = PythonMonty(
         name="Lookup",
         description='Looks up information on a topic. Expects {"topic": "<topic>"}.',
         code="""
@@ -49,7 +48,7 @@ def run(params: dict):
     topic = params.get("topic", "unknown")
     data = {
         "AI": "Artificial Intelligence is a broad field of computer science focused on creating smart machines.",
-        "Python": "Python is a high-level programming language known for readability and versatility.",
+        "PythonMonty": "PythonMonty is a high-level programming language known for readability and versatility.",
         "Checkpoints": "Checkpoints save intermediate state so long-running processes can resume after failure.",
     }
     info = data.get(topic, f"No detailed info found for '{topic}', but it is a valid research topic.")
@@ -58,7 +57,7 @@ def run(params: dict):
         is_parallel_execution_allowed=True,
     )
 
-    summarize_tool = Python(
+    summarize_tool = PythonMonty(
         name="Summarize",
         description='Summarizes text. Expects {"text": "<text to summarize>"}.',
         code="""
@@ -135,7 +134,7 @@ def build_flow(parent_llm, child_llm, backend):
         depends=[NodeDependency(node=input_node)],
     )
 
-    post_processor = Python(
+    post_processor = PythonMonty(
         id=PROCESSOR_ID,
         name="Post Processor",
         description="Formats the agent output into a clean report.",

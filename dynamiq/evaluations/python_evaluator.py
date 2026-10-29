@@ -4,8 +4,12 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.evaluations import BaseEvaluator
-from dynamiq.nodes.tools.python import compile_and_execute, get_restricted_globals
 from dynamiq.utils.logger import logger
+
+# Name of the single input variable the wrapper script reads. Monty runs a whole script and returns
+# the value of its trailing expression, so the user's evaluate() is called from a trailer that unpacks
+# this variable.
+_INPUTS_VAR = "dynamiq_eval_inputs_"
 
 
 class PythonEvaluatorSingleInput(BaseModel):
@@ -15,6 +19,7 @@ class PythonEvaluatorSingleInput(BaseModel):
     Attributes:
         data (dict[str, Any]): A dictionary with input parameters.
     """
+
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -25,6 +30,7 @@ class PythonEvaluatorInput(BaseModel):
     Attributes:
         data_list (list[dict[str, Any]]): A list of input dictionaries.
     """
+
     data_list: list[dict[str, Any]]
 
     @model_validator(mode="after")
@@ -50,6 +56,7 @@ class PythonEvaluatorSingleOutput(BaseModel):
     Attributes:
         score (float): Numeric metric value for the input.
     """
+
     score: float
 
 
@@ -60,17 +67,25 @@ class PythonEvaluatorOutput(BaseModel):
     Attributes:
         scores (list[float]): A list of computed metric scores.
     """
+
     scores: list[float]
 
 
 class PythonEvaluator(BaseEvaluator):
     """
-    Evaluator that executes custom user-defined code inside a safe sandbox.
+    Evaluator that runs a user-defined scoring function in the Monty interpreter.
 
-    The user code must define a function named "evaluate" with any parameters.
-    This evaluator uses regex to extract the function parameters and then calls it
-    with input values passed as keyword arguments. It validates that the provided
-    input contains all required keys, and does not include unexpected keys.
+    The user code must define a function named "evaluate" with any parameters. This evaluator extracts
+    the function parameters, validates that each input provides all required keys and no unexpected
+    ones, then calls "evaluate" with the input values as keyword arguments and returns its numeric
+    result.
+
+    The code runs in Monty, a separate Rust interpreter that cannot reach the host process, filesystem
+    or network, so an untrusted "evaluate" function is contained. The former implementation used
+    RestrictedPython, which shares the host interpreter with the code it restricts and is therefore not
+    a real boundary. Monty supports a subset of Python and part of the standard library (re, math, json
+    and others) but no third-party packages such as numpy or pandas; a metric that needs those belongs
+    in the Dynamiq runtime's OS sandbox instead.
 
     Example user code:
         def evaluate(answer: int, expected: int = 42) -> float:
@@ -80,6 +95,7 @@ class PythonEvaluator(BaseEvaluator):
         name (str): Evaluator name; defaults to "python_metric".
         code (str): The user-defined Python code as a string.
     """
+
     name: str = "python_metric"
     code: str = Field(..., description="User-defined Python code as a string.")
 
@@ -89,24 +105,30 @@ class PythonEvaluator(BaseEvaluator):
 
     def _compile_user_code(self) -> None:
         """
-        Compile the user code using restricted execution. Save the compiled
-        globals and parse the "evaluate" function's parameter names.
+        Parse the "evaluate" function's parameters and build the Monty program once, so later calls
+        only supply inputs. Raises ValueError if pydantic-monty is missing, the code does not define a
+        callable "evaluate", or the code cannot be compiled.
         """
-        self._compiled_globals: dict = get_restricted_globals()
         try:
-            compile_and_execute(self.code, self._compiled_globals)
-        except Exception as compile_error:
-            logger.error(f"User code compilation error: {compile_error}")
-            raise ValueError(f"User code compilation error: {compile_error}") from compile_error
-
-        if "evaluate" not in self._compiled_globals or not callable(self._compiled_globals["evaluate"]):
-            raise ValueError("User code must define a callable function 'evaluate'.")
+            import pydantic_monty
+        except ImportError as import_error:
+            raise ValueError(
+                'PythonEvaluator requires the "pydantic-monty" package. Install it with: '
+                'pip install "dynamiq[monty]".'
+            ) from import_error
 
         (required_params, all_params) = self._extract_function_parameters(self.code)
         self._required_params: set[str] = set(required_params)
         self._all_params: set[str] = set(all_params)
         logger.debug(f"Extracted required parameters: {self._required_params}")
         logger.debug(f"Extracted all parameters: {self._all_params}")
+
+        program = f"{self.code}\n\nevaluate(**{_INPUTS_VAR})\n"
+        try:
+            self._monty = pydantic_monty.Monty(program, inputs=[_INPUTS_VAR], script_name="python_metric.py")
+        except Exception as compile_error:
+            logger.error(f"User code compilation error: {compile_error}")
+            raise ValueError(f"User code compilation error: {compile_error}") from compile_error
 
     @staticmethod
     def _extract_function_parameters(code_str: str) -> tuple[list[str], list[str]]:
@@ -184,7 +206,7 @@ class PythonEvaluator(BaseEvaluator):
         self._validate_input_keys(provided_keys)
 
         try:
-            result = self._compiled_globals["evaluate"](**input_model.data)
+            result = self._monty.run(inputs={_INPUTS_VAR: input_model.data})
         except Exception as func_error:
             logger.error(f"Error during evaluation: {func_error}")
             raise ValueError(f"Error during evaluation: {func_error}") from func_error

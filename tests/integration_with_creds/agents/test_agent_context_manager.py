@@ -11,7 +11,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.utils import SummarizationConfig
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
@@ -34,13 +34,13 @@ def llm_instance():
 
 @pytest.fixture(scope="module")
 def python_tool():
-    """Create a Python tool for generating random word output."""
+    """Create a PythonMonty tool for generating random word output."""
     code = """
 def run(input_data):
     # Generate random word output to test summarization
     return "apple"
 """
-    return Python(
+    return PythonMonty(
         name="word-generator",
         # Without it the agent sees the generic "runs Python code" description, submits its own
         # word list, and then spends loops on why the fixed word was not in it.

@@ -6,8 +6,8 @@ from dynamiq.nodes import InputTransformer
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.splitters.document import DocumentSplitter
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
-from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.writers import PineconeDocumentWriter
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 
@@ -30,7 +30,7 @@ def run(input_data):
 def create_indexing_flow(index_name="default"):
     web_scraper_tool = FirecrawlTool(connection=FirecrawlConnection())
 
-    python_node = Python(
+    python_node = PythonMonty(
         code=python_code,
         depends=[
             NodeDependency(web_scraper_tool),

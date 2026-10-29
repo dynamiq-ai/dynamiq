@@ -1,5 +1,5 @@
 """
-Test ReAct agent with Python tool returning structured outputs (content + raw_response).
+Test ReAct agent with PythonMonty tool returning structured outputs (content + raw_response).
 Demonstrates how agent sees only content while traces preserve all structured data.
 """
 
@@ -9,13 +9,13 @@ from dynamiq import connections
 from dynamiq.callbacks.tracing import TracingCallbackHandler
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms.openai import OpenAI
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.runnables import RunnableConfig
 
 
 @pytest.fixture
 def calculator_python_tool():
-    """Python calculator tool that returns structured output with content + raw_response."""
+    """PythonMonty calculator tool that returns structured output with content + raw_response."""
     calculator_code = '''
 def run(input_data):
     """
@@ -67,7 +67,7 @@ def run(input_data):
         }
 '''
 
-    return Python(
+    return PythonMonty(
         name="Calculator Tool",
         description="Performs mathematical calculations and returns detailed results",
         code=calculator_code,
@@ -76,7 +76,7 @@ def run(input_data):
 
 @pytest.fixture
 def string_handler_python_tool():
-    """Python string handler tool that returns structured output."""
+    """PythonMonty string handler tool that returns structured output."""
     string_handler_code = '''
 def run(input_data):
     """
@@ -126,14 +126,14 @@ def run(input_data):
         }
 '''
 
-    return Python(
+    return PythonMonty(
         name="String Handler Tool", description="Processes and manipulates text strings", code=string_handler_code
     )
 
 
 @pytest.mark.flaky(reruns=3)
 def test_react_agent_with_structured_python_tool(string_handler_python_tool):
-    """Test ReAct agent using Python tool with structured output (content + raw_response)."""
+    """Test ReAct agent using PythonMonty tool with structured output (content + raw_response)."""
     llm = OpenAI(model="gpt-5-mini", connection=connections.OpenAI(), temperature=0.1)
 
     agent = Agent(name="Text Assistant", llm=llm, tools=[string_handler_python_tool], max_loops=10)
@@ -142,7 +142,9 @@ def test_react_agent_with_structured_python_tool(string_handler_python_tool):
     config = RunnableConfig(callbacks=[tracing_handler])
 
     result = agent.run(
-        input_data={"input": "Use the string handler tool with operation='analyze' and text='Hello world from Python'"},
+        input_data={
+            "input": "Use the string handler tool with operation='analyze' and text='Hello world from PythonMonty'"
+        },
         config=config,
     )
 
@@ -181,7 +183,7 @@ def test_react_agent_with_structured_python_tool(string_handler_python_tool):
 
 
 def test_python_tool_structured_output_vs_agent_processing(calculator_python_tool):
-    """Test that Python tool returns structured output but agent processing extracts only content."""
+    """Test that PythonMonty tool returns structured output but agent processing extracts only content."""
     from dynamiq.nodes.agents.utils import process_tool_output_for_agent
 
     tool_result = calculator_python_tool.run({"expression": "10 + 5"})

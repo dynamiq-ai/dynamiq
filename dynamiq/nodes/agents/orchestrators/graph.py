@@ -16,8 +16,9 @@ from dynamiq.nodes.agents.orchestrators.orchestrator import (
     OrchestratorIterationData,
 )
 from dynamiq.nodes.node import Node, NodeDependency
-from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.function_tool import function_tool
+from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.streaming import StreamingMode
@@ -197,7 +198,7 @@ class GraphOrchestrator(Orchestrator):
         self,
         source_id: str,
         destination_ids: list[str],
-        condition: Callable | Python,
+        condition: Callable | PythonMonty,
         callbacks: list[NodeCallbackHandler] = [],
     ) -> None:
         """
@@ -207,14 +208,14 @@ class GraphOrchestrator(Orchestrator):
         Args:
             source_id (str): Id of the source state.
             destination_ids (list[str]): Ids of destination states.
-            condition (Callable | Python): Condition that will determine next state.
+            condition (Callable | PythonMonty): Condition that will determine next state.
             callbacks: list[NodeCallbackHandler]: List of callbacks.
         Raises:
             ValueError: If state with specified id is not present.
         """
         self.validate_states(destination_ids + [source_id])
 
-        if isinstance(condition, Python):
+        if getattr(condition, "action_type", None) == ActionType.CODE_EXECUTION:
             condition.callbacks.extend(callbacks)
             self._state_by_id[source_id].condition = condition
         elif isinstance(condition, Callable):
@@ -222,7 +223,7 @@ class GraphOrchestrator(Orchestrator):
             tool.callbacks = callbacks
             self._state_by_id[source_id].condition = tool
         else:
-            raise OrchestratorError("Error: Conditional edge must be either a Python Node or a Callable.")
+            raise OrchestratorError("Error: Conditional edge must be either a PythonMonty Node or a Callable.")
 
         self._state_by_id[source_id].next_states = destination_ids
 
@@ -302,7 +303,7 @@ class GraphOrchestrator(Orchestrator):
 
         if len(state.next_states) > 1:
             if condition := state.condition:
-                if isinstance(condition, Python):
+                if getattr(condition, "action_type", None) == ActionType.CODE_EXECUTION:
                     input_data = {**self.context, "history": self._chat_history}
                 else:
                     input_data = {"context": self.context | {"history": self._chat_history}}
