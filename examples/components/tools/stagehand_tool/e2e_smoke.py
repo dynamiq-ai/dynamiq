@@ -1,9 +1,11 @@
 """End-to-end smoke test for the Stagehand tool on the v3 SDK.
 
 Requires outbound access to api.browserbase.com / api.stagehand.browserbase.com (and api.steel.dev
-for the Steel path). Keys come from environment variables only:
+for the Steel path, api.browser-use.com for the Browser Use path). Keys come from environment
+variables only:
 
-    BROWSERBASE_API_KEY, BROWSERBASE_PROJECT_ID, ANTHROPIC_API_KEY, OPENAI_API_KEY, STEEL_API_KEY
+    BROWSERBASE_API_KEY, BROWSERBASE_PROJECT_ID, ANTHROPIC_API_KEY, OPENAI_API_KEY, STEEL_API_KEY,
+    BROWSER_USE_API_KEY
 
 Run all paths, or a subset:
 
@@ -12,8 +14,9 @@ Run all paths, or a subset:
     python e2e_smoke.py bb-openai       # Browserbase + OpenAI provider key
     python e2e_smoke.py bb-gateway      # Browserbase Model Gateway (no model key)
     python e2e_smoke.py steel           # Steel cloud via the bundled local Stagehand server
+    python e2e_smoke.py browser-use     # Browser Use Cloud via the bundled local Stagehand server
 
-Steel path note: leave ANTHROPIC_BASE_URL unset (the bundled Stagehand server then defaults to
+Steel / Browser Use path note: leave ANTHROPIC_BASE_URL unset (the bundled Stagehand server then defaults to
 https://api.anthropic.com/v1); if your environment sets it, the value must include the /v1 suffix
 or anthropic/* model calls 404.
 
@@ -28,7 +31,7 @@ import sys
 import traceback
 
 from dynamiq.connections import Browserbase as BrowserbaseConnection
-from dynamiq.connections import SteelBrowser
+from dynamiq.connections import BrowserUse, SteelBrowser
 from dynamiq.nodes.tools.stagehand import Stagehand, StagehandInputSchema
 
 # Deliberately NOT claude-sonnet-5. Its observe fails on the HOSTED Browserbase v3 server, not just
@@ -117,6 +120,17 @@ if "steel" in targets:
             model_name=MODEL,
         ),
         "steel",
+        ACTIONS[:2],
+    )
+
+if "browser-use" in targets:
+    print("== Browser Use Cloud (bundled local Stagehand server) ==")
+    run(
+        Stagehand(
+            connection=BrowserUse(model_api_key=os.environ["ANTHROPIC_API_KEY"]),
+            model_name=MODEL,
+        ),
+        "browser-use",
         ACTIONS[:2],
     )
 

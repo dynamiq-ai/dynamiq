@@ -27,6 +27,7 @@ def bare_stagehand(**attrs) -> Stagehand:
     defaults = {
         "name": "T",
         "id": "id-1",
+        "connection": None,
         "client": None,
         "_session_id": None,
         "_live_view_url": None,
@@ -34,6 +35,8 @@ def bare_stagehand(**attrs) -> Stagehand:
         "_browserbase_client": None,
         "_steel_client": None,
         "_steel_browser_session": None,
+        "_browser_use_client": None,
+        "_browser_use_session": None,
         "_stagehand_session": None,
         "_cdp_url": None,
         "_playwright": None,

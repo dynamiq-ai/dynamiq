@@ -8,13 +8,14 @@ from enum import Enum
 from typing import Any, ClassVar, Coroutine, Literal
 from urllib.parse import urlparse
 
+import httpx
 from browserbase import AsyncBrowserbase
 from playwright.async_api import async_playwright
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from stagehand import APIStatusError, AsyncStagehand, AuthenticationError, InternalServerError, PermissionDeniedError
 from steel import AsyncSteel
 
-from dynamiq.connections import Browserbase, SteelBrowser, SteelBrowserEnvironment
+from dynamiq.connections import Browserbase, BrowserUse, SteelBrowser, SteelBrowserEnvironment
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -246,7 +247,7 @@ class Stagehand(ConnectionNode):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "stagehand-browser"
     description: str = DESCRIPTION_STAGEHAND
-    connection: Browserbase | SteelBrowser
+    connection: Browserbase | SteelBrowser | BrowserUse
     model_name: str
     fallback_model_name: str | None = Field(
         default=None,
@@ -284,6 +285,8 @@ class Stagehand(ConnectionNode):
     _browserbase_client: AsyncBrowserbase | None = PrivateAttr(default=None)
     _steel_client: AsyncSteel | None = PrivateAttr(default=None)
     _steel_browser_session: Any | None = PrivateAttr(default=None)
+    _browser_use_client: httpx.AsyncClient | None = PrivateAttr(default=None)
+    _browser_use_session: dict[str, Any] | None = PrivateAttr(default=None)
     input_schema: ClassVar[type[StagehandInputSchema]] = StagehandInputSchema
     timeout: int = 3600
     is_files_allowed: bool = True
@@ -348,6 +351,8 @@ class Stagehand(ConnectionNode):
         self._browserbase_client = None
         self._steel_client = None
         self._steel_browser_session = None
+        self._browser_use_client = None
+        self._browser_use_session = None
         self._playwright = None
         self._pw_browser = None
         self._pw_page = None
@@ -357,11 +362,19 @@ class Stagehand(ConnectionNode):
         """Check if the current connection is an instance of Steel Browser connection."""
         return isinstance(self.connection, SteelBrowser)
 
+    def _is_browser_use_connection(self) -> bool:
+        """Check if the current connection is an instance of Browser Use Cloud connection."""
+        return isinstance(self.connection, BrowserUse)
+
+    def _uses_local_stagehand_server(self) -> bool:
+        """Steel and Browser Use browsers are driven over CDP by Stagehand's bundled local server."""
+        return self._is_steel_browser_connection() or self._is_browser_use_connection()
+
     def is_clone_safe_for_parallel(self) -> bool:
         """Don't clone under browser sharing: a clone would open a SECOND session on the shared
         Context, diverging and clobbering on persist. One instance keeps one session per turn;
         ``execute`` serializes the calls."""
-        if active_browser_session() is None or self._is_steel_browser_connection():
+        if active_browser_session() is None or self._uses_local_stagehand_server():
             return True
         return False
 
@@ -374,8 +387,8 @@ class Stagehand(ConnectionNode):
         ss = active_browser_session()
         if ss is None:
             return None
-        if self._is_steel_browser_connection():
-            return None  # Steel sharing is a fast-follow
+        if self._uses_local_stagehand_server():
+            return None  # Steel / Browser Use sharing is a fast-follow
         run_key = _current_agent_run.get()
         if run_key is None:
             # The agent's finally releases under the real run key; a substituted key would never
@@ -552,6 +565,70 @@ class Stagehand(ConnectionNode):
         response = await self._steel_client.sessions.files.download_archive(session_id)
         return await response.read()
 
+    def _get_browser_use_client(self) -> httpx.AsyncClient:
+        """Browser Use Cloud API client, created on first use."""
+        if self._browser_use_client is None:
+            self._browser_use_client = httpx.AsyncClient(
+                base_url=self.connection.url, headers=self.connection.conn_params, timeout=60.0
+            )
+        return self._browser_use_client
+
+    async def _ensure_browser_use_session(self) -> dict[str, Any]:
+        """Create a Browser Use Cloud browser if there is none; returns its id, cdpUrl and liveUrl."""
+        if self._browser_use_session is None:
+            response = await self._get_browser_use_client().post("/browsers", json=self.connection.session_config)
+            if response.is_error:
+                # Bad key (401), no credits (402) or forbidden (403) cannot be fixed by retrying.
+                raise ToolExecutionException(
+                    f"Browser Use browser creation failed ({response.status_code}): {response.text}",
+                    recoverable=response.status_code not in (401, 402, 403),
+                )
+            self._browser_use_session = response.json()
+            logger.debug(f"Browser Use browser created: {self._browser_use_session.get('id')}")
+        return self._browser_use_session
+
+    async def _release_browser_use_session(self) -> None:
+        """Best-effort stop of the Browser Use browser, then drop the handle.
+
+        Closing CDP does not stop a Browser Use browser, so it must be stopped explicitly or it runs
+        (and bills) until its timeout. Best-effort for the same reason as the Steel release.
+        """
+        session = self._browser_use_session
+        self._browser_use_session = None
+        session_id = (session or {}).get("id")
+        if not session_id or self._browser_use_client is None:
+            return
+        try:
+            response = await self._browser_use_client.patch(f"/browsers/{session_id}", json={"action": "stop"})
+            response.raise_for_status()
+        except Exception as exc:
+            logger.warning(f"Failed to stop Browser Use browser {session_id}: {exc}")
+
+    async def _download_browser_use_files_archive(self, session_id: str) -> bytes:
+        """Zip the files the Browser Use browser downloaded, matching the other providers' archives."""
+        response = await self._get_browser_use_client().get(
+            f"/browsers/{session_id}/downloads", params={"includeUrls": "true", "limit": 100}
+        )
+        response.raise_for_status()
+        files = [f for f in response.json().get("files") or [] if f.get("url")]
+        if not files:
+            return b""
+        buffer = io.BytesIO()
+        # Presigned URLs: fetched with a bare client so the API key never leaves api.browser-use.com.
+        async with httpx.AsyncClient(timeout=60.0) as storage:
+            with zipfile.ZipFile(buffer, "w") as archive:
+                for file in files:
+                    content = await storage.get(file["url"])
+                    content.raise_for_status()
+                    archive.writestr(file["path"], content.content)
+        return buffer.getvalue()
+
+    def _get_local_browser_cdp_url(self) -> str:
+        """CDP URL of the browser driven by the local Stagehand server (Steel or Browser Use)."""
+        if self._is_browser_use_connection():
+            return self._browser_use_session["cdpUrl"]
+        return self._get_steel_browser_cdp_url()
+
     def init_components(self, connection_manager: ConnectionManager | None = None):
         super().init_components(connection_manager)
         if self._is_steel_browser_connection():
@@ -559,6 +636,8 @@ class Stagehand(ConnectionNode):
                 self._steel_client = AsyncSteel(steel_api_key=self.connection.api_key)
             elif self.connection.environment == SteelBrowserEnvironment.SELF_HOSTED:
                 self._steel_client = AsyncSteel(base_url=self.connection.base_url)
+        elif self._is_browser_use_connection():
+            pass  # The Browser Use API client is created on first use.
         else:
             self._browserbase_client = AsyncBrowserbase(api_key=self.connection.browserbase_api_key)
         self.init_loop()
@@ -607,6 +686,10 @@ class Stagehand(ConnectionNode):
             raise
 
     async def upload_files(self, files: list[io.BytesIO]):
+        if self._is_browser_use_connection():
+            raise ToolExecutionException(
+                "Session file uploads are not supported for Browser Use; use the 'upload' action.", recoverable=False
+            )
         if self._is_steel_browser_connection():
             session = await self._ensure_steel_browser_session()
             if not hasattr(session, "id"):
@@ -656,7 +739,10 @@ class Stagehand(ConnectionNode):
         ``create_shared_session``: we are first to browse in a shared-browser run, so the session
         we create is configured to outlive our turn and to load ``shared_context_id`` (prior-run state).
         """
-        if self._is_steel_browser_connection():
+        if self._is_browser_use_connection():
+            if not (await self._ensure_browser_use_session()).get("cdpUrl"):
+                raise ToolExecutionException("Browser Use browser has no 'cdpUrl'", recoverable=False)
+        elif self._is_steel_browser_connection():
             if self._steel_client is None:
                 # Recreate Steel client if it was cleaned up during close()
                 if self.connection.environment == SteelBrowserEnvironment.CLOUD:
@@ -671,6 +757,7 @@ class Stagehand(ConnectionNode):
                 raise ToolExecutionException(
                     "Steel session missing required 'websocket_url' attribute or has invalid value", recoverable=False
                 )
+        if self._uses_local_stagehand_server():
             if self.client is None:
                 anthropic_base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
                 if (
@@ -689,7 +776,7 @@ class Stagehand(ConnectionNode):
                         self.id,
                         anthropic_base_url,
                     )
-                # The bundled local Stagehand server drives the Steel browser over CDP.
+                # The bundled local Stagehand server drives the Steel / Browser Use browser over CDP.
                 self.client = AsyncStagehand(
                     server="local",
                     model_api_key=self.connection.model_api_key,
@@ -697,13 +784,16 @@ class Stagehand(ConnectionNode):
                     local_ready_timeout_s=30.0,
                 )
             if self._stagehand_session is None:
-                self._cdp_url = self._get_steel_browser_cdp_url()
+                self._cdp_url = self._get_local_browser_cdp_url()
                 self._stagehand_session = await self.client.sessions.start(
                     model_name=self.model_name,
                     browser={"type": "local", "cdp_url": self._cdp_url},
                     **self._session_start_options(),
                 )
-                self._session_id = getattr(self._steel_browser_session, "id", None)
+                if self._is_browser_use_connection():
+                    self._session_id = self._browser_use_session.get("id")
+                else:
+                    self._session_id = getattr(self._steel_browser_session, "id", None)
         else:
             if self.client is None:
                 self.client = AsyncStagehand(
@@ -749,8 +839,8 @@ class Stagehand(ConnectionNode):
 
     async def _get_connect_cdp_url(self) -> str:
         """CDP endpoint of the live browser session, for our own Playwright connection."""
-        if self._is_steel_browser_connection():
-            return self._get_steel_browser_cdp_url()
+        if self._uses_local_stagehand_server():
+            return self._get_local_browser_cdp_url()
         if self._cdp_url:
             return self._cdp_url
         # Resumed sessions may not carry a cdp_url in the start response; ask Browserbase.
@@ -798,7 +888,9 @@ class Stagehand(ConnectionNode):
     async def _fetch_live_view_url(self) -> None:
         """Fetch and store the live view URL for the current session."""
         try:
-            if self._is_steel_browser_connection():
+            if self._is_browser_use_connection():
+                self._live_view_url = (self._browser_use_session or {}).get("liveUrl")
+            elif self._is_steel_browser_connection():
                 # Steel Browser: debug_url is the embeddable live view (session_viewer_url is the
                 # auth-gated dashboard page, kept only as a fallback).
                 if self._steel_browser_session:
@@ -883,6 +975,8 @@ class Stagehand(ConnectionNode):
         Retrieve the downloads archive for the given session.
         Retries until content is non-empty or timeout.
         """
+        if self._is_browser_use_connection():
+            return await self._download_browser_use_files_archive(session_id)
         if self._is_steel_browser_connection():
             files = await self._list_steel_browser_session_files(session_id)
             if files:
@@ -1003,6 +1097,7 @@ class Stagehand(ConnectionNode):
         # Steel owns the browser separately from the Stagehand session, so release it too —
         # otherwise the retry either reattaches to a dead browser or strands a live one.
         await self._release_steel_browser_session()
+        await self._release_browser_use_session()
         if shared_browser is not None and self._session_id:
             # Clearing our own handles is not enough under sharing: the dead id is still the run's
             # published session, so _join_shared_browser would hand it straight back and the retry
@@ -1226,6 +1321,10 @@ class Stagehand(ConnectionNode):
                         self._run_in_loop(self._steel_client.close(), timeout=_CLEANUP_TIMEOUT)
                     except Exception as exc:
                         logger.warning(f"Failed to close Steel client: {exc}")
+            elif self._is_browser_use_connection():
+                self._run_in_loop(self._release_browser_use_session(), timeout=_CLEANUP_TIMEOUT)
+                if self._browser_use_client is not None:
+                    self._run_in_loop(self._browser_use_client.aclose(), timeout=_CLEANUP_TIMEOUT)
             elif self._browserbase_client and hasattr(self._browserbase_client, "close"):
                 self._run_in_loop(self._browserbase_client.close(), timeout=_CLEANUP_TIMEOUT)
         except Exception as e:
@@ -1237,6 +1336,8 @@ class Stagehand(ConnectionNode):
             self._browserbase_client = None
             self._steel_browser_session = None
             self._steel_client = None
+            self._browser_use_session = None
+            self._browser_use_client = None
             self._live_view_url = None
             # Drop CDP handles even if teardown failed, so a later run reconnects instead of
             # reusing a stale page.
@@ -1268,6 +1369,8 @@ class Stagehand(ConnectionNode):
             "_browserbase_client": True,
             "_steel_browser_session": True,
             "_steel_client": True,
+            "_browser_use_client": True,
+            "_browser_use_session": True,
             "_stagehand_session": True,
             "_playwright": True,
             "_pw_browser": True,

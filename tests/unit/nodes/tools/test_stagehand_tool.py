@@ -9,12 +9,15 @@ import io
 import logging
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 from stagehand import APIStatusError, AuthenticationError, InternalServerError, NotFoundError
 
 from dynamiq.connections import Browserbase as BrowserbaseConnection
+from dynamiq.connections import BrowserUse as BrowserUseConnection
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.agents.shared_session import SharedSession
+from dynamiq.nodes.tools import stagehand as stagehand_module
 from dynamiq.nodes.tools.stagehand import Stagehand, StagehandActionType, StagehandInputSchema
 
 
@@ -38,6 +41,8 @@ def bare_stagehand(**attrs) -> Stagehand:
         "_browserbase_client": None,
         "_steel_client": None,
         "_steel_browser_session": None,
+        "_browser_use_client": None,
+        "_browser_use_session": None,
         "_playwright": None,
         "_pw_browser": None,
         "_pw_page": None,
@@ -203,6 +208,8 @@ class TestCloneSafety:
             _browserbase_client=MagicMock(),
             _steel_client=MagicMock(),
             _steel_browser_session=MagicMock(),
+            _browser_use_client=MagicMock(),
+            _browser_use_session={"id": "bu-1"},
             _playwright=MagicMock(),
             _pw_browser=MagicMock(),
             _pw_page=MagicMock(),
@@ -218,6 +225,8 @@ class TestCloneSafety:
         assert tool._browserbase_client is None
         assert tool._steel_client is None
         assert tool._steel_browser_session is None
+        assert tool._browser_use_client is None
+        assert tool._browser_use_session is None
         assert tool._pw_browser is None
         assert tool._playwright is None
         assert tool._shares_browser_session is False
@@ -485,6 +494,23 @@ class TestErrorTaxonomy:
         steel_client.sessions.release.assert_awaited_once_with("steel-1")
         assert tool._steel_browser_session is None
 
+    def test_missing_session_stops_the_browser_use_browser(self):
+        """Closing CDP does not stop a Browser Use browser: it must be stopped or it bills to timeout."""
+        requests = []
+        tool = bare_stagehand(
+            connection=BrowserUseConnection(api_key="bu-key", model_api_key="mk"),
+            _session_id="bu-1",
+            _browser_use_client=_browser_use_api(requests),
+            _browser_use_session={"id": "bu-1", "cdpUrl": "wss://cdp"},
+        )
+
+        self._run_failing_action(tool, _session_gone())
+
+        assert [(r.method, r.url.path, r.content) for r in requests] == [
+            ("PATCH", "/api/v4/browsers/bu-1", b'{"action":"stop"}')
+        ]
+        assert tool._browser_use_session is None
+
     def test_missing_session_retracts_the_runs_shared_session(self):
         """Otherwise _join_shared_browser hands the dead id back and the retry resumes a corpse."""
         shared = SharedSession(share_browser=True)
@@ -555,3 +581,143 @@ class TestSharedSessionInvalidation:
         shared.invalidate_browser_session("sess-1")
 
         assert shared.browser_session_id() == "sess-2"
+
+
+def _browser_use_api(requests: list, handler=None) -> httpx.AsyncClient:
+    """A Browser Use API client whose requests are recorded and answered locally (no network)."""
+
+    def _record(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if handler is not None:
+            return handler(request)
+        return httpx.Response(200, json={"id": "bu-1", "status": "stopped"})
+
+    return httpx.AsyncClient(
+        base_url="https://api.browser-use.com/api/v4",
+        headers={"X-Browser-Use-API-Key": "bu-key"},
+        transport=httpx.MockTransport(_record),
+    )
+
+
+class TestBrowserUse:
+    """Browser Use Cloud browsers are created over REST and driven by the local Stagehand server."""
+
+    def test_connection_defaults(self, monkeypatch):
+        monkeypatch.setenv("BROWSER_USE_API_KEY", "env-key")
+        connection = BrowserUseConnection(model_api_key="mk")
+        assert connection.api_key == "env-key"
+        assert connection.url == "https://api.browser-use.com/api/v4"
+        assert connection.session_config == {"timeout": 60}
+        assert connection.conn_params["X-Browser-Use-API-Key"] == "env-key"
+
+    def test_init_components_does_not_create_a_browserbase_client(self):
+        tool = Stagehand(
+            connection=BrowserUseConnection(api_key="bu-key", model_api_key="mk"),
+            model_name="anthropic/claude-sonnet-4-6",
+        )
+
+        assert tool._browserbase_client is None
+        assert tool._browser_use_client is None
+
+    def test_init_client_creates_a_browser_and_drives_it_over_cdp(self, monkeypatch):
+        requests = []
+        created = {"id": "bu-1", "cdpUrl": "wss://cdp.browser-use.com/bu-1", "liveUrl": "https://live/bu-1"}
+        client = _browser_use_api(requests, lambda request: httpx.Response(201, json=created))
+        stagehand_client = MagicMock()
+        stagehand_client.sessions.start = AsyncMock(return_value=MagicMock())
+        stagehand_cls = MagicMock(return_value=stagehand_client)
+        monkeypatch.setattr(stagehand_module, "AsyncStagehand", stagehand_cls)
+        tool = bare_stagehand(
+            connection=BrowserUseConnection(
+                api_key="bu-key", model_api_key="mk", session_config={"timeout": 30, "proxyCountryCode": "de"}
+            ),
+            _browser_use_client=client,
+            is_return_live_view_url_enabled=True,
+        )
+
+        asyncio.run(tool._init_client())
+
+        assert len(requests) == 1
+        assert (requests[0].method, requests[0].url.path) == ("POST", "/api/v4/browsers")
+        assert requests[0].headers["X-Browser-Use-API-Key"] == "bu-key"
+        assert requests[0].content == b'{"timeout":30,"proxyCountryCode":"de"}'
+        assert stagehand_cls.call_args.kwargs["server"] == "local"
+        assert stagehand_cls.call_args.kwargs["model_api_key"] == "mk"
+        start_kwargs = stagehand_client.sessions.start.call_args.kwargs
+        assert start_kwargs["browser"] == {"type": "local", "cdp_url": "wss://cdp.browser-use.com/bu-1"}
+        assert tool._session_id == "bu-1"
+        assert tool._live_view_url == "https://live/bu-1"
+
+    @pytest.mark.parametrize("status, recoverable", [(401, False), (402, False), (429, True), (500, True)])
+    def test_creation_errors_map_to_the_tool_taxonomy(self, status, recoverable):
+        """A bad key or empty balance cannot be fixed by retrying; rate limits and 5xx can."""
+        client = _browser_use_api([], lambda request: httpx.Response(status, json={"detail": "nope"}))
+        tool = bare_stagehand(
+            connection=BrowserUseConnection(api_key="bu-key", model_api_key="mk"), _browser_use_client=client
+        )
+
+        with pytest.raises(ToolExecutionException) as info:
+            asyncio.run(tool._init_client())
+
+        assert info.value.recoverable is recoverable
+        assert tool._browser_use_session is None
+
+    def test_downloads_are_zipped_without_leaking_the_api_key(self, monkeypatch):
+        requests = []
+        listing = {
+            "files": [
+                {
+                    "path": "report.csv",
+                    "size": 3,
+                    "lastModified": "2026-10-20T00:00:00Z",
+                    "url": "https://storage.example/report.csv?sig=1",
+                }
+            ]
+        }
+        api = _browser_use_api(requests, lambda request: httpx.Response(200, json=listing))
+        storage_requests = []
+
+        def _storage(request: httpx.Request) -> httpx.Response:
+            storage_requests.append(request)
+            return httpx.Response(200, content=b"a,b")
+
+        real_async_client = httpx.AsyncClient
+        monkeypatch.setattr(
+            stagehand_module.httpx,
+            "AsyncClient",
+            lambda **kwargs: real_async_client(transport=httpx.MockTransport(_storage), **kwargs),
+        )
+        tool = bare_stagehand(
+            connection=BrowserUseConnection(api_key="bu-key", model_api_key="mk"), _browser_use_client=api
+        )
+
+        archive = asyncio.run(tool.get_downloads_via_sdk("bu-1"))
+
+        assert requests[0].url.path == "/api/v4/browsers/bu-1/downloads"
+        assert requests[0].url.params["includeUrls"] == "true"
+        assert "X-Browser-Use-API-Key" not in storage_requests[0].headers
+        files = tool.extract_files_from_zip(archive)
+        assert [(f.name, f.getvalue()) for f in files] == [("report.csv", b"a,b")]
+
+    def test_no_downloads_returns_empty(self):
+        api = _browser_use_api([], lambda request: httpx.Response(200, json={"files": []}))
+        tool = bare_stagehand(
+            connection=BrowserUseConnection(api_key="bu-key", model_api_key="mk"), _browser_use_client=api
+        )
+        assert asyncio.run(tool.get_downloads_via_sdk("bu-1")) == b""
+
+    def test_close_stops_the_browser(self):
+        requests = []
+        tool = bare_stagehand(
+            connection=BrowserUseConnection(api_key="bu-key", model_api_key="mk"),
+            _browser_use_client=_browser_use_api(requests),
+            _browser_use_session={"id": "bu-1", "cdpUrl": "wss://cdp"},
+            _session_id="bu-1",
+        )
+        tool.init_loop()
+
+        tool.close()
+
+        assert [(r.method, r.url.path) for r in requests] == [("PATCH", "/api/v4/browsers/bu-1")]
+        assert tool._browser_use_session is None
+        assert tool._browser_use_client is None
