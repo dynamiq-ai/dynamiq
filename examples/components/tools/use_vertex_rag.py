@@ -8,7 +8,7 @@ from examples.llm_setup import setup_llm
 RAG_CORPUS_ID = os.getenv("VERTEXAI_RAG_CORPUS_ID", "your-rag-corpus-id")
 
 # An LLM ranker model has to be served in the corpus's region; override if yours is elsewhere.
-LLM_RANKER_MODEL = os.getenv("VERTEXAI_LLM_RANKER_MODEL", "gemini-2.5-flash")
+LLM_RANKER_MODEL = os.getenv("VERTEXAI_LLM_RANKER_MODEL", "gemini-3.8-flash")
 
 
 def basic_search_example():
