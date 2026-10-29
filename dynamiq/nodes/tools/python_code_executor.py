@@ -10,11 +10,11 @@ import shutil
 import tempfile
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from RestrictedPython.Guards import guarded_unpack_sequence
 from RestrictedPython.PrintCollector import PrintCollector
 
@@ -104,29 +104,73 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 OPTIONAL_PRELOAD_MODULES: tuple[tuple[str, str | None], ...] = (("seaborn", "sns"),)
 
 
-def _describe_libraries() -> str:
-    """Describe the libraries the code can use once they are enabled through extra_allowed_modules.
+# Heavier libraries named in the description only when the instance enables them, so an agent is never
+# told to use a module the node will refuse to import by default.
+_KNOWN_EXTRA_LIBRARIES: tuple[str, ...] = (
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "seaborn",
+    "openpyxl",
+    "docx",
+    "pptx",
+    "pdfplumber",
+    "pypdf",
+)
 
-    Only the standard library is importable by default; the libraries below are available when the node
-    enables them. pdfplumber and the plotting libraries come with extras, so they are left out when they
-    are not installed.
+
+def _build_executor_description(extra_allowed_modules: Sequence[str] = ()) -> str:
+    """Build the node description, naming heavier libraries only when this instance enables them.
+
+    An agent sees only this text. The default config refuses open() and every third-party import, so the
+    description points at the read_file()/write_file() helpers for file access and lists extra libraries
+    such as pandas or numpy only when extra_allowed_modules turns them on; otherwise an agent follows an
+    example the node then rejects and wastes iterations.
     """
-    libraries = ["pandas", "numpy", "requests"]
-    if importlib.util.find_spec("pdfplumber"):
-        libraries.append("pdfplumber")
-    libraries += ["pypdf", "docx (python-docx)", "pptx (python-pptx)", "openpyxl"]
-    if not (importlib.util.find_spec("matplotlib") and importlib.util.find_spec("seaborn")):
-        return (
-            f"When enabled via extra_allowed_modules, these libraries are available: {', '.join(libraries)}; "
-            "the standard library is always available. "
-        )
-    libraries.append("seaborn (preloaded as `sns` and the default for plotting)")
-    return (
-        "The standard library is always available. When enabled via extra_allowed_modules, these libraries "
-        f"are available: {', '.join(libraries)}. "
-        "With matplotlib and seaborn enabled, matplotlib is forced onto the 'Agg' backend so you can render "
-        "plots headlessly with `plt.savefig(...)` (no GUI popups), and seaborn is injected as `sns`. "
+    enabled = [module for module in extra_allowed_modules if module]
+    base = (
+        "Runs dynamic Python code under RestrictedPython. Every snippet MUST define a callable `run` "
+        "entrypoint, for example "
+        "`def run(params=None, helpers=None, files=None, stdout=None, context=None): ...`; declare only "
+        "the parameters you need and reach anything else through the `context` dict. Uploaded files are "
+        "available only through injected helpers: read them with `read_file('your_file.csv')` (or "
+        "`helpers['read_file']('your_file.csv')`) and save new artifacts with the write_* helpers. Direct "
+        "file access such as `open('notes.txt')` is refused, so use read_file()/read_file_text()/"
+        "read_file_bytes(), write_file()/write_file_text()/write_file_bytes(), list_files(), file_exists() "
+        "and describe_file(). The Python standard library is importable by default. "
     )
+    if not enabled:
+        libraries = (
+            "No third-party libraries are enabled on this instance; heavier libraries such as pandas and "
+            "numpy are available only when a trusted workflow lists them in extra_allowed_modules. "
+        )
+    else:
+        named = ", ".join(sorted(enabled))
+        libraries = f"This instance also enables these libraries: {named}. "
+        if "pandas" in enabled:
+            libraries += (
+                "Uploaded files are mirrored into the working directory before `run`, so "
+                "`pd.read_csv('your_file.csv')` works; you can also parse helper output in memory with "
+                "`pd.read_csv(io.StringIO(read_file('your_file.csv')))`. "
+            )
+        if "matplotlib" in enabled or "seaborn" in enabled:
+            libraries += (
+                "matplotlib is forced onto the headless 'Agg' backend, so render plots with "
+                "`plt.savefig(...)` and persist them with the write_* helpers"
+            )
+            if "seaborn" in enabled and importlib.util.find_spec("seaborn"):
+                libraries += "; seaborn is injected as `sns`"
+            libraries += ". "
+    tail = (
+        "Write normal Python exactly as it would appear in a `.py` file: use literal newlines instead of "
+        "escaped ones, and avoid JSON-style quoting inside the source. `print()` output is captured "
+        "separately in a `stdout` field, so have `run` return structured data.\n\n"
+        "- Uploaded files are visible only through the helper functions; use the write_* helpers to "
+        "persist new artifacts back to the shared store.\n"
+        "- RestrictedPython forbids augmented assignment on subscripts/slices (e.g. `counts[key] += 1`); "
+        "use `counts[key] = counts[key] + 1` instead."
+    )
+    return base + libraries + tail
 
 
 class PythonCodeExecutorFileWorkspace(BaseModel):
@@ -350,39 +394,7 @@ class PythonCodeExecutor(Node):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.CODE_EXECUTION
     name: str = "python-code-executor"
-    description: str = (
-        "Runs dynamic Python code under RestrictedPython. "
-        "The tool injects file helpers so you can operate on the "
-        "shared file store without manually copying artifacts. "
-        "Before your code runs, every uploaded file is mirrored into "
-        "the temporary workspace (so even module-level `pd.read_csv('foo.csv')`,"
-        " `pd.read_excel('bar.xlsx')`, or "
-        "`open('notes.txt')` calls just work). The helpers remain the most "
-        "reliable way to read/write artifacts—especially "
-        "when you need metadata, binary vs text detection, or want a "
-        "consistent API—so prefer read_file()/write_file(), "
-        "list_files(), file_exists(), describe_file(), etc., or"
-        " call them via `helpers['read_file']('foo.csv')`. " + _describe_libraries() + "Write normal Python "
-        "exactly as it would appear in a `.py` file—use literal "
-        "newlines instead of escaping them, "
-        "and avoid JSON-style quoting inside the source. Any "
-        "`print()` output is captured separately "
-        "in a `stdout` field, so have `run` return structured data.\n\n"
-        "- Every snippet you send MUST define "
-        "a callable `run` entrypoint. Prefer explicit parameters such as "
-        "`def run(params=None, helpers=None, files=None, stdout=None, context=None): ...`"
-        "- `run` can optionally accept params, files,"
-        " file_inputs, helpers, workspace/file_manager, stdout, or a single "
-        "context dict; pass only what you need in "
-        "the signature and everything else is still accessible via the `context` "
-        "dictionary if you include it.\n"
-        "- Uploaded files are only visible through the helper "
-        "functions; use write_* helpers to persist new artifacts "
-        "back to the shared store.\n"
-        "- RestrictedPython forbids augmented assignment "
-        "on subscripts/slices (e.g., `counts[key] += 1`); use "
-        "`counts[key] = counts[key] + 1` instead."
-    )
+    description: str = Field(default_factory=_build_executor_description)
     file_store: FileStore | None = Field(default=None, description="File storage backend shared with the agent.")
     extra_allowed_modules: list[str] = Field(
         default_factory=list,
@@ -395,6 +407,18 @@ class PythonCodeExecutor(Node):
     input_schema: ClassVar[type[PythonCodeExecutorInputSchema]] = PythonCodeExecutorInputSchema
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @model_validator(mode="after")
+    def _describe_enabled_libraries(self) -> "PythonCodeExecutor":
+        """Rebuild the agent-facing description to name only the libraries this instance enables.
+
+        A caller that set description explicitly keeps it; otherwise the default is recomputed from
+        extra_allowed_modules so the examples match what the node will accept. A reloaded node carries
+        description in its dumped fields, so the round trip preserves the text computed at creation.
+        """
+        if "description" not in self.model_fields_set:
+            self.description = _build_executor_description(self.extra_allowed_modules)
+        return self
 
     def execute(
         self, input_data: PythonCodeExecutorInputSchema, config: RunnableConfig = None, **kwargs

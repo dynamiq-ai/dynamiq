@@ -1,5 +1,6 @@
 import ast
 import builtins
+import copy
 import io
 import typing
 from collections import UserString
@@ -212,6 +213,13 @@ _FORBIDDEN_BUILTINS = frozenset(
     if obj is not None
 )
 
+# Mutable process-wide tables that a snippet could poison by item assignment, refused by identity so a
+# reference can never be obtained. copy.dispatch_table is the copyreg table that copy.deepcopy and pickle
+# consult for every type, so an entry added here would run attacker code in every later deepcopy or
+# pickle of that type, across runs and tenants. It is a dict (unhashable), so it is kept apart from
+# _FORBIDDEN_BUILTINS and matched by identity.
+_FORBIDDEN_OBJECTS = tuple(obj for obj in (getattr(copy, "dispatch_table", None),) if obj is not None)
+
 
 def _is_blocked_attr_name(name: str) -> bool:
     """Report whether an attribute name is refused, mirroring the compile-time attribute checks.
@@ -234,12 +242,20 @@ def _is_shared_write_target(obj: Any) -> bool:
     json.dumps.__defaults__). A class or function the running snippet defines has __module__ "__main__"
     and is recreated for each run, so writing to it is allowed; instances are always writable. A snippet
     cannot disguise a shared object as its own, since changing its __module__ is itself a blocked write.
+
+    A typing generic alias (typing.Counter, typing.Deque, typing.ChainMap, ...) is a process-wide
+    singleton whose __setattr__ forwards a non-dunder name to its __origin__, the real stdlib class, so a
+    write to it mutates collections.Counter and the like for every run. Any object carrying an __origin__
+    is such a shared alias; a snippet's own objects do not define one.
     """
     if isinstance(obj, ModuleType):
         return True
     if isinstance(obj, (type, FunctionType, MethodType, BuiltinFunctionType)):
         return getattr(obj, "__module__", None) != "__main__"
-    return False
+    try:
+        return getattr(obj, "__origin__", None) is not None
+    except Exception:
+        return False
 
 
 def guarded_write(obj, value=None):
@@ -277,9 +293,10 @@ def _forbidden_value_reason(value: Any, allowed_modules: frozenset[str]) -> str 
     """Return why value is off limits, or None if it is allowed to cross into restricted code.
 
     A module is refused unless its top-level package is in allowed_modules and not forbidden; a process,
-    filesystem or code-execution builtin (open, eval, ...) is refused by identity; a ctypes object is
-    refused by its type, so a native handle from any path (numpy.ctypeslib.load_library) cannot be used.
-    Everything else passes.
+    filesystem or code-execution builtin (open, eval, ...) is refused by identity; a shared dispatch
+    table (copy.dispatch_table) is refused by identity so it cannot be poisoned by item assignment; a
+    ctypes object is refused by its type, so a native handle from any path (numpy.ctypeslib.load_library)
+    cannot be used. Everything else passes.
     """
     if isinstance(value, ModuleType):
         root_module_name = (getattr(value, "__name__", "") or "").split(".")[0]
@@ -288,6 +305,8 @@ def _forbidden_value_reason(value: Any, allowed_modules: frozenset[str]) -> str 
         return None
     if any(value is forbidden for forbidden in _FORBIDDEN_BUILTINS):
         return "builtin"
+    if any(value is forbidden for forbidden in _FORBIDDEN_OBJECTS):
+        return "shared dispatch table"
     if (getattr(type(value), "__module__", "") or "").split(".")[0] in ("ctypes", "_ctypes"):
         return "ctypes object"
     if _is_str_format_method(value):
