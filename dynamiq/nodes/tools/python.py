@@ -1,6 +1,7 @@
 import ast
 import builtins
 import io
+import typing
 from collections import UserString
 from copy import deepcopy
 from functools import update_wrapper, wraps
@@ -23,12 +24,13 @@ from dynamiq.utils import format_value
 from dynamiq.utils.lazy_imports import optional_dependency_error
 from dynamiq.utils.logger import logger
 
-# Modules exposed to restricted code by default: pure-Python standard library only. These are safe to
-# offer to untrusted code because they grant no process, filesystem or native-code access. Some stdlib
-# modules are deliberately excluded because they resolve attributes or eval code in C, outside every
-# guard: "operator" (attrgetter, methodcaller), "string" (Formatter walks dunder fields) and "typing"
-# (get_type_hints and ForwardRef eval string annotations). "io" is kept for StringIO and BytesIO, but its
-# file openers are refused through _FORBIDDEN_BUILTINS.
+# Modules exposed to restricted code by default. Mostly pure-Python standard library that grants no
+# process, filesystem or native-code access, plus two deliberate additions: "requests" (HTTP egress is
+# contained by the deployment network policy, not by this sandbox, and it adds no in-process escape) and
+# "typing" (whose eval entry points get_type_hints, ForwardRef and evaluate_forward_ref are refused
+# through _FORBIDDEN_BUILTINS, so string annotations can never be evaluated). "operator" (attrgetter,
+# methodcaller) and "string" (Formatter walks dunder fields) stay excluded: they resolve attributes in C,
+# outside every guard. "io" is kept for StringIO and BytesIO, but its file openers are refused too.
 DEFAULT_ALLOWED_MODULES = frozenset(
     {
         "base64",
@@ -45,8 +47,10 @@ DEFAULT_ALLOWED_MODULES = frozenset(
         "math",
         "random",
         "re",
+        "requests",
         "statistics",
         "time",
+        "typing",
         "uuid",
     }
 )
@@ -59,7 +63,6 @@ EXTENDED_ALLOWED_MODULES = frozenset(
     {
         "numpy",
         "pandas",
-        "requests",
         "urllib",
         "pydantic",
         "openpyxl",
@@ -180,7 +183,9 @@ def make_safe_print(printer: Callable[..., Any]):
 # io.open_code are separate objects). collections.UserString.format delegates to str.format in library
 # code, past the str.format guard, so the class itself is refused. functools.update_wrapper and wraps run
 # a caller-named getattr/setattr in library code, which copies arbitrary dunders (including __code__ of a
-# shared function and __globals__ into the snippet), so both are refused.
+# shared function and __globals__ into the snippet), so both are refused. typing.get_type_hints,
+# ForwardRef and evaluate_forward_ref evaluate string annotations with the real eval, which CPython
+# compiles outside RestrictedPython, so all three are refused; typing is otherwise safe.
 _FORBIDDEN_BUILTINS = frozenset(
     obj
     for obj in (
@@ -196,6 +201,9 @@ _FORBIDDEN_BUILTINS = frozenset(
         UserString,
         update_wrapper,
         wraps,
+        typing.get_type_hints,
+        typing.ForwardRef,
+        getattr(typing, "evaluate_forward_ref", None),
     )
     if obj is not None
 )

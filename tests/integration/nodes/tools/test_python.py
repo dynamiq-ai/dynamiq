@@ -406,6 +406,23 @@ def test_python_node_rejects_extended_library_by_default():
     assert "import of 'numpy' is not allowed" in str(result.error).lower()
 
 
+def test_python_node_requests_and_typing_are_default():
+    """requests and typing are importable without opting in; typing's safe members still resolve."""
+    code = (
+        "import requests\n"
+        "import typing\n"
+        "from typing import Optional\n"
+        "def run(input_data):\n"
+        "    return {'has_get': callable(requests.get), 'origin': str(typing.get_origin(Optional[int]))}\n"
+    )
+
+    result = Python(code=code).run({}, None)
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"]["has_get"] is True
+    assert "Union" in result.output["content"]["origin"]
+
+
 def test_python_node_extra_allowed_modules_enables_library():
     """An opted-in library works, and legitimate submodule access (numpy.linalg) still resolves."""
     code = "def run(input_data):\n    import numpy\n    return {'norm': float(numpy.linalg.norm([3.0, 4.0]))}\n"
@@ -501,7 +518,14 @@ def test_python_node_operator_not_in_default_allow_list():
         # string and typing are no longer in the default set: string.Formatter walks dunder fields and
         # typing.get_type_hints evals string annotations, both outside the guards.
         ("string_not_in_default", "import string\ndef run(input_data):\n    return 1\n"),
-        ("typing_not_in_default", "import typing\ndef run(input_data):\n    return 1\n"),
+        # typing is allowed by default, but its eval entry points are refused (see the dedicated test below).
+        (
+            "typing_get_type_hints_eval",
+            "import typing\n"
+            "def f(x: '().__class__.__bases__[0].__subclasses__()'):\n    pass\n"
+            "def run(input_data):\n    return len(typing.get_type_hints(f)['x'])\n",
+        ),
+        ("typing_forward_ref", "import typing\ndef run(input_data):\n    return typing.ForwardRef('1+1')\n"),
         # setattr on a shared library function would change it for every run; the dunder name is blocked too.
         (
             "setattr_shared_function",
