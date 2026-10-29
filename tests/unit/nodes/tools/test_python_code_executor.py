@@ -98,6 +98,34 @@ def test_materialize_inline_files_malicious_filename_is_sanitized():
                 assert full_path.startswith(workspace_dir)
 
 
+def test_default_description_points_at_helpers_not_disabled_libraries():
+    """The default refuses open() and third-party imports, so the agent-facing description must point at
+    the read_file() helpers and not promise pd.read_csv or open()."""
+    executor = PythonCodeExecutor(file_store=InMemoryFileStore())
+    description = executor.description
+
+    assert "read_file(" in description
+    assert "`open('notes.txt')` is refused" in description
+    assert "No third-party libraries are enabled on this instance" in description
+    assert "pd.read_csv" not in description
+
+
+def test_description_names_only_enabled_libraries():
+    """When a trusted instance enables pandas, the description names it and may show pd.read_csv; a
+    default instance never does."""
+    enabled = PythonCodeExecutor(file_store=InMemoryFileStore(), extra_allowed_modules=["pandas"])
+
+    assert "pandas" in enabled.description
+    assert "pd.read_csv" in enabled.description
+
+
+def test_custom_description_is_preserved():
+    """A caller that sets description explicitly keeps it; the validator only fills the default."""
+    executor = PythonCodeExecutor(file_store=InMemoryFileStore(), description="my custom description")
+
+    assert executor.description == "my custom description"
+
+
 def test_code_executor_captures_stdout_without_print_errors():
     """Ensure the RestrictedPython print hooks no longer crash and stdout is captured."""
     file_store = InMemoryFileStore()

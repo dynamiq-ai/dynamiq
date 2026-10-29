@@ -1,3 +1,6 @@
+import collections
+import copy
+import datetime
 import json
 from io import BytesIO
 
@@ -672,3 +675,45 @@ def test_python_node_refuses_writes_to_shared_library_function():
     ).run({}, None)
 
     assert result.status == RunnableStatus.FAILURE
+
+
+def test_python_node_refuses_writes_through_typing_alias():
+    """A typing generic alias forwards attribute writes to its backing stdlib class, so the write is
+    refused and collections.Counter is left intact for every other run."""
+    code = (
+        "import typing\n"
+        "def evil(self, *args):\n"
+        "    return 'hijacked'\n"
+        "def run(input_data):\n"
+        "    typing.Counter.most_common = evil\n"
+        "    return 1\n"
+    )
+    original_most_common = collections.Counter.most_common
+    try:
+        result = Python(code=code).run({}, None)
+
+        assert result.status == RunnableStatus.FAILURE
+        assert collections.Counter("aab").most_common() == [("a", 2), ("b", 1)]
+    finally:
+        collections.Counter.most_common = original_most_common
+
+
+def test_python_node_refuses_copy_dispatch_table_write():
+    """copy.dispatch_table backs deepcopy and pickle for the whole process, so it is refused by identity
+    and a run cannot install code that every later deepcopy of a type would call."""
+    code = (
+        "import copy, datetime\n"
+        "def evil(obj):\n"
+        "    return (str, ('hijacked',))\n"
+        "def run(input_data):\n"
+        "    copy.dispatch_table[datetime.date] = evil\n"
+        "    return 1\n"
+    )
+    try:
+        result = Python(code=code).run({}, None)
+
+        assert result.status == RunnableStatus.FAILURE
+        assert datetime.date not in copy.dispatch_table
+        assert copy.deepcopy(datetime.date(2020, 1, 1)) == datetime.date(2020, 1, 1)
+    finally:
+        copy.dispatch_table.pop(datetime.date, None)
