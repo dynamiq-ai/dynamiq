@@ -54,3 +54,30 @@ describes anonymous access at `https://search.parallel.ai/mcp` as free for
 exploration and light use, with lower rate limits. Both calls share one session
 identifier. Tool or transport failures stop the example; if rate limited, wait
 for the server's retry deadline before running it again.
+
+## Publishing HTML with deed.page MCP
+
+This optional example discovers `publish_site` and `delete_site` through
+`MCPServer` and runs them over `MCPStreamableHTTP` against
+`https://deed.page/mcp`. It needs no LLM, API key, or account and sends no
+Authorization header.
+
+```sh
+uv sync --python 3.12 --no-install-project --no-default-groups
+uv run --python 3.12 --no-default-groups python -m examples.components.tools.mcp_server_as_tool.use_deed_page
+```
+
+By default it publishes a small sample page for one hour. Pass `--file report.html`
+to publish your own HTML, `--slug` to request a subdomain, or `--ttl 0` to keep the
+page. The printed `publish_site` result contains the public URL and, on the first
+publish, an owner `token`. Save that token to update or delete the page later:
+
+```sh
+DEEDPAGE_TOKEN=deed_tok_... uv run --python 3.12 --no-default-groups \
+  python -m examples.components.tools.mcp_server_as_tool.use_deed_page --delete <slug>
+```
+
+Published pages are public to anyone with the link, so do not publish secrets or
+private data. Limits and the rest of the API are described in the
+[deed.page documentation](https://deed.page/docs). Existing examples and provider
+defaults are unchanged.
