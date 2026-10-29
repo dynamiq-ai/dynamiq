@@ -2,6 +2,7 @@ import ast
 import builtins
 import copy
 import io
+import sys
 import typing
 from collections import UserString
 from copy import deepcopy
@@ -402,6 +403,18 @@ def _make_restricted_import(allowed_modules: frozenset[str]) -> Callable[..., An
             if _forbidden_value_reason(getattr(module, item, None), allowed_modules):
                 logger.warning(f"Import of '{item}' from '{name}' is not allowed")
                 raise ImportError(f"Import of '{item}' from '{name}' is not allowed")
+
+        # "import a.b.c" and "import a.b.c as x" have an empty fromlist and bind a submodule through raw
+        # IMPORT_FROM reads the getattr guard never sees, so a leaf aliased to a module outside the
+        # allow-list slips past the root check above (requests.packages.urllib3 is the real urllib3).
+        # Apply the value check to every dotted prefix that resolved, through sys.modules as CPython does.
+        if not normalized_fromlist and "." in name:
+            parts = name.split(".")
+            for depth in range(2, len(parts) + 1):
+                submodule = sys.modules.get(".".join(parts[:depth]))
+                if submodule is not None and _forbidden_value_reason(submodule, allowed_modules):
+                    logger.warning(f"Import of '{name}' is not allowed")
+                    raise ImportError(f"Import of '{name}' is not allowed")
         return module
 
     return restricted_import

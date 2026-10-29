@@ -122,7 +122,7 @@ def _build_executor_description(extra_allowed_modules: Sequence[str] = ()) -> st
         "available only through injected helpers: read them with `read_file('your_file.csv')` (or "
         "`helpers['read_file']('your_file.csv')`) and save new artifacts with the write_* helpers. Direct "
         "file access such as `open('notes.txt')` is refused, so use read_file()/read_file_text()/"
-        "read_file_bytes(), write_file()/write_file_text()/write_file_bytes(), list_files(), file_exists() "
+        "read_file_bytes(), write_file()/write_text()/write_bytes(), list_files(), file_exists() "
         "and describe_file(). Only these modules can be imported (any other module, including the rest of "
         f"the standard library, is refused): {importable}. "
     )
