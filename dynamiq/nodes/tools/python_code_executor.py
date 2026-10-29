@@ -385,8 +385,9 @@ class PythonCodeExecutor(Node):
     extra_allowed_modules: list[str] = Field(
         default_factory=list,
         description=(
-            "Top-level packages importable on top of the safe standard-library default, such as 'numpy' "
-            "or 'requests'. Enabling these widens the attack surface, so set it only for code you trust."
+            "Top-level packages importable on top of the safe default, such as 'numpy' or 'pandas'. "
+            "requests is already importable by default. Enabling these widens the attack surface, so set "
+            "it only for code you trust."
         ),
     )
     is_files_allowed: bool = True
@@ -396,14 +397,14 @@ class PythonCodeExecutor(Node):
 
     @model_validator(mode="after")
     def _describe_enabled_libraries(self) -> "PythonCodeExecutor":
-        """Rebuild the agent-facing description to name only the libraries this instance enables.
+        """Always rebuild the agent-facing description from extra_allowed_modules.
 
-        A caller that set description explicitly keeps it; otherwise the default is recomputed from
-        extra_allowed_modules so the examples match what the node will accept. A reloaded node carries
-        description in its dumped fields, so the round trip preserves the text computed at creation.
+        description is derived, not stored. to_dict() dumps it, so a saved workflow whose
+        extra_allowed_modules is later edited (a UI or YAML change), or one saved before this change,
+        would otherwise keep text that names the wrong importable modules. Recomputing on every load keeps
+        the module list and library notes accurate for the agent.
         """
-        if "description" not in self.model_fields_set:
-            self.description = _build_executor_description(self.extra_allowed_modules)
+        self.description = _build_executor_description(self.extra_allowed_modules)
         return self
 
     def execute(

@@ -791,3 +791,13 @@ def test_python_node_allows_dotted_submodule_import_within_allow_list():
 
     assert result.status == RunnableStatus.SUCCESS
     assert result.output["content"] == "json.decoder"
+
+
+def test_python_node_description_is_honest_about_imports_and_requests():
+    """The agent-facing description must not claim the whole stdlib imports or present requests as opt-in,
+    while a caller-supplied description (used as a tool label elsewhere) is still respected."""
+    description = Python(code="def run(input_data):\n    return 1\n").description
+
+    assert "requests is importable by default" in description
+    assert "not the whole standard library" in description
+    assert Python(code="def run(input_data):\n    return 1\n", description="calc").description == "calc"
