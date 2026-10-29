@@ -171,9 +171,50 @@ def make_safe_print(printer: Callable[..., Any]):
     return safe_print
 
 
+# Builtin callables that are process, filesystem or code-execution primitives. The compiler blocks the
+# names eval, exec and compile, but they and open stay reachable as attributes of allowed modules (for
+# example io.open is the builtin open), so the attribute guard refuses them by identity as well.
+_FORBIDDEN_BUILTINS = frozenset(
+    {
+        builtins.open,
+        builtins.eval,
+        builtins.exec,
+        builtins.compile,
+        builtins.input,
+        builtins.breakpoint,
+        builtins.__import__,
+    }
+)
+
+
+def _is_shared_write_target(obj: Any) -> bool:
+    """Report whether obj is shared across runs, so mutating it would leak state between them.
+
+    A module, and any class that an allowed module defines, live in the process rather than in a single
+    run's globals, so writing to them would affect every run and tenant. A class the running snippet
+    defines has __module__ "__main__" and is recreated for each run, so writing to it is allowed; its
+    instances are always writable. A snippet cannot disguise a shared class as its own, since changing that
+    class's __module__ is itself a blocked write.
+    """
+    if isinstance(obj, ModuleType):
+        return True
+    if isinstance(obj, type):
+        return getattr(obj, "__module__", None) != "__main__"
+    return False
+
+
 def guarded_write(obj, value=None):
-    """RestrictedPython helper to safely propagate write operations."""
+    """RestrictedPython write guard. Writing to a shared module or class is refused (see above)."""
+    if _is_shared_write_target(obj):
+        raise TypeError("Writing attributes on a module or class is not allowed")
     return value if value is not None else obj
+
+
+def safe_setattr(obj: Any, name: str, value: Any) -> None:
+    """setattr builtin that refuses to mutate a shared module or class (see _is_shared_write_target)."""
+    if _is_shared_write_target(obj):
+        raise TypeError("Setting attributes on a module or class is not allowed")
+    setattr(obj, name, value)
 
 
 def resolve_allowed_modules(extra_allowed_modules: list[str] | None = None) -> frozenset[str]:
@@ -230,6 +271,8 @@ def _make_guarded_getattr(allowed_modules: frozenset[str]) -> Callable[..., Any]
             root_module_name = getattr(value, "__name__", "").split(".")[0]
             if root_module_name in FORBIDDEN_MODULES or root_module_name not in allowed_modules:
                 raise ImportError(f"Access to module '{getattr(value, '__name__', name)}' is not allowed")
+        elif any(value is forbidden for forbidden in _FORBIDDEN_BUILTINS):
+            raise ImportError(f"Access to '{name}' is not allowed")
         return value
 
     return guarded_getattr
@@ -316,7 +359,7 @@ def get_restricted_globals(allowed_modules: list[str] | frozenset[str] | None = 
             "reversed": reversed,
             "round": round,
             "set": set,
-            "setattr": setattr,
+            "setattr": safe_setattr,
             "slice": slice,
             "sorted": sorted,
             "str": str,
@@ -324,7 +367,6 @@ def get_restricted_globals(allowed_modules: list[str] | frozenset[str] | None = 
             "super": super,
             "tuple": tuple,
             "type": type,
-            "vars": vars,
             "zip": zip,
             "__import__": restricted_import,
             "_getattr_": guarded_getattr,

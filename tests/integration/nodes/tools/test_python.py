@@ -406,3 +406,47 @@ def test_python_node_forbidden_module_cannot_be_opted_in():
 
     assert result.status == RunnableStatus.FAILURE
     assert "import of 'os' is not allowed" in str(result.error).lower()
+
+
+@pytest.mark.parametrize(
+    ("attack_name", "attack_code"),
+    [
+        # vars() hands back a module's or class's raw __dict__, bypassing the attribute guard.
+        ("vars_module_dict", "import uuid\ndef run(input_data):\n    return vars(uuid)['os'].getpid()\n"),
+        (
+            "vars_type_subclasses",
+            "def run(input_data):\n    return vars(type)['__subclasses__'](object)\n",
+        ),
+        # io.open is the builtin open: a filesystem primitive reached through an allowed module.
+        ("io_open_file", "import io\ndef run(input_data):\n    return io.open('/etc/hostname').read()\n"),
+        # Mutating a module or a class an allowed module defines leaks state into every other run.
+        ("setattr_module", "import json\ndef run(input_data):\n    setattr(json, 'x', 1)\n    return 1\n"),
+        (
+            "write_shared_class_attr",
+            "import json\ndef run(input_data):\n    json.JSONEncoder.default = 1\n    return 1\n",
+        ),
+    ],
+)
+def test_python_node_object_and_write_escapes_blocked(attack_name, attack_code):
+    """Object-leak and shared-state-write paths that do not go through an import are refused."""
+    result = Python(code=attack_code).run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+
+
+def test_python_node_allows_writes_to_run_local_objects():
+    """Writing to objects the snippet creates stays allowed; only shared modules and classes are refused."""
+    code = (
+        "def run(input_data):\n"
+        "    class Local:\n"
+        "        pass\n"
+        "    Local.attr = 1\n"
+        "    instance = Local()\n"
+        "    setattr(instance, 'value', 2)\n"
+        "    return {'attr': Local.attr, 'value': instance.value}\n"
+    )
+
+    result = Python(code=code).run({}, None)
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == {"attr": 1, "value": 2}
