@@ -793,6 +793,20 @@ def test_python_node_allows_dotted_submodule_import_within_allow_list():
     assert result.output["content"] == "json.decoder"
 
 
+def test_python_node_from_import_aliased_submodule_blocked():
+    """`from requests.packages.urllib3.util.connection import create_connection` loads an off-allow-list
+    leaf module (the real urllib3) even with a non-empty fromlist; the dotted-prefix walk refuses it, so
+    the snippet can't reach a raw socket factory."""
+    code = (
+        "from requests.packages.urllib3.util.connection import create_connection\n"
+        "def run(input_data):\n    return str(create_connection)\n"
+    )
+
+    result = Python(code=code).run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+
+
 def test_python_node_forwardref_class_attribute_access_blocked():
     """A ForwardRef reached as a class via type(f)/f.__class__ cannot expose evaluate(): attribute access
     on the ForwardRef class is refused, so the 3.14 eval entry point stays closed on the default config."""
