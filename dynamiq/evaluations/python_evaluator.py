@@ -4,7 +4,12 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.evaluations import BaseEvaluator
-from dynamiq.nodes.tools.python import compile_and_execute, get_restricted_globals
+from dynamiq.nodes.tools.python import (
+    DEFAULT_ALLOWED_MODULES,
+    EXTENDED_ALLOWED_MODULES,
+    compile_and_execute,
+    get_restricted_globals,
+)
 from dynamiq.utils.logger import logger
 
 
@@ -92,7 +97,9 @@ class PythonEvaluator(BaseEvaluator):
         Compile the user code using restricted execution. Save the compiled
         globals and parse the "evaluate" function's parameter names.
         """
-        self._compiled_globals: dict = get_restricted_globals()
+        # Evaluator code is authored by developers, not end users, so it keeps the data-science libraries
+        # the safe default omits. It still runs under the hardened import and attribute guards.
+        self._compiled_globals: dict = get_restricted_globals(DEFAULT_ALLOWED_MODULES | EXTENDED_ALLOWED_MODULES)
         try:
             compile_and_execute(self.code, self._compiled_globals)
         except Exception as compile_error:

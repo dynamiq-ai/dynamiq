@@ -151,7 +151,7 @@ def test_code_executor_reads_files_via_helper_function():
     file_store = InMemoryFileStore()
     file_store.store("transactions.csv", "amount\n10\n25\n")
 
-    executor = PythonCodeExecutor(file_store=file_store)
+    executor = PythonCodeExecutor(file_store=file_store, extra_allowed_modules=["pandas"])
     code = """
 import pandas as pd
 from io import StringIO
@@ -180,7 +180,11 @@ def test_concurrent_runs_read_their_own_files():
     def run(tenant):
         file_store = InMemoryFileStore()
         file_store.store("data.csv", tenant.encode())
-        return PythonCodeExecutor(file_store=file_store).run(input_data={"code": code}).output["content"]
+        return (
+            PythonCodeExecutor(file_store=file_store, extra_allowed_modules=["pandas"])
+            .run(input_data={"code": code})
+            .output["content"]
+        )
 
     tenants = [f"tenant-{i}" for i in range(6)]
     with ThreadPoolExecutor(len(tenants)) as pool:
@@ -197,7 +201,9 @@ def test_a_run_past_its_time_limit_keeps_its_directory_while_no_other_run_waits(
         "    return str(pd.read_csv('result.csv')['a'][0])\n"
     )
 
-    result = PythonCodeExecutor(file_store=InMemoryFileStore()).run(input_data={"code": code})
+    result = PythonCodeExecutor(file_store=InMemoryFileStore(), extra_allowed_modules=["pandas"]).run(
+        input_data={"code": code}
+    )
 
     assert result.output["content"] == "7"
     assert not (tmp_path / "result.csv").exists()
@@ -207,7 +213,7 @@ def test_a_run_past_its_time_limit_does_not_block_the_next_one():
     hung = PythonCodeExecutor(file_store=InMemoryFileStore(), error_handling=ErrorHandling(timeout_seconds=0.5))
     file_store = InMemoryFileStore()
     file_store.store("data.csv", b"next")
-    following = PythonCodeExecutor(file_store=file_store)
+    following = PythonCodeExecutor(file_store=file_store, extra_allowed_modules=["pandas"])
 
     with ThreadPoolExecutor(1) as pool:
         pool.submit(hung.run, input_data={"code": "import time\ndef run(params=None):\n    time.sleep(4)\n"})

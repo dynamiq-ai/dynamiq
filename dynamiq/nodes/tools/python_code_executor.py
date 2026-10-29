@@ -28,6 +28,7 @@ from dynamiq.nodes.tools.python import (
     get_restricted_globals,
     guarded_write,
     make_safe_print,
+    resolve_allowed_modules,
 )
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
@@ -104,24 +105,27 @@ OPTIONAL_PRELOAD_MODULES: tuple[tuple[str, str | None], ...] = (("seaborn", "sns
 
 
 def _describe_libraries() -> str:
-    """Describe the libraries the code can use.
+    """Describe the libraries the code can use once they are enabled through extra_allowed_modules.
 
-    pdfplumber and the plotting libraries come with extras, so they are left out when they are not installed.
+    Only the standard library is importable by default; the libraries below are available when the node
+    enables them. pdfplumber and the plotting libraries come with extras, so they are left out when they
+    are not installed.
     """
     libraries = ["pandas", "numpy", "requests"]
     if importlib.util.find_spec("pdfplumber"):
         libraries.append("pdfplumber")
     libraries += ["pypdf", "docx (python-docx)", "pptx (python-pptx)", "openpyxl"]
     if not (importlib.util.find_spec("matplotlib") and importlib.util.find_spec("seaborn")):
-        return f"Available libraries include: {', '.join(libraries)}, and the standard library. "
+        return (
+            f"When enabled via extra_allowed_modules, these libraries are available: {', '.join(libraries)}; "
+            "the standard library is always available. "
+        )
     libraries.append("seaborn (preloaded as `sns` and the default for plotting)")
     return (
-        "Matplotlib is forced onto the 'Agg' backend so you can always render plots headlessly with "
-        "`plt.savefig(...)` (no GUI popups). "
-        f"Available libraries include: {', '.join(libraries)}, and the standard library. "
-        "Default to seaborn for charting so plots render consistently without extra setup. Seaborn is already "
-        "injected as `sns`, but explicit `import seaborn as sns` or `import matplotlib.pyplot as plt` statements are "
-        "also permitted if you prefer. "
+        "The standard library is always available. When enabled via extra_allowed_modules, these libraries "
+        f"are available: {', '.join(libraries)}. "
+        "With matplotlib and seaborn enabled, matplotlib is forced onto the 'Agg' backend so you can render "
+        "plots headlessly with `plt.savefig(...)` (no GUI popups), and seaborn is injected as `sns`. "
     )
 
 
@@ -336,17 +340,22 @@ class PythonCodeExecutorInputSchema(BaseModel):
 
 
 class PythonCodeExecutor(Node):
-    """Execute ad-hoc Python code inside RestrictedPython with file store helpers."""
+    """Execute ad-hoc Python code under RestrictedPython with file store helpers.
+
+    RestrictedPython restricts what the code can reach but is not a security boundary for untrusted
+    input: libraries enabled through extra_allowed_modules expose native-code and deserialization sinks,
+    and the temporary workspace is an ordinary process directory. Run untrusted code in a sandbox node.
+    """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.CODE_EXECUTION
     name: str = "python-code-executor"
     description: str = (
-        "Runs dynamic Python code safely via RestrictedPython. "
+        "Runs dynamic Python code under RestrictedPython. "
         "The tool injects file helpers so you can operate on the "
         "shared file store without manually copying artifacts. "
         "Before your code runs, every uploaded file is mirrored into "
-        "the isolated workspace (so even module-level `pd.read_csv('foo.csv')`,"
+        "the temporary workspace (so even module-level `pd.read_csv('foo.csv')`,"
         " `pd.read_excel('bar.xlsx')`, or "
         "`open('notes.txt')` calls just work). The helpers remain the most "
         "reliable way to read/write artifacts—especially "
@@ -375,6 +384,13 @@ class PythonCodeExecutor(Node):
         "`counts[key] = counts[key] + 1` instead."
     )
     file_store: FileStore | None = Field(default=None, description="File storage backend shared with the agent.")
+    extra_allowed_modules: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Top-level packages importable on top of the safe standard-library default, such as 'numpy' "
+            "or 'requests'. Enabling these widens the attack surface, so set it only for code you trust."
+        ),
+    )
     is_files_allowed: bool = True
     input_schema: ClassVar[type[PythonCodeExecutorInputSchema]] = PythonCodeExecutorInputSchema
 
@@ -402,7 +418,8 @@ class PythonCodeExecutor(Node):
 
         safe_print = make_safe_print(stdout_collector._call_print)
 
-        restricted_globals = get_restricted_globals()
+        allowed_modules = resolve_allowed_modules(self.extra_allowed_modules)
+        restricted_globals = get_restricted_globals(allowed_modules)
         restricted_globals.update(helper_aliases)
         restricted_globals.update(
             {
@@ -415,7 +432,7 @@ class PythonCodeExecutor(Node):
                 "_print": stdout_collector._call_print,
             }
         )
-        restricted_globals.update(self._preload_optional_modules())
+        restricted_globals.update(self._preload_optional_modules(allowed_modules))
 
         with _workspace_directory(self.error_handling.timeout_seconds) as workspace_dir:
             files, mapped_inputs, workspace_paths = self._normalize_files(input_data.files)
@@ -639,10 +656,16 @@ class PythonCodeExecutor(Node):
             "(e.g., call read_file('your_file.csv') or helpers['read_file']('your_file.csv') instead of open())."
         )
 
-    def _preload_optional_modules(self) -> dict[str, Any]:
-        """Expose heavier-but-common modules (e.g., seaborn) inside the restricted globals."""
+    def _preload_optional_modules(self, allowed_modules: frozenset[str]) -> dict[str, Any]:
+        """Expose heavier-but-common modules (e.g., seaborn) inside the restricted globals.
+
+        A module is injected only when its top-level package is in allowed_modules, so a preloaded
+        convenience cannot hand out a library the caller did not enable through extra_allowed_modules.
+        """
         preloaded: dict[str, Any] = {}
         for module_path, alias in OPTIONAL_PRELOAD_MODULES:
+            if module_path.split(".")[0] not in allowed_modules:
+                continue
             try:
                 module = importlib.import_module(module_path)
             except Exception as exc:  # noqa: BLE001 broad to guard optional deps
