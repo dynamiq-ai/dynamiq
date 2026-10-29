@@ -104,30 +104,16 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 OPTIONAL_PRELOAD_MODULES: tuple[tuple[str, str | None], ...] = (("seaborn", "sns"),)
 
 
-# Heavier libraries named in the description only when the instance enables them, so an agent is never
-# told to use a module the node will refuse to import by default.
-_KNOWN_EXTRA_LIBRARIES: tuple[str, ...] = (
-    "numpy",
-    "pandas",
-    "matplotlib",
-    "seaborn",
-    "openpyxl",
-    "docx",
-    "pptx",
-    "pdfplumber",
-    "pypdf",
-)
-
-
 def _build_executor_description(extra_allowed_modules: Sequence[str] = ()) -> str:
-    """Build the node description, naming heavier libraries only when this instance enables them.
+    """Build the node description, naming the modules this instance can actually import.
 
-    An agent sees only this text. The default config refuses open() and every third-party import, so the
-    description points at the read_file()/write_file() helpers for file access and lists extra libraries
-    such as pandas or numpy only when extra_allowed_modules turns them on; otherwise an agent follows an
-    example the node then rejects and wastes iterations.
+    An agent sees only this text. Imports are checked against the allow-list, not the whole standard
+    library, so the description lists exactly the importable modules (from resolve_allowed_modules) and
+    points at the read_file()/write_file() helpers for file access; otherwise an agent reaches for a
+    common module such as hashlib or pathlib, or for open(), that the node refuses, and wastes iterations.
     """
     enabled = [module for module in extra_allowed_modules if module]
+    importable = ", ".join(sorted(resolve_allowed_modules(enabled)))
     base = (
         "Runs dynamic Python code under RestrictedPython. Every snippet MUST define a callable `run` "
         "entrypoint, for example "
@@ -137,16 +123,16 @@ def _build_executor_description(extra_allowed_modules: Sequence[str] = ()) -> st
         "`helpers['read_file']('your_file.csv')`) and save new artifacts with the write_* helpers. Direct "
         "file access such as `open('notes.txt')` is refused, so use read_file()/read_file_text()/"
         "read_file_bytes(), write_file()/write_file_text()/write_file_bytes(), list_files(), file_exists() "
-        "and describe_file(). The Python standard library is importable by default. "
+        "and describe_file(). Only these modules can be imported (any other module, including the rest of "
+        f"the standard library, is refused): {importable}. "
     )
     if not enabled:
         libraries = (
-            "No third-party libraries are enabled on this instance; heavier libraries such as pandas and "
-            "numpy are available only when a trusted workflow lists them in extra_allowed_modules. "
+            "Heavier libraries such as pandas and numpy become importable only when a trusted workflow "
+            "lists them in extra_allowed_modules. "
         )
     else:
-        named = ", ".join(sorted(enabled))
-        libraries = f"This instance also enables these libraries: {named}. "
+        libraries = ""
         if "pandas" in enabled:
             libraries += (
                 "Uploaded files are mirrored into the working directory before `run`, so "
