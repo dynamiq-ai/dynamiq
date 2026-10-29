@@ -569,6 +569,16 @@ def test_python_node_operator_not_in_default_allow_list():
             "str_format_unbound",
             "def run(input_data):\n    return str(str.format('{0.__globals__[os]}', run))\n",
         ),
+        # functools.singledispatch(...).register runs typing.get_type_hints on the function, evaluating
+        # its string annotations in library code.
+        (
+            "functools_singledispatch_register",
+            "import functools\n"
+            "@functools.singledispatch\n"
+            "def g(x):\n    return 0\n"
+            "def h(x: '().__class__.__bases__[0].__subclasses__()'):\n    return 1\n"
+            "def run(input_data):\n    g.register(h)\n    return 1\n",
+        ),
         # functools.update_wrapper / wraps run caller-named getattr/setattr in library code: they can copy
         # __globals__ into the snippet or overwrite a shared function's __code__.
         (
