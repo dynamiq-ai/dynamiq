@@ -204,3 +204,36 @@ def test_exa_with_invalid_input_schema(mock_requests, mock_exa_response):
     assert exa_tool_run.error
     assert exa_tool_run.status == RunStatus.FAILED
     assert json.dumps({"runs": [run.to_dict() for run in tracing.runs.values()]}, cls=JsonWorkflowEncoder)
+
+
+@pytest.mark.parametrize(
+    ("category", "sent_category"),
+    [("research paper", "publication"), ("linkedin profile", "people"), ("tweet", None), ("news", "news")],
+)
+def test_exa_replaces_retired_categories(mock_requests, category, sent_category):
+    exa_tool = ExaTool(connection=Exa(api_key="test_key"))
+
+    result = exa_tool.run({"query": "transformer architectures", "category": category})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert mock_requests.call_args.kwargs["json"].get("category") == sent_category
+
+
+def test_exa_node_with_retired_category_still_loads(mock_requests):
+    exa_tool = ExaTool(connection=Exa(api_key="test_key"), category="research paper")
+
+    result = exa_tool.run({"query": "transformer architectures"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert mock_requests.call_args.kwargs["json"]["category"] == "publication"
+
+
+def test_exa_agent_output_includes_notices(mock_requests, mock_exa_response):
+    notice = "No results matched includeDomains, so the results come from a search without it."
+    mock_exa_response["notices"] = [{"code": "RESTRICTIONS_RELAXED", "path": "/includeDomains", "message": notice}]
+    exa_tool = ExaTool(connection=Exa(api_key="test_key"), is_optimized_for_agents=True)
+
+    result = exa_tool.run({"query": "transformer architectures", "include_domains": ["example.org"]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert notice in result.output["content"]

@@ -30,6 +30,18 @@ def find_positions(content: str, needle: str) -> list[int]:
     return positions
 
 
+def http_error_detail(exc: Exception, limit: int = 500) -> str:
+    """Describe a failed request with the body of the response, where providers say why they refused it."""
+    detail = str(exc).rstrip(".")
+    try:
+        body = exc.response.text
+    except Exception:  # Not an HTTP error, or a streamed response whose body was never read.
+        return detail
+    if isinstance(body, str) and body.strip():
+        detail = f"{detail}: {body.strip()[:limit]}"
+    return detail
+
+
 def sanitize_filename(filename: str | None, default: str | None = None) -> str:
     """
     Sanitize a filename to prevent path traversal attacks.
