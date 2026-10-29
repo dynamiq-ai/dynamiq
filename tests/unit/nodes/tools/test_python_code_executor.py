@@ -131,6 +131,17 @@ def test_custom_description_is_preserved():
     assert executor.description == "my custom description"
 
 
+def test_description_names_real_write_helpers():
+    """The description must name helpers that are actually injected (write_text/write_bytes), not
+    write_file_text/write_file_bytes, which do not exist."""
+    description = PythonCodeExecutor(file_store=InMemoryFileStore()).description
+
+    assert "write_text()" in description
+    assert "write_bytes()" in description
+    assert "write_file_text" not in description
+    assert "write_file_bytes" not in description
+
+
 def test_code_executor_captures_stdout_without_print_errors():
     """Ensure the RestrictedPython print hooks no longer crash and stdout is captured."""
     file_store = InMemoryFileStore()

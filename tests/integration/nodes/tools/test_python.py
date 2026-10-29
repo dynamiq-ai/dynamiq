@@ -758,3 +758,36 @@ def test_python_node_refuses_copy_dispatch_table_write():
         assert copy.deepcopy(datetime.date(2020, 1, 1)) == datetime.date(2020, 1, 1)
     finally:
         copy.dispatch_table.pop(datetime.date, None)
+
+
+@pytest.mark.parametrize(
+    ("attack_name", "attack_code"),
+    [
+        # "import a.b.c as x" binds the leaf through a raw IMPORT_FROM the getattr guard never sees, with
+        # an empty fromlist; requests.packages.urllib3 is an alias for the real urllib3, off the allow-list.
+        (
+            "import_alias_urllib3",
+            "import requests.packages.urllib3 as u\ndef run(input_data):\n    return u.__name__\n",
+        ),
+        (
+            "import_alias_urllib3_connection",
+            "import requests.packages.urllib3.util.connection as c\n"
+            "def run(input_data):\n    return str(c.create_connection)\n",
+        ),
+    ],
+)
+def test_python_node_dotted_import_alias_to_forbidden_module_blocked(attack_name, attack_code):
+    """`import a.b.c as x` cannot bind a submodule aliased to a module outside the allow-list."""
+    result = Python(code=attack_code).run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+
+
+def test_python_node_allows_dotted_submodule_import_within_allow_list():
+    """A dotted import whose every component stays within an allowed package still works."""
+    code = "import json.decoder as jd\ndef run(input_data):\n    return jd.__name__\n"
+
+    result = Python(code=code).run({}, None)
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == "json.decoder"
