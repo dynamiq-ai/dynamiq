@@ -174,7 +174,9 @@ def test_python_node_with_random_import(python_code, use_multiple_params):
 )
 def test_python_node_with_dynamiq_import(python_code, use_multiple_params):
     """Test Python node importing dynamiq to create Document objects."""
-    python_node = Python(code=python_code, use_multiple_params=use_multiple_params)
+    python_node = Python(
+        code=python_code, use_multiple_params=use_multiple_params, extra_allowed_modules=["dynamiq"]
+    )
     input_data = {
         "content": "Document content",
         "metadata": {
@@ -339,3 +341,68 @@ def test_python_node_security_attacks_blocked(attack_name, attack_code, expected
 
     error_message = str(result.error).lower()
     assert expected_security_indicator in error_message
+
+
+@pytest.mark.parametrize(
+    ("attack_name", "attack_code", "extra_allowed_modules", "expected_security_indicator"),
+    [
+        (
+            # The reported escape: numpy re-exports the ctypes module, which grants native calls such as
+            # system(). It must stay blocked even when numpy is explicitly enabled.
+            "numpy_ctypes_native_call",
+            "def run(input_data):\n    import numpy\n    return numpy.ctypeslib.ctypes.CDLL(None).getpid()\n",
+            ["numpy"],
+            "access to module 'ctypes' is not allowed",
+        ),
+        (
+            # urllib.request re-exports the os module, a path to os.environ that needs no import of os.
+            "urllib_os_attribute",
+            "def run(input_data):\n    import urllib.request\n    return urllib.request.os.environ\n",
+            ["urllib"],
+            "access to module 'os' is not allowed",
+        ),
+    ],
+)
+def test_python_node_module_traversal_blocked(
+    attack_name, attack_code, extra_allowed_modules, expected_security_indicator
+):
+    """Reaching a disallowed module through an attribute of an allowed one is refused."""
+    python_node = Python(code=attack_code, extra_allowed_modules=extra_allowed_modules)
+
+    result = python_node.run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+    assert expected_security_indicator in str(result.error).lower()
+
+
+def test_python_node_rejects_extended_library_by_default():
+    """numpy is not importable unless the node opts into it through extra_allowed_modules."""
+    python_node = Python(code="def run(input_data):\n    import numpy\n    return 1\n")
+
+    result = python_node.run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "import of 'numpy' is not allowed" in str(result.error).lower()
+
+
+def test_python_node_extra_allowed_modules_enables_library():
+    """An opted-in library works, and legitimate submodule access (numpy.linalg) still resolves."""
+    code = "def run(input_data):\n    import numpy\n    return {'norm': float(numpy.linalg.norm([3.0, 4.0]))}\n"
+    python_node = Python(code=code, extra_allowed_modules=["numpy"])
+
+    result = python_node.run({}, None)
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"]["norm"] == 5.0
+
+
+def test_python_node_forbidden_module_cannot_be_opted_in():
+    """A forbidden module stays blocked even if a caller lists it in extra_allowed_modules."""
+    python_node = Python(
+        code="def run(input_data):\n    import os\n    return 1\n", extra_allowed_modules=["os"]
+    )
+
+    result = python_node.run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "import of 'os' is not allowed" in str(result.error).lower()

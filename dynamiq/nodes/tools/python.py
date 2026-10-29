@@ -2,9 +2,10 @@ import ast
 import builtins
 import io
 from copy import deepcopy
+from types import ModuleType
 from typing import Any, Callable, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from RestrictedPython import compile_restricted, safe_builtins, utility_builtins
 from RestrictedPython.Eval import default_guarded_getattr, default_guarded_getitem, default_guarded_getiter
 from RestrictedPython.Guards import guarded_unpack_sequence
@@ -20,39 +21,92 @@ from dynamiq.utils import format_value
 from dynamiq.utils.lazy_imports import optional_dependency_error
 from dynamiq.utils.logger import logger
 
-ALLOWED_MODULES = [
-    "base64",
-    "collections",
-    "copy",
-    "cmath",
-    "csv",
-    "datetime",
-    "dynamiq",
-    "functools",
-    "io",
-    "json",
-    "math",
-    "operator",
-    "pydantic",
-    "random",
-    "re",
-    "requests",
-    "statistics",
-    "time",
-    "typing",
-    "urllib",
-    "uuid",
-    "pandas",
-    "numpy",
-    "openpyxl",
-    "docx",
-    "pptx",
-    "pdfplumber",
-    "pypdf",
-    "matplotlib",
-    "seaborn",
-    "yaml",
-]
+# Modules exposed to restricted code by default: pure-Python standard library only. These are safe to
+# offer to untrusted code because they grant no process, filesystem or native-code access.
+DEFAULT_ALLOWED_MODULES = frozenset(
+    {
+        "base64",
+        "collections",
+        "copy",
+        "cmath",
+        "csv",
+        "datetime",
+        "decimal",
+        "functools",
+        "io",
+        "itertools",
+        "json",
+        "math",
+        "operator",
+        "random",
+        "re",
+        "statistics",
+        "string",
+        "time",
+        "typing",
+        "uuid",
+    }
+)
+
+# Heavier third-party and I/O libraries. They are not a security boundary: they expose native code and
+# deserialization sinks (for example numpy.ctypeslib.ctypes and pickle-backed loaders), so a node opts
+# into them explicitly through extra_allowed_modules rather than receiving them by default. yaml is left
+# out on purpose because its default loader deserializes arbitrary Python objects.
+EXTENDED_ALLOWED_MODULES = frozenset(
+    {
+        "numpy",
+        "pandas",
+        "requests",
+        "urllib",
+        "pydantic",
+        "openpyxl",
+        "docx",
+        "pptx",
+        "pdfplumber",
+        "pypdf",
+        "matplotlib",
+        "seaborn",
+        # dynamiq exposes framework internals, so it is opt-in rather than a default: it lets trusted code
+        # build domain types such as Document. The attribute guard still blocks reaching os and the like
+        # through a dynamiq submodule.
+        "dynamiq",
+    }
+)
+
+# Modules that restricted code may never import or reach, even when a caller lists them in
+# extra_allowed_modules. Each grants process, filesystem, native-code or introspection access that would
+# defeat the restrictions, so the import and attribute guards refuse them unconditionally.
+FORBIDDEN_MODULES = frozenset(
+    {
+        "os",
+        "sys",
+        "subprocess",
+        "ctypes",
+        "_ctypes",
+        "cffi",
+        "importlib",
+        "builtins",
+        "socket",
+        "pickle",
+        "marshal",
+        "shutil",
+        "signal",
+        "resource",
+        "mmap",
+        "multiprocessing",
+        "threading",
+        "pty",
+        "fcntl",
+        "gc",
+        "inspect",
+        "code",
+        "codeop",
+        "runpy",
+    }
+)
+
+# Retained for backward compatibility with external importers; the nodes no longer read it.
+ALLOWED_MODULES = sorted(DEFAULT_ALLOWED_MODULES | EXTENDED_ALLOWED_MODULES)
 
 ALLOWED_DUNDER_ATTRIBUTES = {"__class__", "__name__", "__qualname__"}
 
@@ -122,68 +176,105 @@ def guarded_write(obj, value=None):
     return value if value is not None else obj
 
 
-def restricted_import(name: str, globals=None, locals=None, fromlist=(), level=0) -> Any:
+def resolve_allowed_modules(extra_allowed_modules: list[str] | None = None) -> frozenset[str]:
+    """Return the effective import allow-list: the safe default plus extras, never a forbidden module.
+
+    FORBIDDEN_MODULES always wins, so a caller cannot re-enable a dangerous module by listing it.
     """
-    Restricted import function to allow importing only modules in ALLOWED_MODULES.
-    """
-    if not name:
-        raise ImportError("Empty module name")
-
-    if level not in (0,):
-        raise ImportError("Relative imports are not supported in the Python executor")
-
-    root_module_name = name.split(".")[0]
-    if root_module_name not in ALLOWED_MODULES:
-        logger.warning(f"Import of '{root_module_name}' is not allowed")
-        raise ImportError(f"Import of '{root_module_name}' is not allowed")
-
-    normalized_fromlist = fromlist or ()
-    try:
-        module = builtins.__import__(name, globals, locals, normalized_fromlist, level)
-        logger.debug(f"Successfully imported {name}")
-        return module
-    except ImportError as e:
-        logger.error(f"Failed to import {name}: {str(e)}")
-        if optional_error := optional_dependency_error(e, name):
-            raise optional_error from e
-        raise
+    allowed = set(DEFAULT_ALLOWED_MODULES)
+    if extra_allowed_modules:
+        allowed.update(extra_allowed_modules)
+    return frozenset(allowed - FORBIDDEN_MODULES)
 
 
-def safe_hasattr(obj: Any, name: str) -> bool:
-    """
-    Safe version of hasattr that uses guarded getattr.
-    """
-    try:
-        default_guarded_getattr(obj, name)
-        return True
-    except (AttributeError, TypeError):
-        return False
+def _make_restricted_import(allowed_modules: frozenset[str]) -> Callable[..., Any]:
+    """Build an __import__ that admits only modules whose top-level package is in allowed_modules."""
 
+    def restricted_import(name: str, globals=None, locals=None, fromlist=(), level=0) -> Any:
+        if not name:
+            raise ImportError("Empty module name")
 
-def safe_getattr(obj: Any, name: str, default=None) -> Any:
-    """
-    Safe version of getattr that uses guarded getattr.
-    """
-    if name in ALLOWED_DUNDER_ATTRIBUTES:
+        if level not in (0,):
+            raise ImportError("Relative imports are not supported in the Python executor")
+
+        root_module_name = name.split(".")[0]
+        if root_module_name in FORBIDDEN_MODULES or root_module_name not in allowed_modules:
+            logger.warning(f"Import of '{root_module_name}' is not allowed")
+            raise ImportError(f"Import of '{root_module_name}' is not allowed")
+
+        normalized_fromlist = fromlist or ()
         try:
-            return getattr(obj, name)
-        except AttributeError:
+            module = builtins.__import__(name, globals, locals, normalized_fromlist, level)
+            logger.debug(f"Successfully imported {name}")
+            return module
+        except ImportError as e:
+            logger.error(f"Failed to import {name}: {str(e)}")
+            if optional_error := optional_dependency_error(e, name):
+                raise optional_error from e
+            raise
+
+    return restricted_import
+
+
+def _make_guarded_getattr(allowed_modules: frozenset[str]) -> Callable[..., Any]:
+    """Build a _getattr_ that forbids reaching a module outside allowed_modules through an attribute.
+
+    RestrictedPython's import guard only checks the "import" statement, but allow-listed modules re-export
+    other modules as plain attributes (numpy.ctypeslib.ctypes, urllib.request.os). Enforcing the allow-list
+    on every module-valued attribute closes that whole class without naming each path.
+    """
+
+    def guarded_getattr(obj: Any, name: str, *args: Any, **kwargs: Any) -> Any:
+        value = default_guarded_getattr(obj, name, *args, **kwargs)
+        if isinstance(value, ModuleType):
+            root_module_name = getattr(value, "__name__", "").split(".")[0]
+            if root_module_name in FORBIDDEN_MODULES or root_module_name not in allowed_modules:
+                raise ImportError(f"Access to module '{getattr(value, '__name__', name)}' is not allowed")
+        return value
+
+    return guarded_getattr
+
+
+def get_restricted_globals(allowed_modules: list[str] | frozenset[str] | None = None) -> dict:
+    """Return a globals dict for restricted execution limited to allowed_modules.
+
+    allowed_modules is the set of importable top-level packages; None uses DEFAULT_ALLOWED_MODULES.
+    Modules in FORBIDDEN_MODULES are refused regardless. The returned import and attribute guards are
+    bound to this set, so each call is independent of any other.
+    """
+    if allowed_modules is None:
+        allowed = frozenset(DEFAULT_ALLOWED_MODULES)
+    else:
+        allowed = frozenset(allowed_modules) - FORBIDDEN_MODULES
+
+    restricted_import = _make_restricted_import(allowed)
+    guarded_getattr = _make_guarded_getattr(allowed)
+
+    def safe_getattr(obj: Any, name: str, default=None) -> Any:
+        """Guarded getattr builtin: the allow-list and dunder rules apply as in compiled attribute access."""
+        if name in ALLOWED_DUNDER_ATTRIBUTES:
+            try:
+                return getattr(obj, name)
+            except AttributeError:
+                if default is not None:
+                    return default
+                raise
+
+        try:
+            return guarded_getattr(obj, name)
+        except (AttributeError, TypeError):
             if default is not None:
                 return default
             raise
 
-    try:
-        return default_guarded_getattr(obj, name)
-    except (AttributeError, TypeError):
-        if default is not None:
-            return default
-        raise
+    def safe_hasattr(obj: Any, name: str) -> bool:
+        """Guarded hasattr builtin. A blocked module attribute reports as absent rather than raising."""
+        try:
+            guarded_getattr(obj, name)
+            return True
+        except (AttributeError, TypeError, ImportError):
+            return False
 
-
-def get_restricted_globals() -> dict:
-    """
-    Return globals dict configured for restricted code execution.
-    """
     return {
         "__builtins__": {
             **safe_builtins,
@@ -236,13 +327,13 @@ def get_restricted_globals() -> dict:
             "vars": vars,
             "zip": zip,
             "__import__": restricted_import,
-            "_getattr_": default_guarded_getattr,
+            "_getattr_": guarded_getattr,
             "_getitem_": default_guarded_getitem,
             "_getiter_": default_guarded_getiter,
             "__metaclass__": type,
             "__name__": "__main__",
         },
-        "_getattr_": default_guarded_getattr,
+        "_getattr_": guarded_getattr,
         "_unpack_sequence_": guarded_unpack_sequence,
     }
 
@@ -270,7 +361,12 @@ class PythonInputSchema(BaseModel):
 
 class Python(Node):
     """
-    Node for executing Python code in a secure sandbox.
+    Node for executing Python code under RestrictedPython.
+
+    RestrictedPython limits what imported code can reach but is not a security boundary for untrusted
+    input: allowed third-party libraries still expose native-code and deserialization sinks. Run code
+    from an untrusted source in a sandbox node instead.
+
     Attributes:
       group (Literal[NodeGroup.TOOLS]): node group.
       name (str): node name.
@@ -279,14 +375,19 @@ class Python(Node):
       use_multiple_params (bool): Determines how the input dictionary is passed to the Python function.
         -If True, the input dictionary is unpacked into multiple parameters.
         -If False, it is passed as a single dictionary with all parameters as keys.
+      extra_allowed_modules (list[str]): Top-level packages importable on top of the safe standard-library
+        default, such as "numpy" or "requests". Enabling these widens the attack surface, so set it only
+        for code you trust. Modules in FORBIDDEN_MODULES can never be enabled.
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.CODE_EXECUTION
     name: str = "python-tool"
-    description: str = """Executes Python code in a secure sandbox with restricted imports for calculations,
-    data processing, and API interactions."""  # noqa: E501
+    description: str = """Executes Python code with restricted imports for calculations, data processing,
+    and API interactions. By default only the Python standard library is importable; configure
+    extra_allowed_modules to enable libraries such as numpy or requests."""  # noqa: E501
     code: str
     use_multiple_params: bool = False
+    extra_allowed_modules: list[str] = Field(default_factory=list)
     input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
     is_files_allowed: bool = True
 
@@ -306,7 +407,7 @@ class Python(Node):
         stdout = io.StringIO()
         safe_print = make_safe_print(lambda *args, **print_kwargs: print(*args, file=stdout, **print_kwargs))
 
-        restricted_globals = get_restricted_globals()
+        restricted_globals = get_restricted_globals(resolve_allowed_modules(self.extra_allowed_modules))
         restricted_globals.update(
             {
                 "_inplacevar_": self._inplacevar,
