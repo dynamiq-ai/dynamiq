@@ -124,11 +124,19 @@ def test_description_names_only_enabled_libraries():
     assert "pd.read_csv" in enabled.description
 
 
-def test_custom_description_is_preserved():
-    """A caller that sets description explicitly keeps it; the validator only fills the default."""
-    executor = PythonCodeExecutor(file_store=InMemoryFileStore(), description="my custom description")
+def test_description_refreshes_when_extra_modules_change():
+    """The description is derived, not stored: to_dict() dumps it, so a saved workflow whose
+    extra_allowed_modules is later edited (a UI/YAML change) must recompute the text rather than keep the
+    stale version that named the wrong importable modules."""
+    stale = PythonCodeExecutor(file_store=InMemoryFileStore()).description
+    assert "pd.read_csv" not in stale
 
-    assert executor.description == "my custom description"
+    reloaded = PythonCodeExecutor(
+        file_store=InMemoryFileStore(), extra_allowed_modules=["pandas"], description=stale
+    )
+
+    assert reloaded.description != stale
+    assert "pd.read_csv" in reloaded.description
 
 
 def test_description_names_real_write_helpers():

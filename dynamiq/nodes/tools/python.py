@@ -621,16 +621,21 @@ class Python(Node):
       use_multiple_params (bool): Determines how the input dictionary is passed to the Python function.
         -If True, the input dictionary is unpacked into multiple parameters.
         -If False, it is passed as a single dictionary with all parameters as keys.
-      extra_allowed_modules (list[str]): Top-level packages importable on top of the safe standard-library
-        default, such as "numpy" or "requests". Enabling these widens the attack surface, so set it only
-        for code you trust. Modules in FORBIDDEN_MODULES can never be enabled.
+      extra_allowed_modules (list[str]): Top-level packages importable on top of the safe default, such as
+        "numpy" or "pandas". requests is already importable by default, so it need not be listed here.
+        Enabling these widens the attack surface, so set it only for code you trust. Modules in
+        FORBIDDEN_MODULES can never be enabled.
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.CODE_EXECUTION
     name: str = "python-tool"
-    description: str = """Executes Python code with restricted imports for calculations, data processing,
-    and API interactions. By default only the Python standard library is importable; configure
-    extra_allowed_modules to enable libraries such as numpy or requests."""  # noqa: E501
+    description: str = (
+        "Executes Python code under RestrictedPython for calculations, data processing and HTTP calls. "
+        "Only an allow-listed set of modules can be imported: the safe standard-library default plus any "
+        "extra_allowed_modules — not the whole standard library (hashlib, pathlib, os and the like are "
+        "refused). requests is importable by default for HTTP; set extra_allowed_modules for heavier "
+        "libraries such as numpy or pandas."
+    )
     code: str
     use_multiple_params: bool = False
     extra_allowed_modules: list[str] = Field(default_factory=list)
