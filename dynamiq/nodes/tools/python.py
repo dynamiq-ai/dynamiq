@@ -3,6 +3,7 @@ import builtins
 import io
 from collections import UserString
 from copy import deepcopy
+from functools import update_wrapper, wraps
 from types import BuiltinFunctionType, FunctionType, MethodType, ModuleType
 from typing import Any, Callable, ClassVar, Literal
 
@@ -177,7 +178,9 @@ def make_safe_print(printer: Callable[..., Any]):
 # snippet reaches them. The compiler blocks the names eval, exec and compile, but they and the file
 # openers stay reachable as attributes of allowed modules (io.open is the builtin open; io.FileIO and
 # io.open_code are separate objects). collections.UserString.format delegates to str.format in library
-# code, past the str.format guard, so the class itself is refused.
+# code, past the str.format guard, so the class itself is refused. functools.update_wrapper and wraps run
+# a caller-named getattr/setattr in library code, which copies arbitrary dunders (including __code__ of a
+# shared function and __globals__ into the snippet), so both are refused.
 _FORBIDDEN_BUILTINS = frozenset(
     obj
     for obj in (
@@ -191,6 +194,8 @@ _FORBIDDEN_BUILTINS = frozenset(
         io.FileIO,
         getattr(io, "open_code", None),
         UserString,
+        update_wrapper,
+        wraps,
     )
     if obj is not None
 )
