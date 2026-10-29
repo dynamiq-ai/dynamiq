@@ -104,11 +104,12 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 OPTIONAL_PRELOAD_MODULES: tuple[tuple[str, str | None], ...] = (("seaborn", "sns"),)
 
 
-# Opening sentence shared by every generated description, including the one on main before this change.
-# A stored description that starts with it is one the node generated (possibly stale, possibly from an
-# older allow-list), so it is safe to regenerate; a caller's custom text does not start with it and is
-# kept as written.
-_GENERATED_DESCRIPTION_PREFIX = "Runs dynamic Python code under RestrictedPython."
+# Opening stem shared by every generated description, this PR's ("Runs dynamic Python code under
+# RestrictedPython. ...") and the one on main before it ("Runs dynamic Python code safely via
+# RestrictedPython. ..."). A stored description that starts with it is one the node generated (possibly
+# stale, possibly from an older allow-list), so it is safe to regenerate; a caller's custom text does not
+# start with it and is kept as written.
+_GENERATED_DESCRIPTION_PREFIX = "Runs dynamic Python code "
 
 
 def _build_executor_description(extra_allowed_modules: Sequence[str] = ()) -> str:
@@ -122,7 +123,7 @@ def _build_executor_description(extra_allowed_modules: Sequence[str] = ()) -> st
     enabled = [module for module in extra_allowed_modules if module]
     importable = ", ".join(sorted(resolve_allowed_modules(enabled)))
     base = (
-        f"{_GENERATED_DESCRIPTION_PREFIX} Every snippet MUST define a callable `run` "
+        "Runs dynamic Python code under RestrictedPython. Every snippet MUST define a callable `run` "
         "entrypoint, for example "
         "`def run(params=None, helpers=None, files=None, stdout=None, context=None): ...`; declare only "
         "the parameters you need and reach anything else through the `context` dict. Uploaded files are "
