@@ -47,7 +47,7 @@ def advanced_search_with_contents_example():
             "limit": 5,
             "query_type": QueryType.neural,
             "use_autoprompt": True,
-            "category": "research paper",
+            "category": "publication",
             "start_crawl_date": "2026-01-01T00:00:00.000Z",
             "end_published_date": "2026-01-31T00:00:00.000Z",
             "include_text": ["large language model"],

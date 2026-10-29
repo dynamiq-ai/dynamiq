@@ -7,6 +7,7 @@ from dynamiq.connections import Jina
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.tools.utils import http_error_detail
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
@@ -71,6 +72,15 @@ class JinaResponseFormat(str, enum.Enum):
     PAGESHOT = "pageshot"
 
 
+# The JSON field Jina Reader puts each format in. Screenshot formats come back as a link to the image.
+JINA_SCRAPE_RESPONSE_FIELDS = {
+    JinaResponseFormat.HTML: "html",
+    JinaResponseFormat.TEXT: "text",
+    JinaResponseFormat.SCREENSHOT: "screenshotUrl",
+    JinaResponseFormat.PAGESHOT: "pageshotUrl",
+}
+
+
 class JinaScrapeTool(ConnectionNode):
     """
     A tool for scraping web pages, powered by Jina Reader API.
@@ -116,6 +126,9 @@ class JinaScrapeTool(ConnectionNode):
             headers["X-Return-Format"] = self.response_format.value
 
         engine = input_data.engine or self.engine
+        if engine == "direct" and self.response_format in (JinaResponseFormat.SCREENSHOT, JinaResponseFormat.PAGESHOT):
+            # The direct engine fetches pages without a browser, so it cannot take screenshots.
+            engine = "browser"
         if engine in ["browser", "direct", "cf-browser-rendering"]:
             headers["X-Engine"] = engine
 
@@ -166,7 +179,7 @@ class JinaScrapeTool(ConnectionNode):
             )
 
         data = response_data["data"]
-        content = data.get("content", "")
+        content = data.get(JINA_SCRAPE_RESPONSE_FIELDS.get(self.response_format, "content")) or ""
         links = data.get("links", {})
         images = data.get("images", {})
 
@@ -197,8 +210,6 @@ class JinaScrapeTool(ConnectionNode):
         calls ``response.json()`` and ``_parse_response``, both of which can raise on
         malformed payloads), while output formatting runs outside.
         """
-        if self.response_format in [JinaResponseFormat.PAGESHOT, JinaResponseFormat.SCREENSHOT]:
-            return response.content, {}, {}
         response_data = response.json()
         return self._parse_response(response_data)
 
@@ -298,6 +309,9 @@ class JinaScrapeTool(ConnectionNode):
         return self._render_scrape_output(scrape_result, links, images, request_body, headers)
 
 
+# Jina Search refuses a request for more results with HTTP 400.
+JINA_SEARCH_MAX_RESULTS = 20
+
 SummaryPreference = bool | Literal["all"]
 EnginePreference = Literal["browser", "direct", "cf-browser-rendering"]
 RetainImagesPreference = Literal["none"]
@@ -305,7 +319,7 @@ RetainImagesPreference = Literal["none"]
 
 class JinaSearchInputSchema(BaseModel):
     query: str | None = Field(None, description="Search query text")
-    max_results: int | None = Field(None, description="Maximum number of search results (1-100)")
+    max_results: int | None = Field(None, description="Maximum number of search results (1-20)")
     country: str | None = Field(None, description="Two-letter country code for search region")
     location: str | None = Field(None, description="Geographic location for search origin")
     language: str | None = Field(None, description="Two-letter language code for results")
@@ -582,7 +596,7 @@ class JinaSearchTool(ConnectionNode):
 
         max_results = input_data.max_results or self.max_results
         if max_results:
-            body["num"] = max_results
+            body["num"] = min(max_results, JINA_SEARCH_MAX_RESULTS)
 
         country = input_data.country or self.country
         if country:
@@ -622,10 +636,11 @@ class JinaSearchTool(ConnectionNode):
         return "\n".join(formatted_results).strip()
 
     def _wrap_search_exception(self, exc: Exception) -> ToolExecutionException:
-        logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {exc}")
+        error = http_error_detail(exc)
+        logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {error}")
         return ToolExecutionException(
             f"Tool '{self.name}' failed to retrieve search results. "
-            f"Error: {str(exc)}. Please analyze the error and take appropriate action.",
+            f"Error: {error}. Please analyze the error and take appropriate action.",
             recoverable=True,
         )
 
