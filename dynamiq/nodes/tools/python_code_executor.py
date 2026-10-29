@@ -104,6 +104,13 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 OPTIONAL_PRELOAD_MODULES: tuple[tuple[str, str | None], ...] = (("seaborn", "sns"),)
 
 
+# Opening sentence shared by every generated description, including the one on main before this change.
+# A stored description that starts with it is one the node generated (possibly stale, possibly from an
+# older allow-list), so it is safe to regenerate; a caller's custom text does not start with it and is
+# kept as written.
+_GENERATED_DESCRIPTION_PREFIX = "Runs dynamic Python code under RestrictedPython."
+
+
 def _build_executor_description(extra_allowed_modules: Sequence[str] = ()) -> str:
     """Build the node description, naming the modules this instance can actually import.
 
@@ -115,7 +122,7 @@ def _build_executor_description(extra_allowed_modules: Sequence[str] = ()) -> st
     enabled = [module for module in extra_allowed_modules if module]
     importable = ", ".join(sorted(resolve_allowed_modules(enabled)))
     base = (
-        "Runs dynamic Python code under RestrictedPython. Every snippet MUST define a callable `run` "
+        f"{_GENERATED_DESCRIPTION_PREFIX} Every snippet MUST define a callable `run` "
         "entrypoint, for example "
         "`def run(params=None, helpers=None, files=None, stdout=None, context=None): ...`; declare only "
         "the parameters you need and reach anything else through the `context` dict. Uploaded files are "
@@ -397,14 +404,19 @@ class PythonCodeExecutor(Node):
 
     @model_validator(mode="after")
     def _describe_enabled_libraries(self) -> "PythonCodeExecutor":
-        """Always rebuild the agent-facing description from extra_allowed_modules.
+        """Regenerate the agent-facing description unless the caller gave a custom one.
 
-        description is derived, not stored. to_dict() dumps it, so a saved workflow whose
-        extra_allowed_modules is later edited (a UI or YAML change), or one saved before this change,
-        would otherwise keep text that names the wrong importable modules. Recomputing on every load keeps
-        the module list and library notes accurate for the agent.
+        to_dict() dumps description, so a generated one would otherwise be preserved on reload and go
+        stale when extra_allowed_modules is later edited (it would name the wrong importable modules); a
+        workflow saved before this change keeps its old generated text the same way. Regenerate when
+        description was not set explicitly, or when the stored value is itself a generated description
+        (it starts with the shared prefix, so any allow-list it was built from is refreshed). A caller's
+        custom description does not start with the prefix and is left exactly as written.
         """
-        self.description = _build_executor_description(self.extra_allowed_modules)
+        if "description" not in self.model_fields_set or (self.description or "").startswith(
+            _GENERATED_DESCRIPTION_PREFIX
+        ):
+            self.description = _build_executor_description(self.extra_allowed_modules)
         return self
 
     def execute(
