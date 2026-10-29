@@ -510,6 +510,13 @@ def test_python_node_operator_not_in_default_allow_list():
             "    setattr(json.dumps, '__kwdefaults__', {'indent': 7})\n"
             "    return 1\n",
         ),
+        # collections.UserString.format delegates to str.format in library code, past the str.format guard.
+        (
+            "userstring_format",
+            "import collections, uuid\n"
+            "def run(input_data):\n"
+            "    return str(collections.UserString('{0.__globals__[os]}').format(uuid.uuid4))\n",
+        ),
     ],
 )
 def test_python_node_c_level_escapes_blocked(attack_name, attack_code):
