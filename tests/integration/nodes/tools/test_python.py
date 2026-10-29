@@ -410,20 +410,61 @@ def test_python_node_rejects_extended_library_by_default():
 
 
 def test_python_node_requests_and_typing_are_default():
-    """requests and typing are importable without opting in; typing's safe members still resolve."""
+    """requests and typing are importable without opting in; typing's safe members and a benign
+    requests.utils helper still resolve."""
     code = (
         "import requests\n"
         "import typing\n"
         "from typing import Optional\n"
         "def run(input_data):\n"
-        "    return {'has_get': callable(requests.get), 'origin': str(typing.get_origin(Optional[int]))}\n"
+        "    return {\n"
+        "        'has_get': callable(requests.get),\n"
+        "        'quote': requests.utils.quote('a b'),\n"
+        "        'origin': str(typing.get_origin(Optional[int])),\n"
+        "    }\n"
     )
 
     result = Python(code=code).run({}, None)
 
     assert result.status == RunnableStatus.SUCCESS
     assert result.output["content"]["has_get"] is True
+    assert result.output["content"]["quote"] == "a%20b"
     assert "Union" in result.output["content"]["origin"]
+
+
+@pytest.mark.parametrize(
+    ("attack_name", "attack_code"),
+    [
+        # requests.utils.atomic_open opens an arbitrary path for writing, past the open/io guards.
+        (
+            "requests_atomic_open",
+            "import requests\ndef run(input_data):\n    return requests.utils.atomic_open('/tmp/pwn')\n",
+        ),
+        # get_environ_proxies and compat.getproxies return the process proxy environment.
+        (
+            "requests_get_environ_proxies",
+            "import requests\ndef run(input_data):\n    return requests.utils.get_environ_proxies('https://x')\n",
+        ),
+        (
+            "requests_compat_getproxies",
+            "import requests\ndef run(input_data):\n    return requests.compat.getproxies()\n",
+        ),
+        # get_netrc_auth returns the login/password from ~/.netrc.
+        (
+            "requests_get_netrc_auth",
+            "import requests\ndef run(input_data):\n    return requests.utils.get_netrc_auth('https://x')\n",
+        ),
+    ],
+)
+def test_python_node_requests_file_and_credential_helpers_blocked(attack_name, attack_code):
+    """requests stays in the default, but its file-write and credential helpers are refused by identity.
+
+    This closes the reachable helpers only; the wider requests/urllib3 surface and trust_env are not a
+    boundary for untrusted code, which belongs in an out-of-process sandbox node.
+    """
+    result = Python(code=attack_code).run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
 
 
 def test_python_node_extra_allowed_modules_enables_library():
