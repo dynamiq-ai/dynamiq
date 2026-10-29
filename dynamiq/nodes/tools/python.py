@@ -406,11 +406,13 @@ def _make_restricted_import(allowed_modules: frozenset[str]) -> Callable[..., An
                 logger.warning(f"Import of '{item}' from '{name}' is not allowed")
                 raise ImportError(f"Import of '{item}' from '{name}' is not allowed")
 
-        # "import a.b.c" and "import a.b.c as x" have an empty fromlist and bind a submodule through raw
-        # IMPORT_FROM reads the getattr guard never sees, so a leaf aliased to a module outside the
-        # allow-list slips past the root check above (requests.packages.urllib3 is the real urllib3).
-        # Apply the value check to every dotted prefix that resolved, through sys.modules as CPython does.
-        if not normalized_fromlist and "." in name:
+        # A dotted name binds or loads submodules through raw IMPORT_FROM reads the getattr guard never
+        # sees, so a leaf aliased to a module outside the allow-list slips past the root check above
+        # (requests.packages.urllib3 is the real urllib3). This happens for "import a.b.c [as x]" and for
+        # "from a.b.c import name" alike (the fromlist check only sees the leaf's attributes, not that the
+        # leaf module itself is off the allow-list), so walk every dotted prefix whatever the fromlist,
+        # through sys.modules as CPython resolves them.
+        if "." in name:
             parts = name.split(".")
             for depth in range(2, len(parts) + 1):
                 submodule = sys.modules.get(".".join(parts[:depth]))

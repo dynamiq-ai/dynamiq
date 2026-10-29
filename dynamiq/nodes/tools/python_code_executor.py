@@ -139,7 +139,7 @@ def _build_executor_description(extra_allowed_modules: Sequence[str] = ()) -> st
                 "`pd.read_csv('your_file.csv')` works; you can also parse helper output in memory with "
                 "`pd.read_csv(io.StringIO(read_file('your_file.csv')))`. "
             )
-        if "matplotlib" in enabled or "seaborn" in enabled:
+        if "matplotlib" in enabled:
             libraries += (
                 "matplotlib is forced onto the headless 'Agg' backend, so render plots with "
                 "`plt.savefig(...)` and persist them with the write_* helpers"
@@ -147,6 +147,10 @@ def _build_executor_description(extra_allowed_modules: Sequence[str] = ()) -> st
             if "seaborn" in enabled and importlib.util.find_spec("seaborn"):
                 libraries += "; seaborn is injected as `sns`"
             libraries += ". "
+        elif "seaborn" in enabled:
+            # seaborn renders through matplotlib, which import matplotlib still refuses unless it is also
+            # enabled, so don't promise plt.savefig; point at enabling matplotlib too.
+            libraries += "Enable matplotlib as well to render and save plots, which seaborn draws through. "
     tail = (
         "Write normal Python exactly as it would appear in a `.py` file: use literal newlines instead of "
         "escaped ones, and avoid JSON-style quoting inside the source. `print()` output is captured "

@@ -148,6 +148,19 @@ def test_custom_description_is_preserved():
     assert executor.description == custom
 
 
+def test_seaborn_only_description_does_not_promise_matplotlib():
+    """A seaborn-only instance can't import matplotlib, so the description must not tell the agent to use
+    plt.savefig; it points at enabling matplotlib. With matplotlib enabled, the plotting guidance appears."""
+    seaborn_only = PythonCodeExecutor(file_store=InMemoryFileStore(), extra_allowed_modules=["seaborn"]).description
+    assert "plt.savefig" not in seaborn_only
+    assert "Enable matplotlib as well" in seaborn_only
+
+    with_mpl = PythonCodeExecutor(
+        file_store=InMemoryFileStore(), extra_allowed_modules=["matplotlib", "seaborn"]
+    ).description
+    assert "plt.savefig" in with_mpl
+
+
 def test_edited_default_opening_description_is_preserved():
     """A custom description that reuses the default's opening words (the common way to customize, or a UI
     user appending instructions to the pre-filled text) must not be overwritten — only a description that
