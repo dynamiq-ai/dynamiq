@@ -481,6 +481,10 @@ def get_restricted_globals(allowed_modules: list[str] | frozenset[str] | None = 
             "__metaclass__": type,
             "__name__": "__main__",
         },
+        # A function created during execution takes __module__ from this dict's __name__, so set it to
+        # "__main__": that is how _is_shared_write_target tells a snippet-defined function (writable) from
+        # a shared library function (refused). A class finds __name__ through the builtins fallback already.
+        "__name__": "__main__",
         "_getattr_": guarded_getattr,
         "_unpack_sequence_": guarded_unpack_sequence,
     }
