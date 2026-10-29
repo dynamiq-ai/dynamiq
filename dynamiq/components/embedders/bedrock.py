@@ -26,7 +26,14 @@ class BedrockEmbedder(BaseEmbedder):
             params["input_type"] = self.input_type
             if self.truncate:
                 params["truncate"] = self.truncate
-            if self.dimensions:
+            # Only embed-v4 accepts an output dimension; v3 models reject the key.
+            if self.dimensions and "embed-v4" in self.model:
                 params["dimensions"] = self.dimensions
 
         return params
+
+    def _apply_text_truncation(self, text: str) -> str:
+        # Bedrock applies Cohere's truncate policy itself, so cutting the text here would override it.
+        if "cohere" in self.model and self.truncate:
+            return text
+        return super()._apply_text_truncation(text)

@@ -32,7 +32,8 @@ class BedrockDocumentEmbedder(DocumentEmbedder):
     model: str = "amazon.titan-embed-text-v1"
     input_type: Literal["search_document", "search_query", "classification", "clustering"] = Field(
         default="search_document",
-        description="Cohere embedding task, sent only for Cohere models. Use search_document for chunks stored in a RAG index.",
+        description="Cohere embedding task, sent only for Cohere models. "
+        "Use search_document for chunks stored in a RAG index.",
     )
     truncate: Literal["NONE", "START", "END"] = Field(
         default="NONE",

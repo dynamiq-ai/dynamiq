@@ -62,3 +62,29 @@ def test_new_fields_round_trip_through_dict(connection):
     assert data["input_type"] == "clustering"
     assert data["truncate"] == "NONE"
     assert data["dimensions"] == 512
+
+
+def test_dimensions_not_sent_to_cohere_v3(connection):
+    node = BedrockTextEmbedder(connection=connection, model="cohere.embed-english-v3", dimensions=512)
+    node.init_components()
+
+    params = node.text_embedder.embed_params
+
+    assert params["input_type"] == "search_query"
+    assert "dimensions" not in params
+
+
+def test_cohere_truncate_skips_client_side_truncation(connection):
+    node = BedrockDocumentEmbedder(connection=connection, model=COHERE_V4)
+    node.init_components()
+    long_text = "word " * 20000
+
+    assert node.document_embedder._apply_text_truncation(long_text) == long_text
+
+
+def test_titan_keeps_client_side_truncation(connection):
+    node = BedrockDocumentEmbedder(connection=connection, model=TITAN)
+    node.init_components()
+    long_text = "word " * 20000
+
+    assert len(node.document_embedder._apply_text_truncation(long_text)) < len(long_text)
