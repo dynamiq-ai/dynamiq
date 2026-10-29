@@ -352,14 +352,35 @@ def test_python_node_security_attacks_blocked(attack_name, attack_code, expected
             "numpy_ctypes_native_call",
             "def run(input_data):\n    import numpy\n    return numpy.ctypeslib.ctypes.CDLL(None).getpid()\n",
             ["numpy"],
-            "access to module 'ctypes' is not allowed",
+            "access to module 'ctypes'",
         ),
         (
             # urllib.request re-exports the os module, a path to os.environ that needs no import of os.
             "urllib_os_attribute",
             "def run(input_data):\n    import urllib.request\n    return urllib.request.os.environ\n",
             ["urllib"],
-            "access to module 'os' is not allowed",
+            "access to module 'os'",
+        ),
+        (
+            # "from pkg.sub import name" resolves the name with a raw attribute read the getattr guard
+            # never sees, so the fromlist entries are checked in restricted_import instead.
+            "from_import_forbidden_module",
+            "from numpy.ctypeslib import ctypes\ndef run(input_data):\n    return str(ctypes.CDLL)\n",
+            ["numpy"],
+            "not allowed",
+        ),
+        (
+            "from_import_os_via_urllib",
+            "from urllib.request import os\ndef run(input_data):\n    return os.getpid()\n",
+            ["urllib"],
+            "not allowed",
+        ),
+        (
+            # from io import open binds the builtin open directly as a name, skipping the attribute guard.
+            "from_import_builtin_open",
+            "from io import open\ndef run(input_data):\n    return open('/etc/hostname').read()\n",
+            [],
+            "not allowed",
         ),
     ],
 )

@@ -228,6 +228,22 @@ def resolve_allowed_modules(extra_allowed_modules: list[str] | None = None) -> f
     return frozenset(allowed - FORBIDDEN_MODULES)
 
 
+def _forbidden_value_reason(value: Any, allowed_modules: frozenset[str]) -> str | None:
+    """Return why value is off limits, or None if it is allowed to cross into restricted code.
+
+    A module is refused unless its top-level package is in allowed_modules and not forbidden; a process,
+    filesystem or code-execution builtin (open, eval, ...) is refused by identity. Everything else passes.
+    """
+    if isinstance(value, ModuleType):
+        root_module_name = (getattr(value, "__name__", "") or "").split(".")[0]
+        if root_module_name in FORBIDDEN_MODULES or root_module_name not in allowed_modules:
+            return f"module '{getattr(value, '__name__', '')}'"
+        return None
+    if any(value is forbidden for forbidden in _FORBIDDEN_BUILTINS):
+        return "builtin"
+    return None
+
+
 def _make_restricted_import(allowed_modules: frozenset[str]) -> Callable[..., Any]:
     """Build an __import__ that admits only modules whose top-level package is in allowed_modules."""
 
@@ -247,32 +263,48 @@ def _make_restricted_import(allowed_modules: frozenset[str]) -> Callable[..., An
         try:
             module = builtins.__import__(name, globals, locals, normalized_fromlist, level)
             logger.debug(f"Successfully imported {name}")
-            return module
         except ImportError as e:
             logger.error(f"Failed to import {name}: {str(e)}")
             if optional_error := optional_dependency_error(e, name):
                 raise optional_error from e
             raise
 
+        # "from pkg.sub import name" resolves each name with a raw attribute read that the getattr guard
+        # never sees, so a forbidden module or builtin could be bound directly (from numpy.ctypeslib import
+        # ctypes, from io import open). Apply the same check to every imported name.
+        for item in _expand_fromlist(module, normalized_fromlist):
+            if _forbidden_value_reason(getattr(module, item, None), allowed_modules):
+                logger.warning(f"Import of '{item}' from '{name}' is not allowed")
+                raise ImportError(f"Import of '{item}' from '{name}' is not allowed")
+        return module
+
     return restricted_import
 
 
+def _expand_fromlist(module: ModuleType, fromlist: tuple[str, ...]) -> list[str]:
+    """Return the attribute names a fromlist binds, expanding "*" to the module's public names."""
+    names: list[str] = []
+    for item in fromlist:
+        if item == "*":
+            public = getattr(module, "__all__", None) or [n for n in vars(module) if not n.startswith("_")]
+            names.extend(public)
+        else:
+            names.append(item)
+    return names
+
+
 def _make_guarded_getattr(allowed_modules: frozenset[str]) -> Callable[..., Any]:
-    """Build a _getattr_ that forbids reaching a module outside allowed_modules through an attribute.
+    """Build a _getattr_ that forbids reaching a forbidden module or builtin through an attribute.
 
     RestrictedPython's import guard only checks the "import" statement, but allow-listed modules re-export
-    other modules as plain attributes (numpy.ctypeslib.ctypes, urllib.request.os). Enforcing the allow-list
-    on every module-valued attribute closes that whole class without naming each path.
+    other modules and builtins as plain attributes (numpy.ctypeslib.ctypes, urllib.request.os, io.open).
+    Enforcing the allow-list on every attribute closes that whole class without naming each path.
     """
 
     def guarded_getattr(obj: Any, name: str, *args: Any, **kwargs: Any) -> Any:
         value = default_guarded_getattr(obj, name, *args, **kwargs)
-        if isinstance(value, ModuleType):
-            root_module_name = getattr(value, "__name__", "").split(".")[0]
-            if root_module_name in FORBIDDEN_MODULES or root_module_name not in allowed_modules:
-                raise ImportError(f"Access to module '{getattr(value, '__name__', name)}' is not allowed")
-        elif any(value is forbidden for forbidden in _FORBIDDEN_BUILTINS):
-            raise ImportError(f"Access to '{name}' is not allowed")
+        if reason := _forbidden_value_reason(value, allowed_modules):
+            raise ImportError(f"Access to {reason} through '{name}' is not allowed")
         return value
 
     return guarded_getattr
