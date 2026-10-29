@@ -526,6 +526,18 @@ def test_python_node_operator_not_in_default_allow_list():
             "def run(input_data):\n    return len(typing.get_type_hints(f)['x'])\n",
         ),
         ("typing_forward_ref", "import typing\ndef run(input_data):\n    return typing.ForwardRef('1+1')\n"),
+        # A ForwardRef instance is reachable without the class via get_args; on 3.14 its evaluate() evals.
+        (
+            "typing_forwardref_instance",
+            "import typing\ndef run(input_data):\n    return typing.get_args(typing.List['1+1'])[0]\n",
+        ),
+        (
+            "typing_forwardref_evaluate_backstop",
+            "import typing\n"
+            "def run(input_data):\n"
+            "    (ref,) = typing.get_args(typing.List['1+1'])\n"
+            "    return ref.evaluate()\n",
+        ),
         # setattr on a shared library function would change it for every run; the dunder name is blocked too.
         (
             "setattr_shared_function",
