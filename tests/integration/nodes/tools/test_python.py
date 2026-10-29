@@ -533,6 +533,17 @@ def test_python_node_operator_not_in_default_allow_list():
             "str_format_unbound",
             "def run(input_data):\n    return str(str.format('{0.__globals__[os]}', run))\n",
         ),
+        # functools.update_wrapper / wraps run caller-named getattr/setattr in library code: they can copy
+        # __globals__ into the snippet or overwrite a shared function's __code__.
+        (
+            "functools_update_wrapper",
+            "import functools\n"
+            "class H:\n    pass\n"
+            "def run(input_data):\n"
+            "    def f():\n        pass\n"
+            "    functools.update_wrapper(H(), f, assigned=('__globals__',), updated=())\n"
+            "    return 1\n",
+        ),
     ],
 )
 def test_python_node_c_level_escapes_blocked(attack_name, attack_code):
