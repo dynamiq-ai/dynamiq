@@ -22,7 +22,9 @@ from dynamiq.utils.lazy_imports import optional_dependency_error
 from dynamiq.utils.logger import logger
 
 # Modules exposed to restricted code by default: pure-Python standard library only. These are safe to
-# offer to untrusted code because they grant no process, filesystem or native-code access.
+# offer to untrusted code because they grant no process, filesystem or native-code access. "operator" is
+# deliberately excluded: operator.attrgetter and methodcaller call C getattr, bypassing every guard.
+# "io" is kept for StringIO and BytesIO, but its file openers are refused through _FORBIDDEN_BUILTINS.
 DEFAULT_ALLOWED_MODULES = frozenset(
     {
         "base64",
@@ -37,7 +39,6 @@ DEFAULT_ALLOWED_MODULES = frozenset(
         "itertools",
         "json",
         "math",
-        "operator",
         "random",
         "re",
         "statistics",
@@ -171,11 +172,13 @@ def make_safe_print(printer: Callable[..., Any]):
     return safe_print
 
 
-# Builtin callables that are process, filesystem or code-execution primitives. The compiler blocks the
-# names eval, exec and compile, but they and open stay reachable as attributes of allowed modules (for
-# example io.open is the builtin open), so the attribute guard refuses them by identity as well.
+# Callables that are process, filesystem or code-execution primitives. The compiler blocks the names
+# eval, exec and compile, but they and the file openers stay reachable as attributes of allowed modules
+# (io.open is the builtin open; io.FileIO and io.open_code are separate objects), so the import and
+# attribute guards refuse them by identity as well.
 _FORBIDDEN_BUILTINS = frozenset(
-    {
+    obj
+    for obj in (
         builtins.open,
         builtins.eval,
         builtins.exec,
@@ -183,8 +186,24 @@ _FORBIDDEN_BUILTINS = frozenset(
         builtins.input,
         builtins.breakpoint,
         builtins.__import__,
-    }
+        io.FileIO,
+        getattr(io, "open_code", None),
+    )
+    if obj is not None
 )
+
+
+def _is_blocked_attr_name(name: str) -> bool:
+    """Report whether an attribute name is refused, mirroring the compile-time attribute checks.
+
+    The compiler rejects a private, dunder-roles or inspect name only in attribute syntax; the same name
+    passed to the getattr or hasattr builtin as a string has to be rejected here too.
+    """
+    if not isinstance(name, str):
+        return False
+    if name.endswith("__roles__") or name in INSPECT_ATTRIBUTES:
+        return True
+    return name.startswith("_") and name != "_"
 
 
 def _is_shared_write_target(obj: Any) -> bool:
@@ -326,7 +345,14 @@ def get_restricted_globals(allowed_modules: list[str] | frozenset[str] | None = 
     guarded_getattr = _make_guarded_getattr(allowed)
 
     def safe_getattr(obj: Any, name: str, default=None) -> Any:
-        """Guarded getattr builtin: the allow-list and dunder rules apply as in compiled attribute access."""
+        """Guarded getattr builtin: the allow-list and dunder rules apply as in compiled attribute access.
+
+        A private, roles or inspect name passed as a string is refused here, since the compiler's check
+        only sees attribute syntax; this closes getattr(object, "__subclasses__") and the like.
+        """
+        if name not in ALLOWED_DUNDER_ATTRIBUTES and _is_blocked_attr_name(name):
+            raise AttributeError(f'"{name}" is not an allowed attribute name')
+
         if name in ALLOWED_DUNDER_ATTRIBUTES:
             try:
                 return getattr(obj, name)
@@ -343,9 +369,9 @@ def get_restricted_globals(allowed_modules: list[str] | frozenset[str] | None = 
             raise
 
     def safe_hasattr(obj: Any, name: str) -> bool:
-        """Guarded hasattr builtin. A blocked module attribute reports as absent rather than raising."""
+        """Guarded hasattr builtin. A blocked or absent attribute reports as absent rather than raising."""
         try:
-            guarded_getattr(obj, name)
+            safe_getattr(obj, name)
             return True
         except (AttributeError, TypeError, ImportError):
             return False

@@ -455,6 +455,58 @@ def test_python_node_object_and_write_escapes_blocked(attack_name, attack_code):
     assert result.status == RunnableStatus.FAILURE
 
 
+@pytest.mark.parametrize(
+    ("attack_name", "attack_code"),
+    [
+        # getattr with a string name skips the compiler's underscore check; the guarded builtin must not.
+        (
+            "getattr_subclasses_jailbreak",
+            "def run(input_data):\n"
+            "    subclasses = getattr(object, '__subclasses__')()\n"
+            "    wrapper = [c for c in subclasses if c.__name__ == '_wrap_close'][0]\n"
+            "    return getattr(getattr(wrapper, '__init__'), '__globals__')['system']('id')\n",
+        ),
+        (
+            "getattr_string_globals",
+            "import json\ndef run(input_data):\n    return getattr(json.dumps, '__globals__')\n",
+        ),
+        # io.FileIO and io.open_code open files like io.open, which the identity guard also refuses.
+        ("io_fileio_read", "import io\ndef run(input_data):\n    return io.FileIO('/etc/hostname').read()\n"),
+        ("io_open_code_read", "import io\ndef run(input_data):\n    return io.open_code('/etc/hostname').read()\n"),
+    ],
+)
+def test_python_node_getattr_and_io_escapes_blocked(attack_name, attack_code):
+    """String-name getattr and the io file openers cannot escape the default allow-list."""
+    result = Python(code=attack_code).run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+
+
+def test_python_node_operator_not_in_default_allow_list():
+    """operator is excluded from the default: attrgetter/methodcaller call C getattr past every guard."""
+    result = Python(code="import operator\ndef run(input_data):\n    return 1\n").run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "import of 'operator' is not allowed" in str(result.error).lower()
+
+
+def test_python_node_getattr_allows_normal_and_whitelisted_names():
+    """The hardened getattr builtin still serves ordinary names and the whitelisted dunders."""
+    code = (
+        "def run(input_data):\n"
+        "    class Local:\n"
+        "        pass\n"
+        "    obj = Local()\n"
+        "    setattr(obj, 'value', 7)\n"
+        "    return {'value': getattr(obj, 'value'), 'cls': getattr(obj, '__class__').__name__}\n"
+    )
+
+    result = Python(code=code).run({}, None)
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == {"value": 7, "cls": "Local"}
+
+
 def test_python_node_allows_writes_to_run_local_objects():
     """Writing to objects the snippet creates stays allowed; only shared modules and classes are refused."""
     code = (
