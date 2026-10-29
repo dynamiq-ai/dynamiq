@@ -490,6 +490,48 @@ def test_python_node_operator_not_in_default_allow_list():
     assert "import of 'operator' is not allowed" in str(result.error).lower()
 
 
+@pytest.mark.parametrize(
+    ("attack_name", "attack_code"),
+    [
+        # str.format replacement fields resolve attributes in C, past every guard.
+        (
+            "str_format_dunder_walk",
+            "import uuid\ndef run(input_data):\n    return str('{0.__globals__[os]}'.format(uuid.uuid4))\n",
+        ),
+        # string and typing are no longer in the default set: string.Formatter walks dunder fields and
+        # typing.get_type_hints evals string annotations, both outside the guards.
+        ("string_not_in_default", "import string\ndef run(input_data):\n    return 1\n"),
+        ("typing_not_in_default", "import typing\ndef run(input_data):\n    return 1\n"),
+        # setattr on a shared library function would change it for every run; the dunder name is blocked too.
+        (
+            "setattr_shared_function",
+            "import json\n"
+            "def run(input_data):\n"
+            "    setattr(json.dumps, '__kwdefaults__', {'indent': 7})\n"
+            "    return 1\n",
+        ),
+    ],
+)
+def test_python_node_c_level_escapes_blocked(attack_name, attack_code):
+    """Stdlib functions that resolve attributes or eval in C cannot escape the default allow-list."""
+    result = Python(code=attack_code).run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+
+
+def test_python_node_ctypes_object_blocked_even_with_numpy():
+    """A native handle from numpy.ctypeslib.load_library is refused by its ctypes type, on any path."""
+    code = (
+        "import numpy\n"
+        "def run(input_data):\n"
+        "    return numpy.ctypeslib.load_library('libc.so.6', '/lib/x86_64-linux-gnu').getpid()\n"
+    )
+
+    result = Python(code=code, extra_allowed_modules=["numpy"]).run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+
+
 def test_python_node_getattr_allows_normal_and_whitelisted_names():
     """The hardened getattr builtin still serves ordinary names and the whitelisted dunders."""
     code = (
