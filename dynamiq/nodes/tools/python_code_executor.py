@@ -104,14 +104,6 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 OPTIONAL_PRELOAD_MODULES: tuple[tuple[str, str | None], ...] = (("seaborn", "sns"),)
 
 
-# Opening stem shared by every generated description, this PR's ("Runs dynamic Python code under
-# RestrictedPython. ...") and the one on main before it ("Runs dynamic Python code safely via
-# RestrictedPython. ..."). A stored description that starts with it is one the node generated (possibly
-# stale, possibly from an older allow-list), so it is safe to regenerate; a caller's custom text does not
-# start with it and is kept as written.
-_GENERATED_DESCRIPTION_PREFIX = "Runs dynamic Python code "
-
-
 def _build_executor_description(extra_allowed_modules: Sequence[str] = ()) -> str:
     """Build the node description, naming the modules this instance can actually import.
 
@@ -405,19 +397,21 @@ class PythonCodeExecutor(Node):
 
     @model_validator(mode="after")
     def _describe_enabled_libraries(self) -> "PythonCodeExecutor":
-        """Regenerate the agent-facing description unless the caller gave a custom one.
+        """Fill or refresh the generated description without ever touching a custom one.
 
-        to_dict() dumps description, so a generated one would otherwise be preserved on reload and go
-        stale when extra_allowed_modules is later edited (it would name the wrong importable modules); a
-        workflow saved before this change keeps its old generated text the same way. Regenerate when
-        description was not set explicitly, or when the stored value is itself a generated description
-        (it starts with the shared prefix, so any allow-list it was built from is refreshed). A caller's
-        custom description does not start with the prefix and is left exactly as written.
+        description is regenerated when the caller gave none, or when the stored value is exactly a
+        description this node generated — the current one, or the no-extras default it would have carried
+        before extra_allowed_modules was edited on a saved workflow. A custom or hand-edited description
+        never equals a generated form byte-for-byte, so it is kept as written, even when it reuses the
+        default's opening words. (A description generated before this change is not recognised, since its
+        text differed, so a pre-change workflow keeps its stored description until it is re-saved.)
         """
-        if "description" not in self.model_fields_set or (self.description or "").startswith(
-            _GENERATED_DESCRIPTION_PREFIX
+        generated = _build_executor_description(self.extra_allowed_modules)
+        if "description" not in self.model_fields_set or self.description in (
+            generated,
+            _build_executor_description(()),
         ):
-            self.description = _build_executor_description(self.extra_allowed_modules)
+            self.description = generated
         return self
 
     def execute(
