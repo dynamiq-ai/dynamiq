@@ -126,7 +126,7 @@ class VertexAIRagSearch(ConnectionNode):
     llm_ranker_model: str | None = Field(
         default=None,
         description=(
-            "LLM ranker model name (e.g. 'gemini-2.5-flash'); mutually exclusive with "
+            "LLM ranker model name (e.g. 'gemini-3.8-flash'); mutually exclusive with "
             "rank_service_model. The model must be served in the corpus's region."
         ),
     )
