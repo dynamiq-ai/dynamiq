@@ -1,6 +1,7 @@
 import ast
 import builtins
 import io
+from collections import UserString
 from copy import deepcopy
 from types import BuiltinFunctionType, FunctionType, MethodType, ModuleType
 from typing import Any, Callable, ClassVar, Literal
@@ -172,10 +173,11 @@ def make_safe_print(printer: Callable[..., Any]):
     return safe_print
 
 
-# Callables that are process, filesystem or code-execution primitives. The compiler blocks the names
-# eval, exec and compile, but they and the file openers stay reachable as attributes of allowed modules
-# (io.open is the builtin open; io.FileIO and io.open_code are separate objects), so the import and
-# attribute guards refuse them by identity as well.
+# Objects that are process, filesystem or code-execution primitives, refused by identity wherever a
+# snippet reaches them. The compiler blocks the names eval, exec and compile, but they and the file
+# openers stay reachable as attributes of allowed modules (io.open is the builtin open; io.FileIO and
+# io.open_code are separate objects). collections.UserString.format delegates to str.format in library
+# code, past the str.format guard, so the class itself is refused.
 _FORBIDDEN_BUILTINS = frozenset(
     obj
     for obj in (
@@ -188,6 +190,7 @@ _FORBIDDEN_BUILTINS = frozenset(
         builtins.__import__,
         io.FileIO,
         getattr(io, "open_code", None),
+        UserString,
     )
     if obj is not None
 )
