@@ -288,6 +288,10 @@ def _forbidden_value_reason(value: Any, allowed_modules: frozenset[str]) -> str 
         return "ctypes object"
     if _is_str_format_method(value):
         return "str.format"
+    if isinstance(value, typing.ForwardRef):
+        # A ForwardRef is reachable without the class, e.g. typing.get_args(typing.List["..."])[0], and on
+        # 3.14 its public evaluate() compiles and evals the string. Refuse the instance wherever it surfaces.
+        return "typing.ForwardRef"
     return None
 
 
@@ -365,6 +369,10 @@ def _make_guarded_getattr(allowed_modules: frozenset[str]) -> Callable[..., Any]
     """
 
     def guarded_getattr(obj: Any, name: str, *args: Any, **kwargs: Any) -> Any:
+        # Backstop for a ForwardRef instance smuggled past the value check (e.g. by unpacking get_args):
+        # refuse any attribute access on it, so evaluate() / _evaluate() cannot be reached.
+        if isinstance(obj, typing.ForwardRef):
+            raise ImportError("Access to typing.ForwardRef is not allowed")
         value = default_guarded_getattr(obj, name, *args, **kwargs)
         if reason := _forbidden_value_reason(value, allowed_modules):
             raise ImportError(f"Access to {reason} through '{name}' is not allowed")
