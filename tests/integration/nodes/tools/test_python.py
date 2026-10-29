@@ -588,3 +588,30 @@ def test_python_node_allows_writes_to_run_local_objects():
 
     assert result.status == RunnableStatus.SUCCESS
     assert result.output["content"] == {"attr": 1, "value": 2}
+
+
+def test_python_node_allows_writes_to_snippet_defined_function():
+    """A function the snippet defines is per-run, so attributes on it (counters, memo caches) are allowed."""
+    code = (
+        "def helper():\n"
+        "    return 1\n"
+        "def run(input_data):\n"
+        "    helper.calls = 3\n"
+        "    setattr(helper, 'label', 'x')\n"
+        "    return {'calls': helper.calls, 'label': helper.label}\n"
+    )
+
+    result = Python(code=code).run({}, None)
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == {"calls": 3, "label": "x"}
+
+
+def test_python_node_refuses_writes_to_shared_library_function():
+    """Writing to a function an allowed module defines is refused: it is shared across runs."""
+    result = Python(
+        code="import json\ndef run(input_data):\n    json.dumps.foo = 1\n    return 1\n",
+        extra_allowed_modules=["json"],
+    ).run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
