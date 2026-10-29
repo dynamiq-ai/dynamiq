@@ -27,7 +27,9 @@ from dynamiq.utils.logger import logger
 
 # Modules exposed to restricted code by default. Mostly pure-Python standard library that grants no
 # process, filesystem or native-code access, plus two deliberate additions: "requests" (HTTP egress is
-# contained by the deployment network policy, not by this sandbox, and it adds no in-process escape) and
+# contained by the deployment network policy, not by this sandbox; its file-write and credential helpers
+# atomic_open, get_netrc_auth, get_environ_proxies and compat.getproxies are refused by identity, but its
+# wider requests/urllib3 surface and trust_env behaviour are not a boundary for untrusted code) and
 # "typing" (whose eval entry points get_type_hints, ForwardRef and evaluate_forward_ref are refused
 # through _FORBIDDEN_BUILTINS, so string annotations can never be evaluated). "operator" (attrgetter,
 # methodcaller) and "string" (Formatter walks dunder fields) stay excluded: they resolve attributes in C,
@@ -221,6 +223,38 @@ _FORBIDDEN_BUILTINS = frozenset(
 _FORBIDDEN_OBJECTS = tuple(obj for obj in (getattr(copy, "dispatch_table", None),) if obj is not None)
 
 
+def _collect_requests_forbidden_helpers() -> tuple[Any, ...]:
+    """Return the requests helpers that write files or read credentials in library code.
+
+    requests stays in the default allow-list for HTTP, but a few of its utilities are process/filesystem
+    primitives reached as plain attributes, past the open and io guards: requests.utils.atomic_open opens
+    an arbitrary path for writing, and get_environ_proxies, get_netrc_auth and requests.compat.getproxies
+    return the process proxy environment and .netrc credentials. They are refused by identity. This does
+    not fence off the whole requests/urllib3 surface (trust_env still reads .netrc and proxy env inside
+    an ordinary request) and is a reduction, not a boundary; requests is imported here defensively because
+    a minimal install may lack it, and this module must still import.
+    """
+    collected: list[Any] = []
+    try:
+        import requests.compat
+        import requests.utils
+    except Exception:
+        return tuple(collected)
+    for module, name in (
+        (requests.utils, "atomic_open"),
+        (requests.utils, "get_environ_proxies"),
+        (requests.utils, "get_netrc_auth"),
+        (requests.compat, "getproxies"),
+    ):
+        helper = getattr(module, name, None)
+        if helper is not None:
+            collected.append(helper)
+    return tuple(collected)
+
+
+_FORBIDDEN_REQUESTS_HELPERS = _collect_requests_forbidden_helpers()
+
+
 def _is_blocked_attr_name(name: str) -> bool:
     """Report whether an attribute name is refused, mirroring the compile-time attribute checks.
 
@@ -295,8 +329,9 @@ def _forbidden_value_reason(value: Any, allowed_modules: frozenset[str]) -> str 
     A module is refused unless its top-level package is in allowed_modules and not forbidden; a process,
     filesystem or code-execution builtin (open, eval, ...) is refused by identity; a shared dispatch
     table (copy.dispatch_table) is refused by identity so it cannot be poisoned by item assignment; a
-    ctypes object is refused by its type, so a native handle from any path (numpy.ctypeslib.load_library)
-    cannot be used. Everything else passes.
+    requests file-write or credential helper (atomic_open, get_netrc_auth, get_environ_proxies,
+    compat.getproxies) is refused by identity; a ctypes object is refused by its type, so a native handle
+    from any path (numpy.ctypeslib.load_library) cannot be used. Everything else passes.
     """
     if isinstance(value, ModuleType):
         root_module_name = (getattr(value, "__name__", "") or "").split(".")[0]
@@ -307,6 +342,8 @@ def _forbidden_value_reason(value: Any, allowed_modules: frozenset[str]) -> str 
         return "builtin"
     if any(value is forbidden for forbidden in _FORBIDDEN_OBJECTS):
         return "shared dispatch table"
+    if any(value is helper for helper in _FORBIDDEN_REQUESTS_HELPERS):
+        return "requests file or credential helper"
     if (getattr(type(value), "__module__", "") or "").split(".")[0] in ("ctypes", "_ctypes"):
         return "ctypes object"
     if _is_str_format_method(value):
