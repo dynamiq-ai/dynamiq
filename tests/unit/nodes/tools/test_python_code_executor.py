@@ -139,6 +139,15 @@ def test_description_refreshes_when_extra_modules_change():
     assert "pd.read_csv" in reloaded.description
 
 
+def test_custom_description_is_preserved():
+    """A caller's own description is kept verbatim; only a generated one is refreshed, so a saved workflow
+    with a tailored tool description does not lose it on load."""
+    custom = "Analyse sales CSVs only."
+    executor = PythonCodeExecutor(file_store=InMemoryFileStore(), extra_allowed_modules=["pandas"], description=custom)
+
+    assert executor.description == custom
+
+
 def test_description_names_real_write_helpers():
     """The description must name helpers that are actually injected (write_text/write_bytes), not
     write_file_text/write_file_bytes, which do not exist."""
