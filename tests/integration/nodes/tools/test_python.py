@@ -517,6 +517,22 @@ def test_python_node_operator_not_in_default_allow_list():
             "def run(input_data):\n"
             "    return str(collections.UserString('{0.__globals__[os]}').format(uuid.uuid4))\n",
         ),
+        # A str subclass or a super() proxy forwards to the real str.format; the value-based check catches it.
+        (
+            "str_subclass_format",
+            "class S(str):\n    pass\ndef run(input_data):\n    return str(S('{0.__globals__[os]}').format(1))\n",
+        ),
+        (
+            "super_proxy_format",
+            "import uuid\n"
+            "class S(str):\n    pass\n"
+            "def run(input_data):\n"
+            "    return str(super(S, S('{0.__globals__[os]}')).format(uuid.uuid4))\n",
+        ),
+        (
+            "str_format_unbound",
+            "def run(input_data):\n    return str(str.format('{0.__globals__[os]}', run))\n",
+        ),
     ],
 )
 def test_python_node_c_level_escapes_blocked(attack_name, attack_code):

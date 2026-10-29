@@ -273,7 +273,24 @@ def _forbidden_value_reason(value: Any, allowed_modules: frozenset[str]) -> str 
         return "builtin"
     if (getattr(type(value), "__module__", "") or "").split(".")[0] in ("ctypes", "_ctypes"):
         return "ctypes object"
+    if _is_str_format_method(value):
+        return "str.format"
     return None
+
+
+def _is_str_format_method(value: Any) -> bool:
+    """Report whether value is str.format or str.format_map, bound or unbound.
+
+    str.format and format_map resolve replacement fields in C, past every guard, so they are refused by
+    the resolved value rather than by the object they were reached through. Checking the value catches
+    every wrapper that forwards the lookup: a str literal, a str subclass, or a super() proxy.
+    """
+    if value is str.format or value is str.format_map:
+        return True
+    return isinstance(getattr(value, "__self__", None), str) and getattr(value, "__name__", None) in (
+        "format",
+        "format_map",
+    )
 
 
 def _make_restricted_import(allowed_modules: frozenset[str]) -> Callable[..., Any]:
@@ -325,23 +342,16 @@ def _expand_fromlist(module: ModuleType, fromlist: tuple[str, ...]) -> list[str]
     return names
 
 
-def _is_str_type(obj: Any) -> bool:
-    """Report whether obj is a str (or str subclass, or the str type itself)."""
-    return isinstance(obj, str) or (isinstance(obj, type) and issubclass(obj, str))
-
-
 def _make_guarded_getattr(allowed_modules: frozenset[str]) -> Callable[..., Any]:
     """Build a _getattr_ that forbids reaching a forbidden module, builtin or ctypes object by attribute.
 
     RestrictedPython's import guard only checks the "import" statement, but allow-listed modules re-export
     other modules and builtins as plain attributes (numpy.ctypeslib.ctypes, urllib.request.os, io.open).
-    Enforcing the allow-list on every attribute closes that whole class without naming each path. str.format
-    and format_map are refused too: their replacement fields resolve attributes in C, past every guard.
+    Enforcing the allow-list on every resolved value closes that whole class without naming each path, and
+    catches str.format reached through a str subclass or a super() proxy (see _forbidden_value_reason).
     """
 
     def guarded_getattr(obj: Any, name: str, *args: Any, **kwargs: Any) -> Any:
-        if name in ("format", "format_map") and _is_str_type(obj):
-            raise AttributeError("str.format and str.format_map are not allowed; use an f-string")
         value = default_guarded_getattr(obj, name, *args, **kwargs)
         if reason := _forbidden_value_reason(value, allowed_modules):
             raise ImportError(f"Access to {reason} through '{name}' is not allowed")
