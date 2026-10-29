@@ -98,15 +98,20 @@ def test_materialize_inline_files_malicious_filename_is_sanitized():
                 assert full_path.startswith(workspace_dir)
 
 
-def test_default_description_points_at_helpers_not_disabled_libraries():
-    """The default refuses open() and third-party imports, so the agent-facing description must point at
-    the read_file() helpers and not promise pd.read_csv or open()."""
+def test_default_description_lists_importable_modules_not_whole_stdlib():
+    """The default refuses open() and every non-allow-listed import, so the description points at the
+    read_file() helpers and names the importable modules rather than claiming the whole standard library
+    or promising pd.read_csv."""
     executor = PythonCodeExecutor(file_store=InMemoryFileStore())
     description = executor.description
 
     assert "read_file(" in description
     assert "`open('notes.txt')` is refused" in description
-    assert "No third-party libraries are enabled on this instance" in description
+    assert "Only these modules can be imported" in description
+    assert "json" in description
+    assert "requests" in description
+    # Modules the node refuses must not be advertised to the agent.
+    assert "hashlib" not in description
     assert "pd.read_csv" not in description
 
 
