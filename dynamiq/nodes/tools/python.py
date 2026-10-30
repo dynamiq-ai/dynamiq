@@ -33,10 +33,10 @@ from dynamiq.utils.logger import logger
 # or refused rather than left open: "requests" (HTTP egress is contained by the deployment network policy,
 # not by this sandbox; its file-write and credential helpers atomic_open, get_netrc_auth,
 # get_environ_proxies and compat.getproxies are refused by identity, but its wider requests/urllib3 surface
-# and trust_env behaviour are not a boundary for untrusted code), "urllib" (urllib.parse and the error
-# classes are pure; urllib.request.urlopen is wrapped to http(s) so it cannot read file:// paths, and the
-# file-reading/writing helpers urlretrieve, URLopener, FancyURLopener, url2pathname and pathname2url are
-# refused by identity) and "typing" (whose eval entry points get_type_hints, ForwardRef and
+# and trust_env behaviour are not a boundary for untrusted code), "urllib" (urllib.parse and urllib.error
+# are pure; urllib.request is reduced to a positive allow-list of just Request and a urlopen wrapped to
+# http(s), so file:// reads, build_opener/OpenerDirector/FileHandler, ProxyHandler and install_opener are
+# all out of reach) and "typing" (whose eval entry points get_type_hints, ForwardRef and
 # evaluate_forward_ref are refused through _FORBIDDEN_BUILTINS, so string annotations can never be
 # evaluated). "operator" (attrgetter, methodcaller) and "string" (Formatter walks dunder fields) stay
 # excluded: they resolve attributes in C, outside every guard. "io" is kept for StringIO and BytesIO, but
@@ -265,36 +265,27 @@ def _collect_requests_forbidden_helpers() -> tuple[Any, ...]:
 _FORBIDDEN_REQUESTS_HELPERS = _collect_requests_forbidden_helpers()
 
 
-def _collect_urllib_guards() -> tuple[Any, tuple[Any, ...], Any]:
-    """Return (urlopen, file_helpers, Request) from urllib.request for the default-allow urllib guards.
+def _collect_urllib_guards() -> tuple[Any, Any, Any]:
+    """Return (urlopen, Request, urllib.request module) for the default-allow urllib guards.
 
-    urllib is in the default allow-list, but urllib.request.urlopen opens file:// (arbitrary read) and
-    urlretrieve, URLopener, FancyURLopener, url2pathname and pathname2url read or write local files, all
-    past the open and io guards. urlopen is wrapped to http(s) schemes only (see _safe_urlopen); the rest
-    are refused by identity. urllib is stdlib, so the import is expected to succeed; it is guarded
-    defensively so this module still imports in a stripped-down environment.
+    urllib.request is an unbounded surface: beyond urlopen (file:// reads) and the file helpers, it exposes
+    build_opener/OpenerDirector/FileHandler (another file:// path), ProxyHandler (reads the proxy
+    environment) and install_opener (replaces the process-global opener for every run). Refusing members
+    one by one never ends, so urllib.request is exposed by a positive allow-list instead: only Request and
+    the wrapped urlopen are reachable (see _URLLIB_REQUEST_SAFE_NAMES, the getattr guard and the import
+    shim); everything else on the module is refused. urllib.parse and urllib.error stay fully available.
+    urllib is stdlib, so the import is expected to succeed; it is guarded defensively so this module still
+    imports in a stripped-down environment.
     """
     try:
         import urllib.request
     except Exception:
-        return None, (), None
-    urlopen = getattr(urllib.request, "urlopen", None)
-    request_cls = getattr(urllib.request, "Request", None)
-    file_helpers = tuple(
-        obj
-        for obj in (
-            getattr(urllib.request, "urlretrieve", None),
-            getattr(urllib.request, "URLopener", None),
-            getattr(urllib.request, "FancyURLopener", None),
-            getattr(urllib.request, "url2pathname", None),
-            getattr(urllib.request, "pathname2url", None),
-        )
-        if obj is not None
-    )
-    return urlopen, file_helpers, request_cls
+        return None, None, None
+    return getattr(urllib.request, "urlopen", None), getattr(urllib.request, "Request", None), urllib.request
 
 
-_URLLIB_URLOPEN, _URLLIB_FILE_HELPERS, _URLLIB_REQUEST = _collect_urllib_guards()
+_URLLIB_URLOPEN, _URLLIB_REQUEST, _URLLIB_REQUEST_MODULE = _collect_urllib_guards()
+_URLLIB_REQUEST_SAFE_NAMES = frozenset({"Request", "urlopen"})
 _URLOPEN_ALLOWED_SCHEMES = frozenset({"http", "https"})
 
 
@@ -302,16 +293,18 @@ def _safe_urlopen(url: Any, *args: Any, **kwargs: Any) -> Any:
     """urllib.request.urlopen restricted to http(s): file://, ftp:// and the like are refused.
 
     This wrapper is handed to a snippet in place of the real urlopen. It reads the scheme from a str URL or
-    a Request and refuses anything but http and https, so urlopen cannot read local files through file://.
-    The http(s) egress itself is contained by the deployment network policy, not here.
+    an exact urllib.request.Request and refuses anything but http and https, so urlopen cannot read local
+    files through file://. A Request subclass is refused rather than trusted, since an overridden full_url
+    or type could report http to this check and resolve to file:// inside urlopen. The http(s) egress
+    itself is contained by the deployment network policy, not here.
     """
     target = url
-    if _URLLIB_REQUEST is not None and isinstance(target, _URLLIB_REQUEST):
-        scheme = (getattr(target, "type", "") or urlsplit(getattr(target, "full_url", "")).scheme or "").lower()
+    if _URLLIB_REQUEST is not None and type(target) is _URLLIB_REQUEST:
+        scheme = (urlsplit(getattr(target, "full_url", "") or "").scheme or "").lower()
     elif isinstance(target, str):
         scheme = (urlsplit(target).scheme or "").lower()
     else:
-        raise ValueError("urlopen accepts only an http(s) URL string or Request in the Python executor")
+        raise ValueError("urlopen accepts only an http(s) URL string or urllib.request.Request")
     if scheme not in _URLOPEN_ALLOWED_SCHEMES:
         raise ValueError(f"urlopen scheme '{scheme or '(none)'}' is not allowed; only http and https are")
     return _URLLIB_URLOPEN(url, *args, **kwargs)
@@ -392,11 +385,11 @@ def _forbidden_value_reason(value: Any, allowed_modules: frozenset[str]) -> str 
     filesystem or code-execution builtin (open, eval, ...) is refused by identity; a shared dispatch
     table (copy.dispatch_table) is refused by identity so it cannot be poisoned by item assignment; a
     requests file-write or credential helper (atomic_open, get_netrc_auth, get_environ_proxies,
-    compat.getproxies) and a urllib file helper (urlretrieve, URLopener, FancyURLopener, url2pathname,
-    pathname2url) are refused by identity; a ctypes object is refused by its type, so a native handle from
-    any path (numpy.ctypeslib.load_library) cannot be used. str.format/format_map and urllib.request.urlopen
-    are not refused here; they are replaced by validating wrappers (see _wrapped_value). Everything else
-    passes.
+    compat.getproxies) is refused by identity; a ctypes object is refused by its type, so a native handle
+    from any path (numpy.ctypeslib.load_library) cannot be used. str.format/format_map and
+    urllib.request.urlopen are not refused here; they are replaced by validating wrappers, and
+    urllib.request is otherwise reduced to a positive allow-list by the getattr guard and import shim (see
+    _wrapped_value and _URLLIB_REQUEST_SAFE_NAMES). Everything else passes.
     """
     if isinstance(value, ModuleType):
         root_module_name = (getattr(value, "__name__", "") or "").split(".")[0]
@@ -409,8 +402,6 @@ def _forbidden_value_reason(value: Any, allowed_modules: frozenset[str]) -> str 
         return "shared dispatch table"
     if any(value is helper for helper in _FORBIDDEN_REQUESTS_HELPERS):
         return "requests file or credential helper"
-    if _URLLIB_FILE_HELPERS and any(value is helper for helper in _URLLIB_FILE_HELPERS):
-        return "urllib file helper"
     if (getattr(type(value), "__module__", "") or "").split(".")[0] in ("ctypes", "_ctypes"):
         return "ctypes object"
     if isinstance(value, typing.ForwardRef):
@@ -537,17 +528,17 @@ def _make_restricted_import(allowed_modules: frozenset[str]) -> Callable[..., An
                     logger.warning(f"Import of '{name}' is not allowed")
                     raise ImportError(f"Import of '{name}' is not allowed")
 
-        # "from urllib.request import urlopen" binds the raw urlopen through a C-level IMPORT_FROM the
-        # getattr guard never sees (the attribute path urllib.request.urlopen is wrapped there instead).
-        # Hand back a shallow copy of the module whose urlopen is the scheme-restricted wrapper, so the
-        # bound name is safe too. The copy is transient and the real module is left untouched; the file
-        # helpers are already refused by the fromlist check above.
-        if _URLLIB_URLOPEN is not None and any(
-            getattr(module, item, None) is _URLLIB_URLOPEN for item in imported_names
-        ):
+        # "from urllib.request import X" binds attributes through a C-level IMPORT_FROM the getattr guard
+        # never sees. Hand back a module exposing only the allow-listed names (Request and the wrapped
+        # urlopen), so any other name (build_opener, ProxyHandler, install_opener, ...) is simply absent
+        # and the import fails. The real module is left untouched; the attribute path is allow-listed by
+        # the getattr guard instead.
+        if _URLLIB_REQUEST_MODULE is not None and module is _URLLIB_REQUEST_MODULE and normalized_fromlist:
             sanitized = ModuleType(getattr(module, "__name__", name))
-            sanitized.__dict__.update(module.__dict__)
-            sanitized.urlopen = _safe_urlopen
+            if _URLLIB_REQUEST is not None:
+                sanitized.Request = _URLLIB_REQUEST
+            if _URLLIB_URLOPEN is not None:
+                sanitized.urlopen = _safe_urlopen
             return sanitized
         return module
 
@@ -584,6 +575,16 @@ def _make_guarded_getattr(allowed_modules: frozenset[str]) -> Callable[..., Any]
         value = default_guarded_getattr(obj, name, *args, **kwargs)
         if (wrapped := _wrapped_value(value)) is not None:
             return wrapped
+        # urllib.request is exposed by a positive allow-list: only Request and the wrapped urlopen (handled
+        # above) are reachable, so build_opener, OpenerDirector, FileHandler, ProxyHandler, install_opener
+        # and the rest cannot be reached as attributes of the module however it was bound.
+        if (
+            _URLLIB_REQUEST_MODULE is not None
+            and obj is _URLLIB_REQUEST_MODULE
+            and not name.startswith("__")
+            and name not in _URLLIB_REQUEST_SAFE_NAMES
+        ):
+            raise ImportError(f"Access to urllib.request.{name} is not allowed")
         if reason := _forbidden_value_reason(value, allowed_modules):
             raise ImportError(f"Access to {reason} through '{name}' is not allowed")
         return value

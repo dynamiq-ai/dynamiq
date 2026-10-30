@@ -358,11 +358,12 @@ def test_python_node_security_attacks_blocked(attack_name, attack_code, expected
             "access to module 'ctypes'",
         ),
         (
-            # urllib.request re-exports the os module, a path to os.environ that needs no import of os.
+            # urllib.request re-exports the os module, but it is a positive allow-list (Request + urlopen
+            # only), so os -- like every other non-safe member -- is refused.
             "urllib_os_attribute",
             "def run(input_data):\n    import urllib.request\n    return urllib.request.os.environ\n",
             ["urllib"],
-            "access to module 'os'",
+            "not allowed",
         ),
         (
             # "from pkg.sub import name" resolves the name with a raw attribute read the getattr guard
@@ -564,6 +565,64 @@ def test_safe_urlopen_allows_http_and_blocks_other_schemes(monkeypatch):
     for blocked_url in ("file:///etc/hostname", "ftp://host/f", "data:text/plain,hi"):
         with pytest.raises(ValueError):
             python_module._safe_urlopen(blocked_url)
+
+
+@pytest.mark.parametrize(
+    ("attack_name", "attack_code"),
+    [
+        # urllib.request is a positive allow-list (Request + wrapped urlopen only); every other member is
+        # refused, so build_opener's FileHandler (another file:// read) cannot be reached,
+        (
+            "build_opener_file_read",
+            "import urllib.request\n"
+            "def run(input_data):\n    return urllib.request.build_opener().open('file:///etc/hostname').read()\n",
+        ),
+        # ProxyHandler cannot read the process proxy environment,
+        (
+            "proxyhandler_env",
+            "import urllib.request\ndef run(input_data):\n    return urllib.request.ProxyHandler().proxies\n",
+        ),
+        # install_opener cannot replace the process-global opener for every other run,
+        (
+            "install_opener",
+            "import urllib.request\ndef run(input_data):\n    return urllib.request.install_opener(None)\n",
+        ),
+        # and the non-safe members are refused on the alias and from-import paths too.
+        (
+            "build_opener_alias",
+            "import urllib.request as r\ndef run(input_data):\n    return r.build_opener()\n",
+        ),
+        (
+            "build_opener_from_import",
+            "from urllib.request import build_opener\ndef run(input_data):\n    return build_opener()\n",
+        ),
+        (
+            "build_opener_via_from_urllib",
+            "from urllib import request\ndef run(input_data):\n    return request.build_opener()\n",
+        ),
+    ],
+)
+def test_python_node_urllib_request_allowlist_refuses_non_safe_members(attack_name, attack_code):
+    """Only Request and the wrapped urlopen are reachable from urllib.request; build_opener, ProxyHandler,
+    install_opener and the rest are refused however they are reached."""
+    result = Python(code=attack_code).run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+
+
+def test_python_node_urlopen_refuses_request_subclass():
+    """A Request subclass could report http to the wrapper's scheme check and resolve to file:// inside
+    urlopen, so the wrapper accepts only an exact urllib.request.Request, not a subclass."""
+    code = (
+        "import urllib.request\n"
+        "class SneakyRequest(urllib.request.Request):\n    pass\n"
+        "def run(input_data):\n"
+        "    return urllib.request.urlopen(SneakyRequest('file:///etc/hostname')).read()\n"
+    )
+
+    result = Python(code=code).run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
 
 
 @pytest.mark.parametrize(
