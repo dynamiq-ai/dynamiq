@@ -8,7 +8,7 @@ from dynamiq.callbacks.tracing import RunStatus
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.node import InputTransformer, NodeDependency
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.utils.utils import Input, Output
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import JsonWorkflowEncoder
@@ -39,7 +39,7 @@ def build_workflow():
         ),
     )
 
-    slow_tool = Python(
+    slow_tool = PythonMonty(
         name="deep-analysis",
         description="Performs deep analysis on a topic. Input: {'topic': '<topic>'}.",
         code="""

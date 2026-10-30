@@ -11,7 +11,7 @@ from dynamiq.flows import Flow
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.runnables import RunnableResult, RunnableStatus
 from dynamiq.utils import JsonWorkflowEncoder
 
@@ -35,7 +35,7 @@ def get_orchestrator_workflow1(model: str, connection: connections.OpenAI, conte
     def run(context: dict, **kwargs):
         return {"result": "task 2 completed", "task2": "task 2 result"}
 
-    task2 = Python(code=textwrap.dedent(inspect.getsource(run)))
+    task2 = PythonMonty(code=textwrap.dedent(inspect.getsource(run)))
 
     def task3(context: dict, **kwargs):
         return {"result": "task 3 completed", "task3": "task 3 result"}
@@ -85,7 +85,7 @@ def get_orchestrator_workflow2(model: str, connection: connections.OpenAI, conte
     def run(context: dict, **kwargs):
         return {"result": "task 2 completed", "task2": "task 2 result"}
 
-    task2 = Python(code=textwrap.dedent(inspect.getsource(run)))
+    task2 = PythonMonty(code=textwrap.dedent(inspect.getsource(run)))
 
     graph_orchestrator.add_state_by_tasks("task1_task2", [task1, task2])
     graph_orchestrator.add_edge("task1_task2", END)

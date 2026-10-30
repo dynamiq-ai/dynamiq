@@ -9,8 +9,8 @@ from dynamiq.callbacks import DynamiqTracingCallbackHandler, TracingCallbackHand
 from dynamiq.connections import Exa as ExaConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.exa_search import ExaTool
-from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file import FileStoreConfig
@@ -32,9 +32,9 @@ Each cited insight must include the source URL, e.g., [AWS Circularity 2025](htt
    - Keep a table of KPIs
    - Track a version header with timestamp (ISO format) and total sources referenced.
 4. Whenever data lends itself to visualization,
-generate a quick chart (PNG) with Python and save it (e.g., `sustainability_gap.png`).
+generate a quick chart (PNG) with PythonMonty and save it (e.g., `sustainability_gap.png`).
 5. Final deliverable: attach the markdown report + any generated assets, and summarize key findings and next steps.
-6. Always ensure your Python code defines `run(...)` and returns structured data.
+6. Always ensure your PythonMonty code defines `run(...)` and returns structured data.
 """
 
 PROMPT = """
@@ -51,7 +51,7 @@ def _create_agent() -> Agent:
     file_store_config = FileStoreConfig(enabled=True, backend=file_store_backend, agent_file_write_enabled=True)
 
     exa_tool = ExaTool(connection=ExaConnection(), name="exa-search")
-    code_tool = PythonCodeExecutor(name="code-executor")
+    code_tool = PythonMonty(name="code-executor")
 
     return Agent(
         name="Cloud Sustainability Researcher",

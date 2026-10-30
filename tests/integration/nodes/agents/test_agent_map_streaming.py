@@ -10,10 +10,10 @@ from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.operators import Map
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME
-from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
@@ -73,7 +73,7 @@ def mock_tools_http(mocker):
 
 def test_react_agent_map_streaming_all_mode_isolated(mock_llm_executor, mock_tools_http):
     """Ensure parallel ReAct agents under Map stream independently in ALL mode (with tools)."""
-    python_tool = Python(
+    python_tool = PythonMonty(
         name="noop-tool",
         description="Simple tool returning static content",
         code="""
@@ -147,7 +147,7 @@ def run(input_data):
 
 def test_react_agent_map_streaming_final_mode_isolated(mock_llm_executor, mock_tools_http):
     """Ensure parallel ReAct agents under Map stream only final content in FINAL mode (with tools)."""
-    python_tool = Python(
+    python_tool = PythonMonty(
         name="noop-tool",
         description="Simple tool returning static content",
         code="""

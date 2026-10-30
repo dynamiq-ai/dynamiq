@@ -19,7 +19,7 @@ from dynamiq.checkpoints.types import CheckpointStatus, RunPausedException
 from dynamiq.nodes import Node, NodeGroup, llms
 from dynamiq.nodes.operators import Choice, ChoiceOption, Delay
 from dynamiq.nodes.operators import delay as delay_module
-from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import ChoiceCondition, ConditionOperator
 from dynamiq.nodes.utils import Input, Output
 from dynamiq.prompts import Message, Prompt
@@ -72,13 +72,15 @@ class Ledger:
     def __init__(self):
         self.calls: dict[str, int] = {}
 
-    def step(self, node_id: str, code: str, **kwargs) -> Python:
+    def step(self, node_id: str, code: str, **kwargs) -> PythonMonty:
         ledger = self
 
-        class CountedPython(Python):
-            def execute(self, input_data, config=None, **run_kwargs):
+        class CountedPython(PythonMonty):
+            # Count in execute_async: the sync path (PythonMonty.execute) delegates to it via
+            # asyncio.run, and the async path calls it directly, so both count exactly once.
+            async def execute_async(self, input_data, config=None, **run_kwargs):
                 ledger.calls[self.id] = ledger.calls.get(self.id, 0) + 1
-                return super().execute(input_data, config, **run_kwargs)
+                return await super().execute_async(input_data, config, **run_kwargs)
 
         return CountedPython(id=node_id, name=node_id, code=code, **kwargs)
 
@@ -255,7 +257,9 @@ class TestPauseKeepsTheRestOfTheFlowMoving:
 
     def test_a_real_failure_elsewhere_fails_the_run_instead_of_pausing_it(self):
         application = Input(id="application")
-        sanctions = Python(id="sanctions_screening", code="def run(input_data):\n    raise ValueError('list down')")
+        sanctions = PythonMonty(
+            id="sanctions_screening", code="def run(input_data):\n    raise ValueError('list down')"
+        )
         sanctions.depends_on(application)
         hold = Delay(id="hold", duration_seconds=3600)
         hold.depends_on(application)
@@ -372,7 +376,7 @@ class TestHumanApprovalResume:
             is_postponed_component_init=True,
         )
         summary.depends_on(application)
-        payout = Python(
+        payout = PythonMonty(
             id="payout",
             code="def run(input_data):\n    return {'paid': True}",
             approval=ApprovalConfig(enabled=True, feedback_method=FeedbackMethod.STREAM),

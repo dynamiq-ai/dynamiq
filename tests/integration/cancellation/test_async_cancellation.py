@@ -1,5 +1,6 @@
 import asyncio
 import time
+from typing import ClassVar
 
 import pytest
 
@@ -7,7 +8,8 @@ from dynamiq import Workflow, connections, flows
 from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.node import Node, NodeDependency, NodeGroup
-from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools.function_tool import FunctionTool
+from dynamiq.nodes.tools.python import PythonInputSchema
 from dynamiq.nodes.utils import Input, Output
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -66,6 +68,29 @@ def make_slow_pipeline(sleep_seconds: float = 5.0):
     )
     out = Output(id="output", name="Output", depends=[NodeDependency(slow)])
     return [inp, slow, out]
+
+
+class SlowCalculatorTool(FunctionTool):
+    """A calculator tool that blocks in-process for ~1.5s so a cancel can land mid-run.
+
+    FunctionTool runs a real in-process Python function, so time.sleep actually blocks; the Monty
+    subset has no time module and cannot sleep. The agent runs in a worker thread, so task.cancel()
+    signals the shared token and the agent's check_cancellation catches it at the next loop iteration.
+    """
+
+    name: str = "calculator"
+    description: str = "Calculator. Input: {'step': <n>}."
+    # Empty schema with extra allowed, like PythonMonty: the agent coerces the tool input through it
+    # but keeps "step" as an extra, and its empty model_fields add nothing to the ReAct prompt.
+    input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
+
+    def run_func(self, input_data, config=None, **kwargs):
+        step = dict(input_data).get("step", "?")
+        elapsed = 0.0
+        while elapsed < 1.5:
+            time.sleep(0.05)
+            elapsed += 0.05
+        return f"step {step} done"
 
 
 class TestAsyncTokenCancellation:
@@ -269,19 +294,10 @@ class TestAsyncAgentCancellation:
         """Agent running in async mode + task.cancel() returns CANCELED."""
         mock_llm_react_loop(mocker, tool_calls=20)
 
-        slow_tool = Python(
+        slow_tool = SlowCalculatorTool(
             id="slow-tool",
             name="calculator",
             description="Calculator. Input: {'step': <n>}.",
-            code=(
-                "import time\n"
-                "def run(input_data):\n"
-                "    elapsed = 0.0\n"
-                "    while elapsed < 1.5:\n"
-                "        time.sleep(0.05)\n"
-                "        elapsed += 0.05\n"
-                "    return {'content': 'ok'}\n"
-            ),
         )
         agent = Agent(
             id="agent",

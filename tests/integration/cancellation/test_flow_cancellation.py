@@ -4,7 +4,7 @@ import time
 from dynamiq import Workflow, connections, flows
 from dynamiq.nodes import llms
 from dynamiq.nodes.node import InputTransformer, Node, NodeDependency, NodeGroup
-from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.utils import Input, Output
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -70,11 +70,11 @@ def make_slow_pipeline(sleep_seconds: float = 5.0):
 
 
 def make_python_pipeline_slow():
-    """Input -> Python -> CooperativeSlowNode -> Output."""
+    """Input -> PythonMonty -> CooperativeSlowNode -> Output."""
     inp = Input(id="input", name="Input")
-    py = Python(
+    py = PythonMonty(
         id="python",
-        name="Python",
+        name="PythonMonty",
         code='def run(input_data): return {"processed": input_data.get("value", 0) * 10}',
         depends=[NodeDependency(inp)],
     )
@@ -152,7 +152,7 @@ class TestMidExecutionCancellation:
         assert result.error.message
 
     def test_cancel_after_first_node_completes(self, mocker, cancellation_token, runnable_config):
-        """Input + Python complete fast; cancel during slow node."""
+        """Input + PythonMonty complete fast; cancel during slow node."""
         flow = flows.Flow(nodes=make_python_pipeline_slow())
 
         def go():

@@ -37,21 +37,21 @@ nodes:
     max_loops: 8
     tools:
       - id: web-search-tool
-        type: dynamiq.nodes.tools.python.Python
+        type: dynamiq.nodes.tools.PythonMonty
         name: web-search
         description: Search the web. Input field - query.
         code: |
           def run(input_data):
               return "results for %s" % input_data.get("query")
       - id: refund-customer-tool
-        type: dynamiq.nodes.tools.python.Python
+        type: dynamiq.nodes.tools.PythonMonty
         name: refund-customer
         description: Refund a customer. Input fields - customer_id, amount.
         code: |
           def run(input_data):
               return "refunded %s to customer %s" % (input_data.get("amount"), input_data.get("customer_id"))
       - id: delete-customer-tool
-        type: dynamiq.nodes.tools.python.Python
+        type: dynamiq.nodes.tools.PythonMonty
         name: delete-customer
         description: Delete a customer by customer_id.
         code: |

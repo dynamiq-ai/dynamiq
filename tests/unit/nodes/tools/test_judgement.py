@@ -15,7 +15,7 @@ from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.detectors import SystemOne
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools import Judgement, JudgementOption, JudgementQuestion, Python
+from dynamiq.nodes.tools import Judgement, JudgementOption, JudgementQuestion, PythonMonty
 from dynamiq.nodes.tools.judgement import confidence_of
 from dynamiq.nodes.types import NamedField
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
@@ -360,7 +360,7 @@ def test_agent_questions_can_be_hidden_from_the_tool_schema():
     [
         (lambda llm: {}, "Field required"),
         (
-            lambda llm: {"judge": Python(code="def run(_):\n    return {}")},
+            lambda llm: {"judge": PythonMonty(code="def run(_):\n    return {}")},
             "must be a System One, an LLM or an agent node",
         ),
         (

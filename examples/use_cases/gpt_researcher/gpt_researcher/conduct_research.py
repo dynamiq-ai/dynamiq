@@ -6,7 +6,7 @@ from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.node import InputTransformer, NodeDependency
 from dynamiq.nodes.operators import Map
 from dynamiq.nodes.splitters.document import DocumentSplitter
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.tavily import TavilyTool
 from dynamiq.nodes.tools.zenrows import ZenRowsTool
 from dynamiq.nodes.writers import PineconeDocumentWriter
@@ -46,8 +46,8 @@ def conduct_research_workflow():
     )
 
     # Parse generated sub-queries into a structured list
-    parse_sub_queries_node = Python(
-        name="Python: Parse Sub-Queries",
+    parse_sub_queries_node = PythonMonty(
+        name="PythonMonty: Parse Sub-Queries",
         id="parse_sub_queries_node",
         code="""
 def run(input_data):
@@ -73,8 +73,8 @@ def run(input_data):
     )
 
     # Extract URLs from search results
-    extract_links_node = Python(
-        name="Python: Extract URLs",
+    extract_links_node = PythonMonty(
+        name="PythonMonty: Extract URLs",
         id="extract_links_node",
         code="""
 def run(input_data):
@@ -100,8 +100,8 @@ def run(input_data):
     )
 
     # Convert fetched content into document format
-    convert_to_documents_node = Python(
-        name="Python: Convert to Documents",
+    convert_to_documents_node = PythonMonty(
+        name="PythonMonty: Convert to Documents",
         id="convert_to_documents_node",
         code="""
 def run(input_data):

@@ -226,7 +226,7 @@ def test_action_parsing_failure_emits_tool_input_error_event(mocker):
     from dynamiq.nodes.agents import Agent
     from dynamiq.nodes.agents.agent import Behavior
     from dynamiq.nodes.llms import OpenAI
-    from dynamiq.nodes.tools.python import Python
+    from dynamiq.nodes.tools import PythonMonty
     from dynamiq.nodes.types import InferenceMode
     from dynamiq.runnables import RunnableConfig
     from dynamiq.types.streaming import AgentToolInputErrorEventMessageData, StreamingConfig, StreamingMode
@@ -238,7 +238,7 @@ def test_action_parsing_failure_emits_tool_input_error_event(mocker):
         connection=conn,
         prompt=prompts.Prompt(messages=[prompts.Message(role="user", content="{{input}}")]),
     )
-    tool = Python(name="dummy", description="dummy tool", code="def run(inputs): return {}")
+    tool = PythonMonty(name="dummy", description="dummy tool", code="def run(inputs): return {}")
 
     agent = Agent(
         name="test-agent",

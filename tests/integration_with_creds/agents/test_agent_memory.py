@@ -11,7 +11,7 @@ from dynamiq.memory.backends import DynamoDB, InMemory, Pinecone, Qdrant
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
 from dynamiq.nodes.llms import Anthropic, AnthropicCacheControl, OpenAI
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import MessageRole
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -411,7 +411,7 @@ def test_react_agent_with_dynamodb_memory(
 def test_memory_snapshot_with_inmemory_backend(anthropic_llm, run_config):
     """Test that memory uses snapshot semantics: clear + rewrite after each run.
 
-    Uses a Python tool so the agent produces tool-call / observation messages.
+    Uses a PythonMonty tool so the agent produces tool-call / observation messages.
 
     Verifies:
     1. After turn 1, memory contains all non-system prompt messages (including
@@ -426,7 +426,7 @@ def test_memory_snapshot_with_inmemory_backend(anthropic_llm, run_config):
     usage_capture = UsageCaptureCallback()
     test_run_config = run_config.model_copy(update={"callbacks": [usage_capture]})
 
-    lookup_tool = Python(
+    lookup_tool = PythonMonty(
         name="company-lookup",
         description="Look up which company a person works at. Input: {'person': '<name>'}",
         code=(

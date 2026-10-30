@@ -12,7 +12,7 @@ nodes:
       model: gpt-4o
     tools:
       - id: python-file-tool
-        type: dynamiq.nodes.tools.python.Python
+        type: dynamiq.nodes.tools.PythonMonty
         code: |
           def run(input_data):
               """

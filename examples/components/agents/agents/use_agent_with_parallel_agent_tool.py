@@ -5,7 +5,7 @@ from dynamiq import Workflow
 from dynamiq.callbacks import DynamiqTracingCallbackHandler, TracingCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import JsonWorkflowEncoder
 from dynamiq.utils.logger import logger
@@ -29,7 +29,7 @@ Summarize the specialist's findings for the user.
 
 
 def make_child_agent(llm):
-    sum_tool = Python(
+    sum_tool = PythonMonty(
         name="Range Sum",
         description='Returns sum(1..n). Expects input {"n": int}.',
         code="""
@@ -40,7 +40,7 @@ def run(params: dict):
 """,
     )
 
-    product_tool = Python(
+    product_tool = PythonMonty(
         name="Range Product",
         description='Returns product(1..m). Expects input {"m": int}.',
         code="""

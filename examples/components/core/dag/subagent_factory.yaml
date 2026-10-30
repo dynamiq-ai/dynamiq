@@ -30,7 +30,7 @@ nodes:
             temperature: 0.1
             max_tokens: 4000
           tools:
-            - type: dynamiq.nodes.tools.python.Python
+            - type: dynamiq.nodes.tools.PythonMonty
               code: |
                 def run(input_data):
                     return {"content": str(input_data)}

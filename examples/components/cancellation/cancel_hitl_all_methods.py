@@ -17,8 +17,8 @@ from threading import Event
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
-from dynamiq.nodes.tools.python import Python
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.feedback import ApprovalConfig, FeedbackMethod
 from dynamiq.types.streaming import StreamingConfig
@@ -134,7 +134,7 @@ def test_tool_approval_streaming():
     input_queue = Queue()
     done_event = Event()
 
-    email_tool = Python(
+    email_tool = PythonMonty(
         id="t-tool-approval-email",
         name="t-tool-approval-send-email",
         description="Sends an email. Input: {'email': '<content>'}.",
@@ -178,7 +178,7 @@ def test_tool_approval_console():
 
     llm = setup_llm()
 
-    email_tool = Python(
+    email_tool = PythonMonty(
         id="t-tool-approval-console-email",
         name="t-tool-approval-console-send-email",
         description="Sends an email. Input: {'email': '<content>'}.",

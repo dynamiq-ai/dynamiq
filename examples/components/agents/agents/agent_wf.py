@@ -10,9 +10,9 @@ from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.retrievers import WeaviateDocumentRetriever
 from dynamiq.nodes.retrievers.retriever import VectorStoreRetriever
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.http_api_call import HttpApiCall, ResponseType
-from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
@@ -96,7 +96,7 @@ def setup_react_agent_http_python() -> Agent:
     llm = setup_llm()
 
     # Create the PythonTool for web requests
-    web_request_tool = Python(
+    web_request_tool = PythonMonty(
         name="WebRequestTool",
         description="Makes a GET request to example.com and returns the response text",
         code=PYTHON_TOOL_CODE,

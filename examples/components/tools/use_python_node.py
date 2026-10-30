@@ -1,8 +1,8 @@
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 
 
 def run_python_node_with_input():
-    """Basic example of running Python node with input data."""
+    """Basic example of running PythonMonty node with input data."""
     python_code_with_input = """
 def run(input_data):
     name = input_data.get('name', 'World')
@@ -17,7 +17,7 @@ def run(input_data):
     }
 """
 
-    python_node = Python(code=python_code_with_input)
+    python_node = PythonMonty(code=python_code_with_input)
     input_data = {"name": "Alice", "age": 30}
     config = None
     result = python_node.run(input_data, config)
@@ -26,7 +26,7 @@ def run(input_data):
 
 
 def run_python_node_without_input():
-    """Basic example of running Python node without input data."""
+    """Basic example of running PythonMonty node without input data."""
     python_code_without_input = """
 def run(input_data):
     # Generate a "random" number without using imports
@@ -37,14 +37,14 @@ def run(input_data):
     }
 """
 
-    python_node = Python(code=python_code_without_input)
+    python_node = PythonMonty(code=python_code_without_input)
     result = python_node.run({})
     print("\nResult without input:")
     print(result)
 
 
 def run_python_node_with_math_import():
-    """Basic example of running Python node with math import."""
+    """Basic example of running PythonMonty node with math import."""
     python_code_with_math = """
 import math
 
@@ -62,7 +62,7 @@ def run(input_data):
     }
 """
 
-    python_node = Python(code=python_code_with_math)
+    python_node = PythonMonty(code=python_code_with_math)
     input_data = {"radius": 5}
     config = None
     result = python_node.run(input_data, config)
@@ -71,7 +71,7 @@ def run(input_data):
 
 
 def run_python_node_with_random_import():
-    """Basic example of running Python node with random import."""
+    """Basic example of running PythonMonty node with random import."""
     python_code_with_random = """
 import random
 
@@ -88,7 +88,7 @@ def run(input_data):
     }
 """
 
-    python_node = Python(code=python_code_with_random)
+    python_node = PythonMonty(code=python_code_with_random)
     input_data = {"min": 1, "max": 10}
     config = None
     result = python_node.run(input_data, config)
@@ -97,7 +97,7 @@ def run(input_data):
 
 
 def run_python_node_with_dynamiq_import():
-    """Basic example of running Python node with dynamiq relative import."""
+    """Basic example of running PythonMonty node with dynamiq relative import."""
     python_code_with_math = """
 
 def run(input_data):
@@ -112,7 +112,7 @@ def run(input_data):
     }
 """
 
-    python_node = Python(code=python_code_with_math)
+    python_node = PythonMonty(code=python_code_with_math)
 
     input_data = {
         "content": "Document content",

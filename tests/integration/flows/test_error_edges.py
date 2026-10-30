@@ -21,7 +21,7 @@ from dynamiq.nodes import DependencyTrigger, ErrorHandling
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.operators import Choice, ChoiceOption, Delay
 from dynamiq.nodes.operators import delay as delay_module
-from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import ChoiceCondition, ConditionOperator
 from dynamiq.nodes.utils import Input, Output
 from dynamiq.runnables import RunnableStatus
@@ -48,13 +48,15 @@ class Calls:
     def __init__(self):
         self.count: dict[str, int] = {}
 
-    def step(self, node_id: str, code: str, **kwargs) -> Python:
+    def step(self, node_id: str, code: str, **kwargs) -> PythonMonty:
         calls = self
 
-        class CountedPython(Python):
-            def execute(self, input_data, config=None, **run_kwargs):
+        class CountedPython(PythonMonty):
+            # Count in execute_async: the sync path (PythonMonty.execute) delegates to it via
+            # asyncio.run, and the async path calls it directly, so both count exactly once.
+            async def execute_async(self, input_data, config=None, **run_kwargs):
                 calls.count[self.id] = calls.count.get(self.id, 0) + 1
-                return super().execute(input_data, config, **run_kwargs)
+                return await super().execute_async(input_data, config, **run_kwargs)
 
         return CountedPython(id=node_id, name=node_id, code=code, **kwargs)
 
@@ -114,7 +116,7 @@ class TestCompensation:
         }
         assert result.output["refund"]["output"]["content"] == {
             "refunded": True,
-            "reason": "Code execution error: card declined: insufficient funds",
+            "reason": "Code execution error: RuntimeError: card declined: insufficient funds",
         }
 
     def test_refund_is_skipped_when_the_charge_succeeds(self):
@@ -148,8 +150,8 @@ class TestCompensation:
         assert statuses(result)["result"] == "success"
 
 
-def plain_step(node_id: str, code: str) -> Python:
-    return Python(id=node_id, name=node_id, code=code)
+def plain_step(node_id: str, code: str) -> PythonMonty:
+    return PythonMonty(id=node_id, name=node_id, code=code)
 
 
 class TestRoutingByError:

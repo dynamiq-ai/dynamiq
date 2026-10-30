@@ -4,7 +4,7 @@ from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import JsonWorkflowEncoder
 from dynamiq.utils.logger import logger
@@ -26,7 +26,7 @@ Summarize final results for the user.
 
 
 def make_child_agent(llm):
-    python_tool = Python(
+    python_tool = PythonMonty(
         code="""
 def run(params: dict):
     # expects optional n; defaults to 10

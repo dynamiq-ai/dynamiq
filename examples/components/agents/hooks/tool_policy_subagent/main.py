@@ -24,7 +24,7 @@ from _common import (  # noqa: E402
 
 DELETE_AND_RESEARCH = "Delete customer 42, then research the history of the Apache license."
 RESEARCH = "Research the history of the Apache license and summarize it in two sentences."
-BUDGET = "Search the web for three different things: Python, Rust and Go."
+BUDGET = "Search the web for three different things: PythonMonty, Rust and Go."
 
 DELETE_THEN_RESEARCH = [
     step_tool("delete-customer", customer_id="42"),
@@ -36,10 +36,10 @@ RESEARCH_ONLY = [
     step_final("Done. See the tool observation for what was allowed."),
 ]
 SEARCH_THREE = [
-    step_tool("web-search", query="Python"),
+    step_tool("web-search", query="PythonMonty"),
     step_tool("web-search", query="Rust"),
     step_tool("web-search", query="Go"),
-    step_final("Searched Python and Rust; the budget stopped the third search."),
+    step_final("Searched PythonMonty and Rust; the budget stopped the third search."),
 ]
 REFUND = "Refund customer 42 by 20 dollars."
 REFUND_SCRIPT = [

@@ -12,7 +12,7 @@ from dynamiq.flows import Flow
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import Anthropic, OpenAI
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import InferenceMode, InputParamMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
@@ -221,8 +221,8 @@ def llm_instance():
 
 @pytest.fixture(scope="module")
 def string_length_tool_instance(python_tool_code):
-    logger.info("--- Creating Python tool (StringLengthTool) (Fixture) ---")
-    tool = Python(
+    logger.info("--- Creating PythonMonty tool (StringLengthTool) (Fixture) ---")
+    tool = PythonMonty(
         name="StringLengthTool",
         description="""Calculates the length of a given string. Input parameter: 'text' (string).""",
         code=python_tool_code,
@@ -307,7 +307,7 @@ def run_and_assert_agent(agent: Agent, agent_input, expected_length, run_config)
 def test_react_agent_inference_modes(
     llm_instance, string_length_tool_instance, agent_role, agent_input, expected_length, run_config, inference_mode
 ):
-    """Test agent with a simple Python tool across different inference modes."""
+    """Test agent with a simple PythonMonty tool across different inference modes."""
     agent = Agent(
         name=f"Test Agent {inference_mode.value}",
         llm=llm_instance,
@@ -353,7 +353,7 @@ def _run_comprehensive_schema_test(llm, comprehensive_tool, run_config, inferenc
     wf = Workflow(flow=Flow(nodes=[agent]))
     result = wf.run(
         input_data={
-            "input": "Analyze the text 'Hello world from Python testing' in summary format with limit "
+            "input": "Analyze the text 'Hello world from PythonMonty testing' in summary format with limit "
             "5 and high priority"
         },
         config=RunnableConfig(callbacks=[streaming], request_timeout=120),

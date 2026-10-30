@@ -84,7 +84,7 @@ def test_importing_the_core_loads_no_integration():
         from dynamiq.flows import Flow
         from dynamiq.nodes.agents import Agent
         from dynamiq.nodes.llms import Anthropic, Bedrock, Gemini, OpenAI
-        from dynamiq.nodes.tools import HttpApiCall, MCPServer, Python
+        from dynamiq.nodes.tools import HttpApiCall, MCPServer, PythonMonty
         from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
 
         print(sorted(module for module in {DEFERRED_MODULES!r} if module in sys.modules))

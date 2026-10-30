@@ -21,7 +21,7 @@ from dynamiq.nodes.agents.exceptions import (
 )
 from dynamiq.nodes.agents.utils import SummarizationConfig, XMLParser
 from dynamiq.nodes.llms import Gemini, OpenAI
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Message, MessageRole
@@ -71,9 +71,9 @@ def xml_react_agent(openai_node, mock_llm_executor):
 @pytest.fixture
 def mock_tool():
     """A real Node-based tool for testing."""
-    from dynamiq.nodes.tools.python import Python
+    from dynamiq.nodes.tools import PythonMonty
 
-    return Python(
+    return PythonMonty(
         name="Calculator",
         description="A simple calculator tool for performing arithmetic operations",
         code="""
@@ -608,34 +608,6 @@ def test_generate_function_calling_schemas(openai_node, mock_tool):
         assert parameters["required"][0] == "thought"
 
 
-def test_agent_injects_file_store_into_python_code_executor(openai_node, mock_llm_executor):
-    """Regression test: Agent should inject file_store into PythonCodeExecutor tools at runtime."""
-    from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
-    from dynamiq.storages.file.base import FileStoreConfig
-    from dynamiq.storages.file.in_memory import InMemoryFileStore
-
-    executor = PythonCodeExecutor(name="TestExecutor")
-    assert executor.file_store is None, "PythonCodeExecutor should allow None file_store"
-
-    file_store_backend = InMemoryFileStore()
-    agent = Agent(
-        name="TestAgent",
-        llm=openai_node,
-        tools=[executor],
-        file_store=FileStoreConfig(enabled=True, backend=file_store_backend),
-    )
-
-    assert agent.file_store_backend is file_store_backend
-
-    tool = next((t for t in agent.tools if isinstance(t, PythonCodeExecutor)), None)
-    assert tool is not None, "PythonCodeExecutor should be in agent's tools"
-
-    if not tool.file_store:
-        tool.file_store = agent.file_store_backend
-
-    assert tool.file_store is file_store_backend, "Agent should inject file_store into PythonCodeExecutor"
-
-
 def test_todo_tools_added_when_enabled(openai_node, mock_llm_executor):
     """Test that todo tools are added and instructions included when file_store.todo_enabled is True."""
 
@@ -1036,7 +1008,7 @@ class TestParallelToolCloning:
 
     @pytest.fixture
     def calculator_tool(self):
-        return Python(
+        return PythonMonty(
             name="Calculator",
             description="A simple calculator tool for performing arithmetic operations",
             code="",
@@ -1045,7 +1017,7 @@ class TestParallelToolCloning:
 
     @pytest.fixture
     def formatter_tool(self):
-        return Python(
+        return PythonMonty(
             name="Formatter",
             description="A text formatting tool",
             code="",
@@ -1073,7 +1045,7 @@ class TestParallelToolCloning:
             return_value=(calculator_tool, config),
         )
         mock_result = RunnableResult(status=RunnableStatus.SUCCESS, output={"content": "42"})
-        mocker.patch.object(Python, "run", return_value=mock_result)
+        mocker.patch.object(PythonMonty, "run", return_value=mock_result)
 
         parallel_agent._run_tool(calculator_tool, {"expression": "1+1"}, config, is_parallel=False)
 
@@ -1088,7 +1060,7 @@ class TestParallelToolCloning:
             return_value=(calculator_tool, config),
         )
         mock_result = RunnableResult(status=RunnableStatus.SUCCESS, output={"content": "42"})
-        mocker.patch.object(Python, "run", return_value=mock_result)
+        mocker.patch.object(PythonMonty, "run", return_value=mock_result)
 
         parallel_agent._run_tool(calculator_tool, {"expression": "1+1"}, config, is_parallel=True)
 

@@ -5,7 +5,7 @@ from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.node import InputTransformer, NodeDependency
 from dynamiq.nodes.retrievers import PineconeDocumentRetriever
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.prompts import Message, Prompt
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 from examples.use_cases.gpt_researcher.gpt_researcher.prompts import get_research_report_prompt
@@ -40,8 +40,8 @@ def write_report_workflow(source_to_extract: int) -> Workflow:
         depends=[NodeDependency(embed_query_node)],
     )
 
-    curate_sources_node = Python(
-        name="Python: Curate Sources",
+    curate_sources_node = PythonMonty(
+        name="PythonMonty: Curate Sources",
         id="curate_sources_node",
         code="""
 def run(input_data):

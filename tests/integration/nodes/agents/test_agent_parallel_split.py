@@ -7,7 +7,7 @@ import pytest
 from dynamiq import connections, prompts
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 
@@ -23,8 +23,8 @@ def openai_node():
     )
 
 
-def _make_tool(name: str, *, is_parallel_execution_allowed: bool = True) -> Python:
-    return Python(
+def _make_tool(name: str, *, is_parallel_execution_allowed: bool = True) -> PythonMonty:
+    return PythonMonty(
         name=name,
         description=f"Tool {name}",
         code="",

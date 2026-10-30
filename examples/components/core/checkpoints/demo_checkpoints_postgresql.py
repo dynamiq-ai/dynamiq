@@ -1,6 +1,6 @@
 """Example: PostgreSQL-backed checkpoint storage.
 
-Runs a small Input -> Python -> Output flow with checkpointing enabled and a
+Runs a small Input -> PythonMonty -> Output flow with checkpointing enabled and a
 PostgreSQL backend. Demonstrates:
 
 - wiring the backend via ``dynamiq.connections.PostgreSQL``
@@ -30,7 +30,7 @@ from dynamiq.checkpoints import CheckpointBehavior, CheckpointConfig
 from dynamiq.checkpoints.backends import PostgreSQL as PostgresCheckpointBackend
 from dynamiq.connections import PostgreSQL as PostgresConn
 from dynamiq.nodes.node import NodeDependency
-from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.utils import Input, Output
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -40,15 +40,15 @@ TABLE_NAME = os.getenv("DYNAMIQ_CHECKPOINTS_TABLE", "flow_checkpoints_demo")
 
 
 def build_flow(backend: PostgresCheckpointBackend) -> flows.Flow:
-    """Input -> Python (multiply) -> Python (square) -> Output."""
+    """Input -> PythonMonty (multiply) -> PythonMonty (square) -> Output."""
     inp = Input(id="input", name="Input")
-    multiply = Python(
+    multiply = PythonMonty(
         id="multiply",
         name="multiply-by-10",
         code="def run(input_data): return {'value': input_data.get('value', 0) * 10}",
         depends=[NodeDependency(inp)],
     )
-    square = Python(
+    square = PythonMonty(
         id="square",
         name="square",
         code="def run(input_data): return {'value': input_data['multiply']['output']['content']['value'] ** 2}",

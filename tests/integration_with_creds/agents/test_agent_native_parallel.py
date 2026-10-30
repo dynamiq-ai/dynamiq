@@ -10,15 +10,15 @@ from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from tests.integration_with_creds.agents.streaming_assertions import assert_streaming_events, collect_streaming_events
 
 
-def _make_tool(name: str, code: str) -> Python:
-    return Python(
+def _make_tool(name: str, code: str) -> PythonMonty:
+    return PythonMonty(
         name=name,
         description=f"Returns a fact about {name.lower()}.",
         code=code,

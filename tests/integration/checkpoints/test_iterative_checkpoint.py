@@ -24,7 +24,7 @@ from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig
 from dynamiq.nodes import ErrorHandling, llms
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.node import NodeDependency
-from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.llm_summarizer import SummarizerTool
 from dynamiq.nodes.types import Behavior
 from dynamiq.nodes.utils import Input, Output
@@ -56,7 +56,7 @@ def create_agent_flow(
     flow_id: str = FLOW_ID,
     behavior: CheckpointBehavior = CheckpointBehavior.APPEND,
 ):
-    calc_tool = Python(
+    calc_tool = PythonMonty(
         id=CALC_TOOL_ID,
         name="calculator",
         description="Calculator tool for math operations",
@@ -389,7 +389,7 @@ class TestSkipAndFailureMidPipeline:
         backend = backend_factory(backend_type)
 
         inp = Input(id="input", name="Input")
-        failing = Python(
+        failing = PythonMonty(
             id="failing",
             name="Failing",
             code='def run(input_data): raise ValueError("boom")',
@@ -420,14 +420,14 @@ class TestSkipAndFailureMidPipeline:
         backend = backend_factory(backend_type)
 
         inp = Input(id="input", name="Input")
-        failing = Python(
+        failing = PythonMonty(
             id="failing-return",
             name="Failing Return",
             code='def run(input_data): raise ValueError("recoverable")',
             error_handling=ErrorHandling(behavior=Behavior.RETURN),
             depends=[NodeDependency(inp)],
         )
-        success = Python(
+        success = PythonMonty(
             id="success",
             name="Success",
             code='def run(input_data): return {"ok": True}',
@@ -452,20 +452,20 @@ class TestSkipAndFailureMidPipeline:
         backend = backend_factory(backend_type)
 
         inp = Input(id="input", name="Input")
-        step1 = Python(
+        step1 = PythonMonty(
             id="step1",
             name="Step1",
             code='def run(input_data): return {"v": 1}',
             depends=[NodeDependency(inp)],
         )
-        step2 = Python(
+        step2 = PythonMonty(
             id="step2",
             name="Step2",
             code='def run(input_data): raise RuntimeError("mid fail")',
             error_handling=ErrorHandling(behavior=Behavior.RAISE),
             depends=[NodeDependency(step1)],
         )
-        step3 = Python(
+        step3 = PythonMonty(
             id="step3",
             name="Step3",
             code='def run(input_data): return {"v": 3}',
@@ -500,10 +500,10 @@ class TestSkipAndFailureMidPipeline:
 
         # Run 1: step2 fails
         inp = Input(id="input", name="Input")
-        step1 = Python(
+        step1 = PythonMonty(
             id="step1", name="Step1", code='def run(input_data): return {"v": 1}', depends=[NodeDependency(inp)]
         )
-        step2 = Python(
+        step2 = PythonMonty(
             id="step2",
             name="Step2",
             code=make_step2_code_fail(),
@@ -532,10 +532,10 @@ class TestSkipAndFailureMidPipeline:
 
         # Run 2: resume with fixed step2
         inp2 = Input(id="input", name="Input")
-        step1_2 = Python(
+        step1_2 = PythonMonty(
             id="step1", name="Step1", code='def run(input_data): return {"v": 1}', depends=[NodeDependency(inp2)]
         )
-        step2_2 = Python(
+        step2_2 = PythonMonty(
             id="step2",
             name="Step2",
             code=make_step2_code_succeed(),
@@ -579,7 +579,7 @@ class TestAgentFailureMidLoop:
         """Agent hits max_loops with RAISE behavior: checkpoint status is FAILED."""
         backend = backend_factory(backend_type)
 
-        calc_tool = Python(
+        calc_tool = PythonMonty(
             id=CALC_TOOL_ID,
             name="calculator",
             description="Calculator",
@@ -612,7 +612,7 @@ class TestAgentFailureMidLoop:
         """Agent hits max_loops with RETURN behavior: checkpoint COMPLETED with crafted answer."""
         backend = backend_factory(backend_type)
 
-        calc_tool = Python(
+        calc_tool = PythonMonty(
             id=CALC_TOOL_ID,
             name="calculator",
             description="Calculator",
@@ -667,7 +667,7 @@ class TestAgentTimeoutWithCheckpoint:
 
         import time
 
-        calc_tool = Python(
+        calc_tool = PythonMonty(
             id=CALC_TOOL_ID,
             name="calculator",
             description="Calculator",
@@ -708,7 +708,7 @@ class TestAgentTimeoutWithCheckpoint:
 
         import time
 
-        calc_tool = Python(
+        calc_tool = PythonMonty(
             id=CALC_TOOL_ID,
             name="calculator",
             description="Calculator",
@@ -926,7 +926,7 @@ class TestAppendModeCheckpoints:
     def test_append_mode_creates_multiple_checkpoints(self, mocker, backend_factory, backend_type):
         """Agent with 3 tool calls in append mode produces multiple checkpoint snapshots."""
         backend = backend_factory(backend_type)
-        calc_tool = Python(
+        calc_tool = PythonMonty(
             id=CALC_TOOL_ID,
             name="calculator",
             description="Calculator",
@@ -961,7 +961,7 @@ class TestAppendModeCheckpoints:
     def test_append_mode_checkpoints_linked_by_parent(self, mocker, backend_factory, backend_type):
         """Append-mode checkpoints form a chain via parent_checkpoint_id."""
         backend = backend_factory(backend_type)
-        calc_tool = Python(
+        calc_tool = PythonMonty(
             id=CALC_TOOL_ID,
             name="calculator",
             description="Calculator",
@@ -1000,7 +1000,7 @@ class TestAppendModeCheckpoints:
     def test_append_mode_time_travel_resume(self, mocker):
         """Resume from an intermediate checkpoint in append chain."""
         backend = InMemory()
-        calc_tool = Python(
+        calc_tool = PythonMonty(
             id=CALC_TOOL_ID,
             name="calculator",
             description="Calculator",
@@ -1054,7 +1054,7 @@ class TestAppendModeCheckpoints:
                         name="Agent",
                         llm=make_agent_llm(),
                         tools=[
-                            Python(
+                            PythonMonty(
                                 id=CALC_TOOL_ID,
                                 name="calculator",
                                 description="Calculator",
@@ -1086,12 +1086,12 @@ class TestAppendModeCheckpoints:
 
     @pytest.mark.parametrize("backend_type", ["in_memory", "file"])
     def test_append_mode_multi_node_pipeline(self, mocker, backend_factory, backend_type):
-        """Pipeline with Input -> Python -> Output in append mode: checkpoint per node batch."""
+        """Pipeline with Input -> PythonMonty -> Output in append mode: checkpoint per node batch."""
         backend = backend_factory(backend_type)
         inp = Input(id="input", name="Input")
-        py = Python(
+        py = PythonMonty(
             id="python",
-            name="Python",
+            name="PythonMonty",
             code='def run(input_data): return {"result": "processed"}',
             depends=[NodeDependency(inp)],
         )

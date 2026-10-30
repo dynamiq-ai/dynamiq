@@ -13,7 +13,7 @@ from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig, Che
 from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.node import NodeDependency
-from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.human_feedback import (
     HFStreamingInputEventMessage,
     HFStreamingInputEventMessageData,
@@ -60,7 +60,7 @@ def create_agent_flow(
     behavior: CheckpointBehavior = CheckpointBehavior.APPEND,
 ):
     """Create Agent(with calculator) flow. Agent receives input directly (no Input wrapper)."""
-    calc_tool = Python(
+    calc_tool = PythonMonty(
         id=CALC_TOOL_ID,
         name="calculator",
         description="Calculator tool for math operations",
@@ -254,9 +254,9 @@ class TestHITLApprovalCheckpoint:
         backend = backend_factory(backend_type)
 
         input_node = Input(id="input", name="Input")
-        approved_node = Python(
+        approved_node = PythonMonty(
             id="approved-python",
-            name="Approved Python",
+            name="Approved PythonMonty",
             code='def run(input_data): return {"result": "processed"}',
             approval=ApprovalConfig(enabled=True, feedback_method=FeedbackMethod.CONSOLE),
             depends=[NodeDependency(input_node)],
@@ -264,7 +264,7 @@ class TestHITLApprovalCheckpoint:
         output_node = Output(id="output", name="Output", depends=[NodeDependency(approved_node)])
 
         mocker.patch.object(
-            Python,
+            PythonMonty,
             "send_console_approval_message",
             return_value=ApprovalInputData(feedback="", is_approved=True, data={}),
         )
@@ -288,9 +288,9 @@ class TestHITLApprovalCheckpoint:
         backend = backend_factory(backend_type)
 
         input_node = Input(id="input", name="Input")
-        rejected_node = Python(
+        rejected_node = PythonMonty(
             id="rejected-python",
-            name="Rejected Python",
+            name="Rejected PythonMonty",
             code='def run(input_data): return {"result": "processed"}',
             approval=ApprovalConfig(enabled=True, feedback_method=FeedbackMethod.CONSOLE),
             depends=[NodeDependency(input_node)],
@@ -298,7 +298,7 @@ class TestHITLApprovalCheckpoint:
         output_node = Output(id="output", name="Output", depends=[NodeDependency(rejected_node)])
 
         mocker.patch.object(
-            Python,
+            PythonMonty,
             "send_console_approval_message",
             return_value=ApprovalInputData(feedback="not approved", is_approved=False, data={}),
         )
@@ -319,9 +319,9 @@ class TestHITLApprovalCheckpoint:
         backend = InMemory()
 
         input_node = Input(id="input", name="Input")
-        approved_node = Python(
+        approved_node = PythonMonty(
             id="approved-python",
-            name="Approved Python",
+            name="Approved PythonMonty",
             code='def run(input_data): return {"result": "ok"}',
             approval=ApprovalConfig(enabled=True, feedback_method=FeedbackMethod.CONSOLE),
             depends=[NodeDependency(input_node)],
@@ -329,7 +329,7 @@ class TestHITLApprovalCheckpoint:
         output_node = Output(id="output", name="Output", depends=[NodeDependency(approved_node)])
 
         mocker.patch.object(
-            Python,
+            PythonMonty,
             "send_console_approval_message",
             return_value=ApprovalInputData(feedback="", is_approved=True, data={}),
         )
@@ -441,11 +441,11 @@ class TestInputStreamingTimeoutInAgent:
         assert second.status == RunnableStatus.SUCCESS
 
     def test_streaming_approval_tool_timeout_checkpoint_recoverable_in_agent(self, mocker):
-        """End-to-end: agent's Python tool with ApprovalConfig(STREAM) times out →
+        """End-to-end: agent's PythonMonty tool with ApprovalConfig(STREAM) times out →
         on_input_timeout fires → walk-up snapshots agent state → resume completes."""
         spy = mocker.spy(CheckpointContext, "save_on_input_timeout")
         queue = Queue()
-        tool = Python(
+        tool = PythonMonty(
             id=self.PY_TOOL_ID,
             name="approval-python",
             code='def run(input_data): return {"result": "ran"}',

@@ -5,7 +5,7 @@ nodes:
     type: dynamiq.nodes.utils.Input
 
   credit-check:
-    type: dynamiq.nodes.tools.Python
+    type: dynamiq.nodes.tools.PythonMonty
     name: credit check
     code: |
       def run(input_data):
@@ -23,7 +23,7 @@ nodes:
       - node: credit-check
 
   disburse:
-    type: dynamiq.nodes.tools.Python
+    type: dynamiq.nodes.tools.PythonMonty
     name: disburse
     code: |
       def run(input_data):
@@ -39,7 +39,7 @@ nodes:
       - node: cooling-off
 
   notify-ops:
-    type: dynamiq.nodes.tools.Python
+    type: dynamiq.nodes.tools.PythonMonty
     name: notify operations
     code: |
       def run(input_data):

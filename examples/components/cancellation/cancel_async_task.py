@@ -14,7 +14,7 @@ from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.node import NodeDependency
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.runnables import RunnableConfig
 from dynamiq.workflow import Workflow
 from examples.llm_setup import setup_llm
@@ -51,7 +51,7 @@ def build_workflow(prefix):
         llm=_llm(f"{prefix}-researcher"),
         role=f"Use {prefix}-slow-research for every sub-topic. Research 3+ aspects.",
         tools=[
-            Python(
+            PythonMonty(
                 id=f"{prefix}-tool",
                 name=f"{prefix}-slow-research",
                 description='Research tool. Input: {{"topic": "<t>"}}.',

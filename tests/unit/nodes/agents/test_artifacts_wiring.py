@@ -325,14 +325,16 @@ def test_an_upload_can_be_read_and_published(llm, store, mocker):
 
 @pytest.mark.parametrize("other_tools", [False, True])
 def test_an_upload_gives_a_workspace_less_agent_the_tool_and_its_instructions(llm, store, mocker, other_tools):
-    from dynamiq.nodes.tools.python import Python
+    from dynamiq.nodes.tools import PythonMonty
 
     completion = _replies(
         mocker,
         _action({"action": "create", "path": "data.csv", "name": "Data"}),
         "Thought: Done.\nAnswer: Published.",
     )
-    tools = [Python(name="dummy", description="dummy tool", code="def run(inputs): return {}")] if other_tools else []
+    tools = (
+        [PythonMonty(name="dummy", description="dummy tool", code="def run(inputs): return {}")] if other_tools else []
+    )
     agent = Agent(name="a", llm=llm, tools=tools, artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT)
     assert "## Artifacts" not in _ops(agent), "no workspace at init"
 

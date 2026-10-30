@@ -89,7 +89,8 @@ providers and needs their keys. Smoke tests are slow and paid, and run only thro
 
 ### Security
 
-- `eval`, `exec` and `compile` run only in `dynamiq/nodes/tools/python.py`, under RestrictedPython.
+- User-authored Python runs only in the Dynamiq runtime's OS sandbox, not in this package. Do not add
+  in-process `eval`, `exec` or `compile` of untrusted code here.
 - No credentials in code: connections read them from their fields or from environment variables.
 - A type string from a request names code to import (`import_type`): resolve only types the caller may use.
 

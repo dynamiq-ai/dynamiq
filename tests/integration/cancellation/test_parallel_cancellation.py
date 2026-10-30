@@ -1,5 +1,6 @@
 import threading
 import time
+from typing import ClassVar
 
 from litellm import ModelResponse
 
@@ -8,8 +9,9 @@ from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.node import Node, NodeGroup
 from dynamiq.nodes.operators.operators import Map
-from dynamiq.nodes.tools import Python
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
+from dynamiq.nodes.tools.function_tool import FunctionTool
+from dynamiq.nodes.tools.python import PythonInputSchema
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.cancellation import check_cancellation
@@ -30,23 +32,33 @@ def make_llm(node_id: str = "llm") -> llms.OpenAI:
     )
 
 
-SLOW_TOOL_CODE = """
-import time
-def run(input_data):
-    elapsed = 0.0
-    while elapsed < 1.5:
-        time.sleep(0.05)
-        elapsed += 0.05
-    return {"content": "ok"}
-"""
+class SlowCalculatorTool(FunctionTool):
+    """A tool that blocks in-process for ~1.5s so a cancel can land mid-run.
+
+    FunctionTool runs a real in-process Python function, so time.sleep actually blocks; the Monty
+    subset has no time module and cannot sleep. check_cancellation runs before each tool call, so a
+    cancel during this sleep is caught at the next loop iteration (and between the parallel workers'
+    own cancellation checks).
+    """
+
+    # Empty schema with extra allowed, like PythonMonty: the agent coerces the tool input through it
+    # but keeps "step" as an extra, and its empty model_fields add nothing to the ReAct prompt.
+    input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
+
+    def run_func(self, input_data, config=None, **kwargs):
+        step = dict(input_data).get("step", "?")
+        elapsed = 0.0
+        while elapsed < 1.5:
+            time.sleep(0.05)
+            elapsed += 0.05
+        return f"step {step} done"
 
 
-def make_slow_tool(name: str = "slow-tool", node_id: str | None = None) -> Python:
-    return Python(
+def make_slow_tool(name: str = "slow-tool", node_id: str | None = None) -> SlowCalculatorTool:
+    return SlowCalculatorTool(
         id=node_id or name,
         name=name,
         description=f"{name}. Input: {{'step': <n>}}.",
-        code=SLOW_TOOL_CODE,
     )
 
 

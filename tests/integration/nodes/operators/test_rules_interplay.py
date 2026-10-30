@@ -1,5 +1,5 @@
 """The Rules node next to the nodes a workflow built in the editor already has: an agent with a
-response format, a document converter, validators and detectors, a Python function, a Choice."""
+response format, a document converter, validators and detectors, a PythonMonty function, a Choice."""
 
 from dynamiq import Workflow, connections
 from dynamiq.flows import Flow
@@ -10,7 +10,7 @@ from dynamiq.nodes.detectors import PIIDetector
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.operators import Choice, ChoiceOption, Expression, Rules
-from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.types import ChoiceCondition, ConditionOperator, DerivedValue, ExpressionItem, NamedField, Rule
 from dynamiq.nodes.utils import Input, Output
 from dynamiq.nodes.validators import RegexMatch
@@ -293,7 +293,7 @@ def test_a_file_without_an_appraisal_fails_the_presence_rule_and_holds_the_dated
     assert findings["FILE-04"]["status"] == "not_evaluated"
 
 
-# --- Validators, a detector and a Python function feed the rules --------------------------------------
+# --- Validators, a detector and a PythonMonty function feed the rules --------------------------------------
 
 
 TENURE = """
@@ -306,7 +306,7 @@ def run(input_data):
 
 
 def screening_workflow(pii_detected: bool) -> Workflow:
-    """Input → RegexMatch + PIIDetector (mocked) + Python → Rules → Output."""
+    """Input → RegexMatch + PIIDetector (mocked) + PythonMonty → Rules → Output."""
     start = Input(id="start", name="start")
     passport = RegexMatch(
         id="passport",
@@ -325,7 +325,7 @@ def screening_workflow(pii_detected: bool) -> Workflow:
         depends=[NodeDependency(node=start)],
         input_transformer=InputTransformer(selector={"message": "$.start.output.note"}),
     )
-    tenure = Python(
+    tenure = PythonMonty(
         id="tenure",
         name="tenure",
         code=TENURE,

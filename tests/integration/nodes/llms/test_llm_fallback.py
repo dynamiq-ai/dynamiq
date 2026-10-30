@@ -10,7 +10,7 @@ from dynamiq.flows import Flow
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.llms.base import FallbackConfig, FallbackTrigger
 from dynamiq.nodes.node import InputTransformer, NodeDependency, OutputTransformer
-from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 
@@ -293,7 +293,7 @@ def test_fallback_uses_primary_input_transformer(mocker, primary_connection, fal
 
 def test_fallback_not_triggered_on_skip(mocker, primary_connection, fallback_connection, prompt):
     """Test that fallback is NOT triggered when primary LLM is skipped (e.g., dependency failure)."""
-    failing_node = Python(
+    failing_node = PythonMonty(
         name="FailingNode",
         code="def run(input_data): raise ValueError('Dependency failed')",
     )

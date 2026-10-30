@@ -9,7 +9,7 @@ from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.agents.orchestrators.orchestrator import OrchestratorError
 from dynamiq.nodes.node import Node, NodeDependency
-from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools import PythonMonty
 from dynamiq.nodes.tools.function_tool import FunctionTool
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.prompts import MessageRole
@@ -42,7 +42,7 @@ class GraphState(Node):
         description (str): Description of the state.
         next_states (list[str]): List of adjacent node
         tasks (list[Node]): List of tasks that have to be executed in this state.
-        condition (Python | FunctionTool): Condition that determines next state to execute.
+        condition (PythonMonty | FunctionTool): Condition that determines next state to execute.
         manager (GraphAgentManager): The managing agent responsible for overseeing state execution.
     """
 
@@ -53,7 +53,7 @@ class GraphState(Node):
     description: str = ""
     next_states: list[str] = []
     tasks: list[Node] = []
-    condition: Python | FunctionTool | None = None
+    condition: PythonMonty | FunctionTool | None = None
     manager: GraphAgentManager | None = None
 
     @model_validator(mode="after")
@@ -247,7 +247,7 @@ class GraphState(Node):
 
         context = response.output.get("content")
 
-        if isinstance(task, FunctionTool) or isinstance(task, Python):
+        if isinstance(task, FunctionTool) or isinstance(task, PythonMonty):
             if not isinstance(context, dict):
                 raise OrchestratorError(
                     f"Error: Task returned invalid data format. Expected a dictionary got {type(context)}"
