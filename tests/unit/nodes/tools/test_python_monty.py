@@ -223,8 +223,6 @@ OVERSIZED_RESULTS |= {
     "aware datetime": LONG_TIMEZONE
     + "def run(inputs):\n    return [datetime.datetime(2020, 1, 1, tzinfo=tz)] * 1000\n",
     "aware time": LONG_TIMEZONE + "def run(inputs):\n    return [datetime.time(1, tzinfo=tz)] * 1000\n",
-    # Each frozenset({1}) prints 14 characters, so the container's own text has to count too.
-    "frozensets": "def run(inputs):\n    return [frozenset({1})] * 800000\n",
 }
 
 
@@ -260,6 +258,14 @@ def renderings(value) -> dict[str, int]:
     return lengths
 
 
+def zones(key: str) -> list[zoneinfo.ZoneInfo]:
+    """Return the zone in a list, or an empty list on a system without a time zone database (slim images)."""
+    try:
+        return [zoneinfo.ZoneInfo(key)]
+    except zoneinfo.ZoneInfoNotFoundError:
+        return []
+
+
 def test_output_size_bounds_every_rendering():
     named_zone = datetime.timezone(datetime.timedelta(hours=-23, minutes=-59, seconds=-59), "z'\"\\é" * 20)
     shared = ["é\U0001F600", b"\xff\x00", {1, "a"}]
@@ -280,12 +286,14 @@ def test_output_size_bounds_every_rendering():
         set(),
         frozenset(),
         frozenset({frozenset({1}), (1, "\\")}),
+        # Each frozenset({1}) prints 14 characters, so the container's own text has to count too.
+        [frozenset({1})] * 1000,
         {1: "a", None: 2.5, (1, 2): ["é"], "k'\"": True},
         datetime.date(9999, 12, 31),
         datetime.timedelta(days=-999999999, seconds=86399, microseconds=999999),
         datetime.datetime(9999, 12, 31, 23, 59, 59, 999999, fold=1),
         datetime.datetime(9999, 12, 31, 23, 59, 59, 999999, tzinfo=named_zone, fold=1),
-        datetime.time(23, 59, 59, 999999, tzinfo=zoneinfo.ZoneInfo("America/Argentina/ComodRivadavia"), fold=1),
+        *(datetime.time(23, 59, 59, 999999, tzinfo=zone, fold=1) for zone in zones("America/Argentina/ComodRivadavia")),
         named_zone,
         datetime.timezone.utc,
         pathlib.PurePosixPath("/a'b/é\\c"),
