@@ -2,6 +2,8 @@ import ast
 import asyncio
 from typing import Any, ClassVar, Literal
 
+import pydantic_monty
+
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
@@ -10,9 +12,14 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
+from dynamiq.utils.monty import get_monty_pool
 
 _INPUTS_VAR = "dynamiq_monty_inputs_"
 _TYPE_CHECK_STUBS = f"{_INPUTS_VAR}: dict = {{}}\n"
+_SCRIPT_NAME = "python_monty.py"
+# Applies when error_handling.timeout_seconds is unset, so code that never returns cannot hold a worker forever.
+DEFAULT_TIME_LIMIT_SECONDS = 60.0
+DEFAULT_MAX_MEMORY_BYTES = 256 * 1024 * 1024
 
 
 def _run_contains_async_def(code: str) -> bool:
@@ -41,6 +48,10 @@ def _wrap_user_code(code: str, use_multiple_params: bool) -> str:
 class PythonMonty(Node):
     """
     Node for executing Python code using the Monty interpreter (a Rust-based minimal Python interpreter).
+
+    Each run gets a fresh Monty worker subprocess, which has no access to the host's environment variables,
+    files or network. The run is stopped after error_handling.timeout_seconds, or DEFAULT_TIME_LIMIT_SECONDS
+    when that is unset, and once it uses more than DEFAULT_MAX_MEMORY_BYTES of heap.
 
     Attributes:
         code (str): The Python code to execute. Must define a `run` function as the entry point.
@@ -80,9 +91,12 @@ class PythonMonty(Node):
             Any: A dictionary with a ``content`` key holding the ``run`` return value.
 
         Raises:
-            ToolExecutionException: If ``pydantic_monty`` is unavailable or the user code fails.
+            ToolExecutionException: If the user code fails or exceeds its limits.
         """
-        return asyncio.run(self.execute_async(input_data, config, **kwargs))
+        config = ensure_config(config)
+        check_cancellation(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+        return self._format_result(self._run_in_monty(dict(input_data)))
 
     async def execute_async(self, input_data: PythonInputSchema, config: RunnableConfig = None, **kwargs) -> Any:
         """
@@ -97,38 +111,35 @@ class PythonMonty(Node):
             Any: A dictionary with a ``content`` key holding the ``run`` return value.
 
         Raises:
-            ToolExecutionException: If ``pydantic_monty`` is unavailable or the user code fails.
+            ToolExecutionException: If the user code fails or exceeds its limits.
         """
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
+        # The pool blocks until the worker answers, so the call runs off the event loop.
+        result = await asyncio.to_thread(self._run_in_monty, dict(input_data))
+        return self._format_result(result)
 
+    def _run_in_monty(self, inputs: dict[str, Any]) -> Any:
+        """Run the user code with inputs in a fresh Monty worker and return the value of its run()."""
+        limits = pydantic_monty.ResourceLimits(
+            max_feed_duration_secs=self.error_handling.timeout_seconds or DEFAULT_TIME_LIMIT_SECONDS,
+            max_memory=DEFAULT_MAX_MEMORY_BYTES,
+        )
         try:
-            import pydantic_monty
-        except ImportError as e:
-            raise ToolExecutionException(
-                "PythonMonty requires the 'pydantic-monty' package. " 'Install it with: pip install "dynamiq[monty]"',
-                recoverable=False,
-            ) from e
-
-        inputs_dict = dict(input_data)
-        wrapped_code = _wrap_user_code(self.code, self.use_multiple_params)
-
-        try:
-            monty = pydantic_monty.Monty(
-                wrapped_code,
-                inputs=[_INPUTS_VAR],
-                script_name="python_monty.py",
+            with get_monty_pool().checkout(
+                script_name=_SCRIPT_NAME,
+                limits=limits,
                 type_check=self.type_check,
                 type_check_stubs=_TYPE_CHECK_STUBS if self.type_check else None,
-            )
-            result = await monty.run_async(inputs={_INPUTS_VAR: inputs_dict})
+            ) as session:
+                return session.feed_run(
+                    _wrap_user_code(self.code, self.use_multiple_params), inputs={_INPUTS_VAR: inputs}
+                )
         except Exception as e:
             error_msg = f"Code execution error: {str(e)}"
             logger.error(error_msg)
             raise ToolExecutionException(error_msg, recoverable=True) from e
-
-        return self._format_result(result)
 
     def _format_result(self, result: Any) -> Any:
         if isinstance(result, dict) and "content" in result:

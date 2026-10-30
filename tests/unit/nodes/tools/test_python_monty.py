@@ -1,3 +1,8 @@
+import subprocess
+import sys
+import textwrap
+import time
+
 import pytest
 
 pytest.importorskip("pydantic_monty")
@@ -5,6 +10,7 @@ pytest.importorskip("pydantic_monty")
 from dynamiq import Workflow  # noqa: E402
 from dynamiq.flows import Flow  # noqa: E402
 from dynamiq.nodes.agents.exceptions import ToolExecutionException  # noqa: E402
+from dynamiq.nodes.node import ErrorHandling  # noqa: E402
 from dynamiq.nodes.tools.python_monty import PythonMonty  # noqa: E402
 
 
@@ -89,37 +95,76 @@ def run(inputs):
     assert "pandas" in str(excinfo.value)
 
 
-def test_missing_pydantic_monty_raises_unrecoverable(monkeypatch):
-    import builtins
-
-    real_import = builtins.__import__
-
-    def fake_import(name, *args, **kwargs):
-        if name == "pydantic_monty":
-            raise ImportError("simulated: pydantic_monty not installed")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-
-    node = PythonMonty(code="def run(inputs):\n    return 1\n")
-    with pytest.raises(ToolExecutionException) as excinfo:
-        node.execute({})
-    assert excinfo.value.recoverable is False
-    assert "pydantic-monty" in str(excinfo.value)
+def test_missing_pydantic_monty_names_the_extra():
+    # A fresh interpreter, so the hidden package is not already imported.
+    script = textwrap.dedent(
+        """
+        import sys
 
 
-def test_unsupported_class_definition_raises():
+        class HideMonty:
+            def find_spec(self, name, path=None, target=None):
+                if name == "pydantic_monty" or name.startswith("pydantic_monty."):
+                    raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+                return None
+
+
+        sys.meta_path.insert(0, HideMonty())
+        from dynamiq.nodes import tools
+
+        try:
+            tools.PythonMonty
+        except ModuleNotFoundError as error:
+            print(type(error).__name__, error)
+        """
+    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
+    assert result.stdout.startswith("OptionalDependencyError")
+    assert 'pip install "dynamiq[monty]"' in result.stdout
+
+
+def test_class_definition_runs():
     code = """
-class Foo:
-    pass
+class Counter:
+    def __init__(self, start):
+        self.value = start
+
+    def bump(self):
+        self.value = self.value + 1
+        return self.value
+
 def run(inputs):
-    return Foo()
+    return {"value": Counter(inputs["start"]).bump()}
+"""
+    node = PythonMonty(code=code)
+    assert node.execute({"start": 41}) == {"content": {"value": 42}}
+
+
+def test_endless_loop_stops_at_node_timeout():
+    code = """
+def run(inputs):
+    while True:
+        pass
+"""
+    node = PythonMonty(code=code, error_handling=ErrorHandling(timeout_seconds=1))
+    started = time.monotonic()
+    with pytest.raises(ToolExecutionException, match="time limit exceeded") as excinfo:
+        node.execute({})
+    assert time.monotonic() - started < 5
+    assert excinfo.value.recoverable is True
+
+
+def test_host_environment_is_not_reachable(monkeypatch):
+    monkeypatch.setenv("DYNAMIQ_MONTY_TEST_SECRET", "s3cret")
+    code = """
+import os
+def run(inputs):
+    return os.getenv("DYNAMIQ_MONTY_TEST_SECRET")
 """
     node = PythonMonty(code=code)
     with pytest.raises(ToolExecutionException) as excinfo:
         node.execute({})
-    assert excinfo.value.recoverable is True
-    assert "class" in str(excinfo.value).lower()
+    assert "s3cret" not in str(excinfo.value)
 
 
 @pytest.mark.asyncio
