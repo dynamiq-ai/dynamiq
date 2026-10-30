@@ -185,21 +185,77 @@ def test_sleeping_runs_leave_workers_free_for_other_runs():
     assert time.monotonic() - started < 1
 
 
-def test_result_with_shared_sublists_stops_at_the_output_limit():
-    # Each level references the previous list twice, so 22 levels of a few dozen objects print as ~29 million
-    # characters. The size is checked in the worker, so the host never builds that text.
-    code = """
-def run(inputs):
+# Each level references the previous list twice, so 22 levels of a few dozen objects print as ~29 million
+# characters. The variants hide that from a size check that runs in the snippet's own namespace.
+SHARED_SUBLISTS = """
+def build():
     x = [0]
     for _ in range(22):
         x = [x, x]
     return x
 """
+OVERSIZED_RESULTS = {
+    "plain": SHARED_SUBLISTS + "def run(inputs):\n    return build()\n",
+    "shadowed repr": SHARED_SUBLISTS + "def repr(value):\n    return ''\ndef run(inputs):\n    return build()\n",
+    "shadowed len": SHARED_SUBLISTS + "def len(value):\n    return 0\ndef run(inputs):\n    return build()\n",
+    "short __repr__": SHARED_SUBLISTS
+    + """
+class Result:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __repr__(self):
+        return "small"
+
+def run(inputs):
+    return Result(build())
+""",
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("use_async", [False, True])
+@pytest.mark.parametrize("code", OVERSIZED_RESULTS.values(), ids=OVERSIZED_RESULTS.keys())
+async def test_oversized_result_stops_at_the_output_limit(code, use_async):
     node = PythonMonty(code=code, is_optimized_for_agents=True)
     started = time.monotonic()
     with pytest.raises(ToolExecutionException, match="characters of output"):
+        if use_async:
+            await node.execute_async({})
+        else:
+            node.execute({})
+    assert time.monotonic() - started < 5
+
+
+def test_large_results_within_the_output_limit_pass():
+    code = """
+def run(inputs):
+    return {"text": "a" * (1024 * 1024), "numbers": list(range(100000))}
+"""
+    output = PythonMonty(code=code).execute({})
+    assert len(output["content"]["text"]) == 1024 * 1024
+    assert len(output["content"]["numbers"]) == 100000
+
+
+def test_class_instance_result_passes_with_its_attributes():
+    code = """
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+def run(inputs):
+    return Point(1, 2)
+"""
+    output = PythonMonty(code=code, is_optimized_for_agents=True).execute({})
+    assert "Point" in output["content"]
+    assert "'x': 1" in output["content"]
+
+
+def test_result_of_an_unsupported_type_is_rejected():
+    node = PythonMonty(code="def run(inputs):\n    return ValueError('not a result')\n")
+    with pytest.raises(ToolExecutionException, match="cannot pass on"):
         node.execute({})
-    assert time.monotonic() - started < 10
 
 
 def test_host_environment_is_not_reachable(monkeypatch):

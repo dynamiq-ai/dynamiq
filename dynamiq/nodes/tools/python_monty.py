@@ -1,5 +1,7 @@
 import ast
 import asyncio
+import datetime
+import pathlib
 from typing import Any, ClassVar, Literal
 
 import pydantic_monty
@@ -15,15 +17,104 @@ from dynamiq.utils.logger import logger
 from dynamiq.utils.monty import MONTY_OS_POLICY, get_monty_pool
 
 _INPUTS_VAR = "dynamiq_monty_inputs_"
-_RESULT_VAR = "dynamiq_monty_result_"
 _TYPE_CHECK_STUBS = f"{_INPUTS_VAR}: dict = {{}}\n"
 _SCRIPT_NAME = "python_monty.py"
 # Applies when error_handling.timeout_seconds is unset, so code that never returns cannot hold a worker forever.
 DEFAULT_TIME_LIMIT_SECONDS = 60.0
 DEFAULT_MAX_MEMORY_BYTES = 256 * 1024 * 1024
-# The longest repr() a run() result may have. A result can share sublists, so a few dozen objects can stand for
-# gigabytes of text; it is measured inside the worker, under its limits, before the host formats or serializes it.
+# The most characters a run() result may take when formatted or serialized. A result can repeat references to the
+# same object, so a few dozen objects can stand for gigabytes of text.
 DEFAULT_MAX_OUTPUT_CHARS = 10 * 1024 * 1024
+
+# Upper bounds of the repr() of fixed-size values.
+_FIXED_SIZES: dict[type, int] = {
+    type(None): 4,
+    bool: 5,
+    float: 24,
+    complex: 52,
+    type(Ellipsis): 8,
+    datetime.date: 40,
+    datetime.datetime: 96,
+    datetime.time: 48,
+    datetime.timedelta: 64,
+    datetime.timezone: 96,
+}
+_SEQUENCE_TYPES = (list, tuple, set, frozenset)
+# A reference back to an enclosing container prints as "[...]".
+_CYCLE_SIZE = 5
+
+
+def _output_size(value: Any, limit: int) -> int:
+    """Return an upper bound of the characters repr() or JSON would produce for value.
+
+    Every repeated reference counts in full, as formatting expands it, but each distinct object is visited once,
+    so the walk stays as small as the object graph Monty returned. The walk is the host's own code, so neither
+    names nor __repr__ methods the snippet defines change the result.
+
+    Raises:
+        ValueError: If the bound exceeds limit, or value holds a type a Monty result does not convert to.
+    """
+    sizes: dict[int, int] = {}
+    # Containers whose children are being sized, with those children. Sized objects stay referenced in visited,
+    # so no id() is reused by another object during the walk.
+    pending: dict[int, list[Any]] = {}
+    visited: list[Any] = []
+    stack: list[tuple[Any, bool]] = [(value, False)]
+    while stack:
+        item, children_sized = stack.pop()
+        key = id(item)
+        if key in sizes:
+            continue
+        if children_sized:
+            children = pending.pop(key)
+            size = 2 + sum(sizes.get(id(child), _CYCLE_SIZE) + 2 for child in children)
+            if type(item) is pydantic_monty.MontyClassProxy:
+                size += 32
+        elif (size := _leaf_size(item)) is None:
+            if key in pending:  # a reference back to an enclosing container
+                continue
+            children = _children(item)
+            pending[key] = children
+            stack.append((item, True))
+            stack.extend((child, False) for child in children if id(child) not in sizes)
+            # Each pending reference prints at least one character, which bounds the walk by the limit.
+            if len(sizes) + len(stack) > limit:
+                raise ValueError(f"run() returned more than {limit} characters of output")
+            continue
+        if size > limit:
+            raise ValueError(f"run() returned more than {limit} characters of output")
+        sizes[key] = size
+        visited.append(item)
+    return sizes[id(value)]
+
+
+def _leaf_size(value: Any) -> int | None:
+    """Return the repr() size bound of a value that holds no other values, or None for a container."""
+    kind = type(value)
+    if kind is str:
+        if value.isprintable():
+            return len(value) + value.count("\\") + value.count("'") + value.count('"') + 2
+        return 10 * len(value) + 2
+    if kind is bytes or kind is bytearray:
+        return 4 * len(value) + 14
+    if kind is int:
+        return value.bit_length() * 30103 // 100000 + 3
+    if kind in _FIXED_SIZES:
+        return _FIXED_SIZES[kind]
+    if isinstance(value, pathlib.PurePath):
+        return 2 * len(value.as_posix()) + 32
+    if kind in _SEQUENCE_TYPES or kind is dict or kind is pydantic_monty.MontyClassProxy:
+        return None
+    raise ValueError(f"run() returned a {kind.__name__}, which PythonMonty cannot pass on")
+
+
+def _children(value: Any) -> list[Any]:
+    """Return the values a container holds, keys included, and a class instance's name and attributes."""
+    if type(value) is dict:
+        return [part for pair in value.items() for part in pair]
+    if type(value) is pydantic_monty.MontyClassProxy:
+        return [value.name, value.attributes]
+    return list(value)
 
 
 def _run_contains_async_def(code: str) -> bool:
@@ -39,20 +130,14 @@ def _run_contains_async_def(code: str) -> bool:
 
 
 def _wrap_user_code(code: str, use_multiple_params: bool) -> str:
-    """Append a call to `run(...)` that checks the size of its result and returns it, so Monty returns its value."""
+    """Append a trailing call to `run(...)` so Monty returns its value."""
     is_async = _run_contains_async_def(code)
     call_prefix = "await " if is_async else ""
     if use_multiple_params:
-        call = f"{call_prefix}run(**{_INPUTS_VAR})"
+        trailer = f"{call_prefix}run(**{_INPUTS_VAR})"
     else:
-        call = f"{call_prefix}run({_INPUTS_VAR})"
-    return (
-        f"{code}\n\n"
-        f"{_RESULT_VAR} = {call}\n"
-        f"if len(repr({_RESULT_VAR})) > {DEFAULT_MAX_OUTPUT_CHARS}:\n"
-        f"    raise ValueError('run() returned more than {DEFAULT_MAX_OUTPUT_CHARS} characters of output')\n"
-        f"{_RESULT_VAR}\n"
-    )
+        trailer = f"{call_prefix}run({_INPUTS_VAR})"
+    return f"{code}\n\n{trailer}\n"
 
 
 class PythonMonty(Node):
@@ -61,7 +146,8 @@ class PythonMonty(Node):
 
     Each run gets a fresh Monty worker subprocess, which has no access to the host's environment variables,
     files or network. The run is stopped after error_handling.timeout_seconds, or DEFAULT_TIME_LIMIT_SECONDS
-    when that is unset, and once it uses more than DEFAULT_MAX_MEMORY_BYTES of heap.
+    when that is unset, and once it uses more than DEFAULT_MAX_MEMORY_BYTES of heap. It fails when run() returns
+    a value that would format to more than DEFAULT_MAX_OUTPUT_CHARS characters.
 
     Attributes:
         code (str): The Python code to execute. Must define a `run` function as the entry point.
@@ -144,9 +230,12 @@ class PythonMonty(Node):
                 type_check=self.type_check,
                 type_check_stubs=_TYPE_CHECK_STUBS if self.type_check else None,
             ) as session:
-                return session.feed_run(
+                result = session.feed_run(
                     _wrap_user_code(self.code, self.use_multiple_params), inputs={_INPUTS_VAR: inputs}
                 )
+            # Checked before anything formats or serializes the result, which would expand repeated references.
+            _output_size(result, DEFAULT_MAX_OUTPUT_CHARS)
+            return result
         except Exception as e:
             error_msg = f"Code execution error: {str(e)}"
             logger.error(error_msg)
