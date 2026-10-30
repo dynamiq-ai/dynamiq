@@ -14,6 +14,7 @@ asserted separately below, since it cannot be exercised without a database.
 
 import pytest
 
+from dynamiq.memory import Memory
 from dynamiq.memory.backends import InMemory, SQLite
 from dynamiq.prompts import Message, MessageRole
 
@@ -60,6 +61,31 @@ def test_get_all_limit_larger_than_stored_is_not_padded_or_truncated(backend):
         backend.add(message)
 
     assert [m.content for m in backend.get_all(limit=LIMIT)] == ["msg-0", "msg-1"]
+
+
+@pytest.mark.parametrize("timestamps", [(1, 1, 1, 1), (1, 2, 2, 3), (2, 1, 2, 1)])
+@pytest.mark.parametrize("limit", [2, 4, 10])
+def test_memory_retrieval_preserves_insertion_order_for_equal_timestamps(backend, timestamps, limit):
+    memory = Memory(backend=backend)
+    for i, timestamp in enumerate(timestamps):
+        memory.add(role=MessageRole.USER, content=f"msg-{i}", metadata={"timestamp": timestamp})
+
+    ordered = sorted(range(len(timestamps)), key=lambda i: timestamps[i])
+    assert [m.content for m in memory.get_all(limit=limit)] == [f"msg-{i}" for i in ordered[-limit:]]
+
+
+@pytest.mark.parametrize("limit", [2, 4])
+def test_sqlite_search_preserves_recency_for_equal_timestamps_after_reopen(tmp_path, limit):
+    db_path = str(tmp_path / "conv.db")
+    backend = SQLite(db_path=db_path)
+    for i in range(4):
+        backend.add(Message(role=MessageRole.USER, content=f"msg-{i}", metadata={"timestamp": 1}))
+
+    reopened = SQLite(db_path=db_path)
+    assert [m.content for m in reopened.get_all()] == [f"msg-{i}" for i in range(4)]
+    assert [m.content for m in reopened.search(query="msg", limit=limit)] == [
+        f"msg-{i}" for i in reversed(range(4 - limit, 4))
+    ]
 
 
 def test_sqlite_search_with_limit_returns_the_most_recent_matches(tmp_path):
