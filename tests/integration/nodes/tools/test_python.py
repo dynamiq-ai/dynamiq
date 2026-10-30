@@ -567,6 +567,25 @@ def test_safe_urlopen_allows_http_and_blocks_other_schemes(monkeypatch):
             python_module._safe_urlopen(blocked_url)
 
 
+def test_safe_urlopen_normalizes_str_subclass_url(monkeypatch):
+    """A str subclass with a malicious __str__ (built via the 3-arg type builtin) can report http to the
+    scheme check and resolve to file:// when urlopen re-stringifies the URL. The wrapper normalises the
+    URL to a genuine str, so the real urlopen receives the base characters, not the override, and a
+    subclass whose real characters are file:// is refused."""
+    from dynamiq.nodes.tools import python as python_module
+
+    received = []
+    monkeypatch.setattr(python_module, "_URLLIB_URLOPEN", lambda url, *a, **k: received.append(url) or "RESPONSE")
+
+    sneaky = type("Sneaky", (str,), {"__str__": lambda self: "file:///etc/hostname"})
+    assert python_module._safe_urlopen(sneaky("http://example.invalid/")) == "RESPONSE"
+    assert received == ["http://example.invalid/"]
+    assert str(received[0]) == "http://example.invalid/"
+
+    with pytest.raises(ValueError):
+        python_module._safe_urlopen(type("FileStr", (str,), {})("file:///etc/hostname"))
+
+
 @pytest.mark.parametrize(
     ("attack_name", "attack_code"),
     [
