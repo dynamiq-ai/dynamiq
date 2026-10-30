@@ -1,3 +1,6 @@
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from dynamiq.evaluations import PythonEvaluator
@@ -98,3 +101,107 @@ def evaluate(answer, expected):
     evaluator = PythonEvaluator(code=user_code)
     with pytest.raises(ValueError, match="non-numeric"):
         evaluator.run_single(input_data)
+
+
+@pytest.mark.parametrize(
+    "user_code",
+    [
+        "x = 1\n",
+        "def evaluate_answer(answer):\n    return 1.0\n",
+    ],
+)
+def test_python_evaluator_rejects_code_without_evaluate(user_code):
+    with pytest.raises(ValueError):
+        PythonEvaluator(code=user_code)
+
+
+def test_python_evaluator_rejects_code_that_fails_to_compile():
+    with pytest.raises(ValueError, match="compilation error"):
+        PythonEvaluator(code="def evaluate(answer)\n    return 1.0\n")
+
+
+def test_python_evaluator_stops_code_past_its_time_limit():
+    user_code = """
+def evaluate(answer):
+    while True:
+        pass
+"""
+    evaluator = PythonEvaluator(code=user_code, timeout_seconds=1)
+    started = time.monotonic()
+    with pytest.raises(ValueError, match="time limit exceeded"):
+        evaluator.run_single({"answer": "Paris"})
+    assert time.monotonic() - started < 5
+
+
+def test_python_evaluator_sleeps_return_at_once():
+    # Monty's time limit does not count sleeping, so a real sleep would hold the worker past it.
+    user_code = """
+import time
+def evaluate(answer):
+    for _ in range(1000):
+        time.sleep(10)
+    return 1.0
+"""
+    evaluator = PythonEvaluator(code=user_code, timeout_seconds=1)
+    started = time.monotonic()
+    assert evaluator.run_single({"answer": "Paris"}) == 1.0
+    assert time.monotonic() - started < 2
+
+
+def test_python_evaluator_stops_code_past_its_memory_limit():
+    user_code = """
+def evaluate(answer):
+    return len(answer * (10 ** 9))
+"""
+    evaluator = PythonEvaluator(code=user_code, max_memory_bytes=16 * 1024 * 1024)
+    with pytest.raises(ValueError, match="memory limit exceeded"):
+        evaluator.run_single({"answer": "Paris"})
+
+
+def test_python_evaluator_cannot_read_host_environment(monkeypatch):
+    monkeypatch.setenv("DYNAMIQ_EVALUATOR_TEST_SECRET", "s3cret")
+    user_code = """
+import os
+def evaluate(answer):
+    return float(len(os.getenv("DYNAMIQ_EVALUATOR_TEST_SECRET")))
+"""
+    evaluator = PythonEvaluator(code=user_code)
+    with pytest.raises(ValueError) as excinfo:
+        evaluator.run_single({"answer": "Paris"})
+    assert "s3cret" not in str(excinfo.value)
+
+
+def test_python_evaluator_survives_code_that_overflows_a_native_stack():
+    # Serializing a deeply nested value segfaulted the host process on pydantic-monty 0.0.16, which ran
+    # the code in-process.
+    user_code = """
+import json
+def evaluate(answer):
+    nested = []
+    for _ in range(200000):
+        nested = [nested]
+    return float(len(json.dumps(nested)))
+"""
+    evaluator = PythonEvaluator(code=user_code)
+    with pytest.raises(ValueError):
+        evaluator.run_single({"answer": "Paris"})
+    assert PythonEvaluator(code="def evaluate(answer):\n    return 1.0\n").run_single({"answer": "Paris"}) == 1.0
+
+
+def test_python_evaluator_runs_each_input_in_a_fresh_interpreter():
+    user_code = """
+calls = []
+def evaluate(answer):
+    calls.append(answer)
+    return float(len(calls))
+"""
+    evaluator = PythonEvaluator(code=user_code)
+    assert evaluator.run([{"answer": "Paris"}, {"answer": "Berlin"}, {"answer": "Madrid"}]) == [1.0, 1.0, 1.0]
+
+
+def test_python_evaluator_concurrent_runs_from_threads():
+    evaluator = PythonEvaluator(code="def evaluate(a, b):\n    return float(a * b)\n")
+    pairs = [(a, b) for a in range(8) for b in range(8)]
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        scores = list(executor.map(lambda pair: evaluator.run_single({"a": pair[0], "b": pair[1]}), pairs))
+    assert scores == [float(a * b) for a, b in pairs]

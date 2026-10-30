@@ -106,21 +106,23 @@ sandboxes = [
     "e2b>=2.26.0,<3.0.0",
     "e2b-code-interpreter>=2.11.0,<3.0.0",
     "e2b-desktop>=2.7.2,<3.0.0",
-    "pydantic-monty>=0.0.16,<0.0.17",
+    "pydantic-monty>=1.3.0,<2.0.0",
 ]
 # Vertex AI RAG search and the Document AI converter. Vertex AI and Gemini models need only the core install.
 gcp = [
     "google-cloud-aiplatform>=1.133.0,<2.0.0",
     "google-cloud-documentai>=3.15.0,<4.0.0",
 ]
+# pydantic-monty runs PythonEvaluator's custom metrics.
 evals = [
+    "pydantic-monty>=1.3.0,<2.0.0",
     "rapidfuzz>=3.14.0,<3.15.0",
     "rouge-score>=0.1.2,<0.2.0",
     "sacrebleu>=2.5.1,<2.6.0",
 ]
 cua = ["cua-computer==0.4.19 ; python_version >= '3.12' and python_version < '3.14'"]
 # Kept for existing installs; sandboxes includes it.
-monty = ["pydantic-monty>=0.0.16,<0.0.17"]
+monty = ["pydantic-monty>=1.3.0,<2.0.0"]
 # Every extra except cua, which stays opt-in.
 all = ["dynamiq[files,data,vectorstores,sql,browser,sandboxes,gcp,evals]"]
 
