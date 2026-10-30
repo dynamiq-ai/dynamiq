@@ -298,11 +298,16 @@ def _safe_urlopen(url: Any, *args: Any, **kwargs: Any) -> Any:
     or type could report http to this check and resolve to file:// inside urlopen. The http(s) egress
     itself is contained by the deployment network policy, not here.
     """
-    target = url
-    if _URLLIB_REQUEST is not None and type(target) is _URLLIB_REQUEST:
-        scheme = (urlsplit(getattr(target, "full_url", "") or "").scheme or "").lower()
-    elif isinstance(target, str):
-        scheme = (urlsplit(target).scheme or "").lower()
+    if _URLLIB_REQUEST is not None and type(url) is _URLLIB_REQUEST:
+        # full_url is read after Request's own unwrap(), so a str-subclass URL has already been
+        # stringified here; the same value is what urlopen dispatches on, so there is no gap.
+        scheme = (urlsplit(getattr(url, "full_url", "") or "").scheme or "").lower()
+    elif isinstance(url, str):
+        # Normalise to a genuine str (str.__str__ ignores a subclass __str__ override), so a str subclass
+        # cannot report http here and resolve to file:// when urlopen re-stringifies the URL. The call
+        # below uses this normalised value, not the original.
+        url = str.__str__(url)
+        scheme = (urlsplit(url).scheme or "").lower()
     else:
         raise ValueError("urlopen accepts only an http(s) URL string or urllib.request.Request")
     if scheme not in _URLOPEN_ALLOWED_SCHEMES:
