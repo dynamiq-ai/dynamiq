@@ -15,7 +15,7 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
-from dynamiq.utils.monty import MONTY_OS_POLICY, get_monty_pool
+from dynamiq.utils.monty import MONTY_OS_POLICY, MontyUnavailableError, get_monty_pool
 
 _INPUTS_VAR = "dynamiq_monty_inputs_"
 _TYPE_CHECK_STUBS = f"{_INPUTS_VAR}: dict = {{}}\n"
@@ -293,6 +293,8 @@ class PythonMonty(Node):
             # Checked before anything formats or serializes the result, which would expand repeated references.
             _output_size(result, DEFAULT_MAX_OUTPUT_CHARS)
             return result
+        except MontyUnavailableError:
+            raise
         except Exception as e:
             error_msg = f"Code execution error: {str(e)}"
             logger.error(error_msg)

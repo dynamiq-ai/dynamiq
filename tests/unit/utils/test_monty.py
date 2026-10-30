@@ -1,6 +1,8 @@
 import os
 import shutil
 import subprocess
+import sys
+import textwrap
 
 import pytest
 
@@ -79,3 +81,57 @@ def test_pool_runs_workers_at_normal_priority_without_nice(monkeypatch):
             assert session.feed_run("1 + 1") == 2
     finally:
         pool.__exit__(None, None, None)
+
+
+# Run in a fresh interpreter, so the test never forks pytest's own process and its threads.
+FORK_SCRIPT = textwrap.dedent(
+    """
+    import os
+    import signal
+    import time
+    import warnings
+
+    warnings.simplefilter("ignore", DeprecationWarning)  # fork() in a process with threads
+    from dynamiq.utils import monty
+
+
+    def use_monty():
+        with monty.get_monty_pool().checkout() as session:
+            session.feed_run("1 + 1")
+
+
+    def fork_and_report():
+        read_end, write_end = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            os.close(read_end)
+            signal.alarm(20)  # a hang ends the child, and the parent then reads no outcome
+            started = time.monotonic()
+            try:
+                use_monty()
+                monty.get_monty_pool().__exit__(None, None, None)
+                outcome = "ran"
+            except monty.MontyUnavailableError:
+                outcome = "unavailable"
+            os.write(write_end, f"{outcome} {time.monotonic() - started:.2f}".encode())
+            os._exit(0)
+        os.close(write_end)
+        os.waitpid(pid, 0)
+        return os.read(read_end, 100).decode()
+
+
+    print("before use:", fork_and_report())
+    use_monty()
+    print("after use:", fork_and_report())
+    """
+)
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="needs fork()")
+def test_child_forked_after_monty_use_fails_at_once():
+    result = subprocess.run([sys.executable, "-c", FORK_SCRIPT], capture_output=True, text=True, timeout=60)
+    outcomes = dict(line.split(": ", 1) for line in result.stdout.splitlines() if ": " in line)
+    assert outcomes.get("before use", "").startswith("ran"), result.stderr[-2000:]
+    outcome, seconds = outcomes.get("after use", "missing 0").split()
+    assert outcome == "unavailable", result.stderr[-2000:]
+    assert float(seconds) < 1

@@ -29,8 +29,14 @@ MONTY_WORKER_NICENESS = 19
 MONTY_OS_POLICY = pydantic_monty.OSPolicy(sleep="zero")
 
 _pool: pydantic_monty.Monty | None = None
-_pool_pid: int | None = None
 _pool_lock = threading.Lock()
+# The process that first started a pool. pydantic-monty's native state does not survive fork(): in a process forked
+# from it, starting workers fails or, on Linux, hangs.
+_first_pool_pid: int | None = None
+
+
+class MontyUnavailableError(RuntimeError):
+    """Raised in a process forked after its parent, or an earlier ancestor, started Monty workers."""
 
 
 def get_monty_pool() -> pydantic_monty.Monty:
@@ -38,15 +44,26 @@ def get_monty_pool() -> pydantic_monty.Monty:
 
     The pool is safe to use from several threads at once. A checkout waits for a free worker for up to
     MONTY_CHECKOUT_TIMEOUT_SECONDS, then raises TimeoutError. Workers run at MONTY_WORKER_NICENESS where the nice
-    command can start them, and at normal priority otherwise. A forked child starts a pool of its own rather than
-    sharing the parent's workers.
+    command can start them, and at normal priority otherwise.
+
+    A process forked before any Monty use starts a pool of its own. One forked after its parent started a pool
+    cannot, because pydantic-monty's native state does not survive fork().
+
+    Raises:
+        MontyUnavailableError: In a process forked after an ancestor started Monty workers.
     """
-    global _pool, _pool_pid
+    global _pool, _first_pool_pid
     with _pool_lock:
-        if _pool is None or _pool_pid != os.getpid():
+        if _first_pool_pid is not None and _first_pool_pid != os.getpid():
+            raise MontyUnavailableError(
+                "Monty cannot start workers in a process forked after its parent used Monty. Use Monty only "
+                "after forking, or start child processes with the 'spawn' method."
+            )
+        if _pool is None:
+            _first_pool_pid = os.getpid()
             pool, launcher_dir = _start_pool()
             atexit.register(_close_pool, pool, os.getpid(), launcher_dir)
-            _pool, _pool_pid = pool, os.getpid()
+            _pool = pool
         return _pool
 
 

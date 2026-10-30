@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.evaluations import BaseEvaluator
 from dynamiq.utils.logger import logger
-from dynamiq.utils.monty import MONTY_OS_POLICY, get_monty_pool
+from dynamiq.utils.monty import MONTY_OS_POLICY, MontyUnavailableError, get_monty_pool
 
 DEFAULT_TIME_LIMIT_SECONDS = 5.0
 DEFAULT_MAX_MEMORY_BYTES = 64 * 1024 * 1024
@@ -125,6 +125,8 @@ class PythonEvaluator(BaseEvaluator):
         """
         try:
             defines_evaluate = self._run_in_monty(f"{self.code}\n{_DEFINES_EVALUATE_CHECK}")
+        except MontyUnavailableError:
+            raise
         except Exception as compile_error:
             logger.error(f"User code compilation error: {compile_error}")
             raise ValueError(f"User code compilation error: {compile_error}") from compile_error
@@ -226,6 +228,8 @@ class PythonEvaluator(BaseEvaluator):
             result = self._run_in_monty(
                 f"{self.code}\n\nevaluate(**{_INPUTS_VAR})\n", inputs={_INPUTS_VAR: input_model.data}
             )
+        except MontyUnavailableError:
+            raise
         except Exception as func_error:
             logger.error(f"Error during evaluation: {func_error}")
             raise ValueError(f"Error during evaluation: {func_error}") from func_error
@@ -260,6 +264,8 @@ class PythonEvaluator(BaseEvaluator):
                 score = self.run_single(data_dict)
                 scores.append(score)
                 logger.info(f"Processed input {idx} with score = {score}")
+            except MontyUnavailableError:
+                raise
             except Exception as error:
                 logger.error(f"Failed processing input {idx}: {error}")
                 raise ValueError(f"Failed processing input {idx}: {error}") from error
