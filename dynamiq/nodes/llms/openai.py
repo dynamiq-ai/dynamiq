@@ -3,11 +3,9 @@ import os
 from functools import cached_property
 from typing import Any, ClassVar
 
-from openai import OpenAI as OpenAIClient
 from pydantic import Field
 
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.llms import _openai_sdk
 from dynamiq.nodes.llms._strict import OpenAIStrictToolsMixin
 from dynamiq.nodes.llms.base import BaseLLM
 
@@ -193,11 +191,17 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
             return None
         if (params.get("api_base"), params.get("api_key")) != (self.connection.url, self.connection.api_key):
             return None
+        from dynamiq.nodes.llms import _openai_sdk  # deferred: importing the node must not load the OpenAI SDK
+
         return _openai_sdk.build_request(params, self.MODEL_PREFIX)
 
     def _call_completion(self, params: dict[str, Any]) -> Any:
         request = self._native_request(params)
-        if request is None or not isinstance(self.client, OpenAIClient):
+        if request is None:
+            return super()._call_completion(params)
+        from dynamiq.nodes.llms import _openai_sdk  # deferred: importing the node must not load the OpenAI SDK
+
+        if not isinstance(self.client, _openai_sdk.OpenAI):
             return super()._call_completion(params)
         return _openai_sdk.create(self.client, request)
 
@@ -205,9 +209,14 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
         request = self._native_request(params)
         if request is None:
             return await super()._acall_completion(params)
+        from dynamiq.nodes.llms import _openai_sdk  # deferred: importing the node must not load the OpenAI SDK
+
         return await _openai_sdk.acreate(await self.get_async_client(), request)
 
     def _build_streamed_response(self, chunks: list, messages: list[dict]) -> Any:
-        if _openai_sdk.is_sdk_stream(chunks):
-            return _openai_sdk.build_response(chunks, messages, self.model)
+        if self.use_native_sdk:
+            from dynamiq.nodes.llms import _openai_sdk  # deferred: importing the node must not load the OpenAI SDK
+
+            if _openai_sdk.is_sdk_stream(chunks):
+                return _openai_sdk.build_response(chunks, messages, self.model)
         return super()._build_streamed_response(chunks, messages)
