@@ -432,6 +432,140 @@ def test_python_node_requests_and_typing_are_default():
     assert "Union" in result.output["content"]["origin"]
 
 
+def test_python_node_str_format_safe_templates_work():
+    """str.format/format_map with plain fields and format specs is allowed; only fields that resolve
+    attributes or items are refused."""
+    code = (
+        "def run(input_data):\n"
+        "    return {\n"
+        "        'positional': '{} {}'.format('a', 'b'),\n"
+        "        'indexed': '{0}-{1}'.format(1, 2),\n"
+        "        'named': '{name}'.format(name='x'),\n"
+        "        'spec': '{:.2f}'.format(3.14159),\n"
+        "        'nested_spec': '{0:>{1}}'.format('z', 5),\n"
+        "        'format_map': '{a}'.format_map({'a': 7}),\n"
+        "    }\n"
+    )
+
+    result = Python(code=code).run({}, None)
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = result.output["content"]
+    assert content["positional"] == "a b"
+    assert content["indexed"] == "1-2"
+    assert content["named"] == "x"
+    assert content["spec"] == "3.14"
+    assert content["nested_spec"] == "    z"
+    assert content["format_map"] == "7"
+
+
+@pytest.mark.parametrize(
+    ("attack_name", "attack_code"),
+    [
+        # A replacement field that reaches a dunder through a nested format spec resolves in C.
+        (
+            "str_format_nested_spec_attr",
+            "import uuid\ndef run(input_data):\n    return '{0:{1.__globals__}}'.format('x', uuid.uuid4)\n",
+        ),
+        # format_map resolves the same attribute walk through its field names.
+        (
+            "str_format_map_attr",
+            "import uuid\ndef run(input_data):\n    return '{a.__globals__}'.format_map({'a': uuid.uuid4})\n",
+        ),
+    ],
+)
+def test_python_node_str_format_attribute_fields_still_blocked(attack_name, attack_code):
+    """The str.format wrapper refuses attribute/index access even when hidden in a nested spec or reached
+    through format_map."""
+    result = Python(code=attack_code).run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+
+
+def test_python_node_urllib_parse_request_and_error_are_default():
+    """urllib.parse, urllib.request.Request and the urllib.error classes are importable by default, on
+    both the attribute and from-import paths."""
+    code = (
+        "import urllib.parse\n"
+        "from urllib.request import Request\n"
+        "from urllib.error import HTTPError, URLError\n"
+        "def run(input_data):\n"
+        "    return {\n"
+        "        'quote': urllib.parse.quote('a b/c'),\n"
+        "        'encoded': urllib.parse.urlencode({'q': 'a b'}),\n"
+        "        'scheme': Request('https://example.com').type,\n"
+        "        'error_subclass': issubclass(HTTPError, URLError),\n"
+        "    }\n"
+    )
+
+    result = Python(code=code).run({}, None)
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = result.output["content"]
+    assert content["quote"] == "a%20b/c"
+    assert content["encoded"] == "q=a+b"
+    assert content["scheme"] == "https"
+    assert content["error_subclass"] is True
+
+
+@pytest.mark.parametrize(
+    ("attack_name", "attack_code"),
+    [
+        # urlopen('file://...') reads a local file past the open/io guards; refused on the attribute path,
+        (
+            "urlopen_file_attribute",
+            "import urllib.request\n"
+            "def run(input_data):\n    return urllib.request.urlopen('file:///etc/hostname').read()\n",
+        ),
+        # on the from-import path (the bound urlopen is the wrapped one too),
+        (
+            "urlopen_file_from_import",
+            "from urllib.request import urlopen\n"
+            "def run(input_data):\n    return urlopen('file:///etc/hostname').read()\n",
+        ),
+        # and when the scheme is carried on a Request object.
+        (
+            "urlopen_file_request",
+            "import urllib.request\n"
+            "def run(input_data):\n"
+            "    return urllib.request.urlopen(urllib.request.Request('file:///etc/hostname')).read()\n",
+        ),
+        # The file-reading/writing helpers are refused outright, by attribute and by from-import.
+        (
+            "urlretrieve_attribute",
+            "import urllib.request\n"
+            "def run(input_data):\n    return urllib.request.urlretrieve('http://x', '/tmp/x')\n",
+        ),
+        (
+            "urlretrieve_from_import",
+            "from urllib.request import urlretrieve\ndef run(input_data):\n    return urlretrieve\n",
+        ),
+        ("urlopener", "import urllib.request\ndef run(input_data):\n    return urllib.request.URLopener()\n"),
+    ],
+)
+def test_python_node_urllib_file_access_blocked(attack_name, attack_code):
+    """With urllib in the default set, urlopen is restricted to http(s) (no file://) and the file helpers
+    are refused, so urllib grants no filesystem access."""
+    result = Python(code=attack_code).run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+
+
+def test_safe_urlopen_allows_http_and_blocks_other_schemes(monkeypatch):
+    """The urlopen wrapper lets http(s) through to the real urlopen and refuses every other scheme,
+    without a network call."""
+    from dynamiq.nodes.tools import python as python_module
+
+    calls = []
+    monkeypatch.setattr(python_module, "_URLLIB_URLOPEN", lambda url, *a, **k: calls.append(url) or "RESPONSE")
+
+    assert python_module._safe_urlopen("https://example.com/path") == "RESPONSE"
+    assert calls == ["https://example.com/path"]
+    for blocked_url in ("file:///etc/hostname", "ftp://host/f", "data:text/plain,hi"):
+        with pytest.raises(ValueError):
+            python_module._safe_urlopen(blocked_url)
+
+
 @pytest.mark.parametrize(
     ("attack_name", "attack_code"),
     [

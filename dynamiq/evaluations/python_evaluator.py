@@ -92,8 +92,8 @@ class PythonEvaluator(BaseEvaluator):
         description=(
             "Extra top-level packages the metric code may import on top of the standard library and the "
             "data-science set, for example 'operator' or 'yaml' (both dropped from the default set). "
-            "str.format/format_map are refused under the guards regardless of this field; use f-strings "
-            "or %-formatting. Metric code is developer-authored, so these are a trusted-code decision."
+            "str.format works for plain fields and format specs; a field that resolves an attribute or "
+            "item is refused. Metric code is developer-authored, so these are a trusted-code decision."
         ),
     )
 
@@ -109,7 +109,7 @@ class PythonEvaluator(BaseEvaluator):
         # Evaluator code is authored by developers, not end users, so it keeps the data-science libraries
         # the safe default omits, plus anything in extra_allowed_modules. It still runs under the hardened
         # import and attribute guards, so operator and yaml are no longer in the base set (opt in through
-        # extra_allowed_modules) and str.format is refused (use f-strings).
+        # extra_allowed_modules) and str.format refuses a field that resolves an attribute or item.
         allowed = DEFAULT_ALLOWED_MODULES | EXTENDED_ALLOWED_MODULES | set(self.extra_allowed_modules)
         self._compiled_globals: dict = get_restricted_globals(allowed)
         try:
