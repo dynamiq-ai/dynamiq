@@ -1,7 +1,11 @@
+import datetime
+import json
+import pathlib
 import subprocess
 import sys
 import textwrap
 import time
+import zoneinfo
 
 import pytest
 
@@ -11,8 +15,9 @@ from dynamiq import Workflow  # noqa: E402
 from dynamiq.flows import Flow  # noqa: E402
 from dynamiq.nodes.agents.exceptions import ToolExecutionException  # noqa: E402
 from dynamiq.nodes.node import ErrorHandling  # noqa: E402
-from dynamiq.nodes.tools.python_monty import PythonMonty  # noqa: E402
+from dynamiq.nodes.tools.python_monty import PythonMonty, _output_size  # noqa: E402
 from dynamiq.utils.monty import MONTY_MAX_WORKERS  # noqa: E402
+from dynamiq.utils.utils import JsonWorkflowEncoder, format_value  # noqa: E402
 
 
 def test_basic_run_returns_dict():
@@ -211,6 +216,16 @@ def run(inputs):
     return Result(build())
 """,
 }
+# A timezone prints its name, which can be any length, and an aware datetime or time prints its timezone.
+LONG_TIMEZONE = "import datetime\ntz = datetime.timezone(datetime.timedelta(hours=1), 'x' * 100000)\n"
+OVERSIZED_RESULTS |= {
+    "timezone name": LONG_TIMEZONE + "def run(inputs):\n    return [tz] * 1000\n",
+    "aware datetime": LONG_TIMEZONE
+    + "def run(inputs):\n    return [datetime.datetime(2020, 1, 1, tzinfo=tz)] * 1000\n",
+    "aware time": LONG_TIMEZONE + "def run(inputs):\n    return [datetime.time(1, tzinfo=tz)] * 1000\n",
+    # Each frozenset({1}) prints 14 characters, so the container's own text has to count too.
+    "frozensets": "def run(inputs):\n    return [frozenset({1})] * 800000\n",
+}
 
 
 @pytest.mark.asyncio
@@ -225,6 +240,61 @@ async def test_oversized_result_stops_at_the_output_limit(code, use_async):
         else:
             node.execute({})
     assert time.monotonic() - started < 5
+
+
+def renderings(value) -> dict[str, int]:
+    """Return the length of each text the host makes of a result, skipping one that rejects the value."""
+    renders = {
+        "repr": repr,
+        "str": str,
+        "tracing JSON": lambda v: json.dumps(format_value(v, for_tracing=True), cls=JsonWorkflowEncoder),
+        "agent JSON": lambda v: json.dumps(v, ensure_ascii=False, default=str),
+        "JSON with str fallback": lambda v: json.dumps(v, default=str),
+    }
+    lengths = {}
+    for name, render in renders.items():
+        try:
+            lengths[name] = len(render(value))
+        except (TypeError, ValueError):
+            pass
+    return lengths
+
+
+def test_output_size_bounds_every_rendering():
+    named_zone = datetime.timezone(datetime.timedelta(hours=-23, minutes=-59, seconds=-59), "z'\"\\é" * 20)
+    shared = ["é\U0001F600", b"\xff\x00", {1, "a"}]
+    values = [
+        None,
+        False,
+        -(10**200),
+        -2.2250738585072014e-308,
+        complex(-2.2250738585072014e-308, -1e308),
+        ...,
+        "",
+        "q'\"\\" * 10,
+        '"' * 3,
+        "日本語 é \U0001F600 \x00 \u2028",
+        b"\x00\xff" * 10,
+        "é".encode() * 5,
+        bytearray(b"\xff"),
+        set(),
+        frozenset(),
+        frozenset({frozenset({1}), (1, "\\")}),
+        {1: "a", None: 2.5, (1, 2): ["é"], "k'\"": True},
+        datetime.date(9999, 12, 31),
+        datetime.timedelta(days=-999999999, seconds=86399, microseconds=999999),
+        datetime.datetime(9999, 12, 31, 23, 59, 59, 999999, fold=1),
+        datetime.datetime(9999, 12, 31, 23, 59, 59, 999999, tzinfo=named_zone, fold=1),
+        datetime.time(23, 59, 59, 999999, tzinfo=zoneinfo.ZoneInfo("America/Argentina/ComodRivadavia"), fold=1),
+        named_zone,
+        datetime.timezone.utc,
+        pathlib.PurePosixPath("/a'b/é\\c"),
+        [shared, shared, (shared,), {"k": shared}],
+    ]
+    for value in values:
+        bound = _output_size(value, 10**12)
+        for name, length in renderings(value).items():
+            assert bound >= length, f"{name} of {value!r} is {length} characters, over the bound of {bound}"
 
 
 def test_large_results_within_the_output_limit_pass():

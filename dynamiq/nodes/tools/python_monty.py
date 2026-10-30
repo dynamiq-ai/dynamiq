@@ -2,6 +2,7 @@ import ast
 import asyncio
 import datetime
 import pathlib
+import zoneinfo
 from typing import Any, ClassVar, Literal
 
 import pydantic_monty
@@ -26,20 +27,40 @@ DEFAULT_MAX_MEMORY_BYTES = 256 * 1024 * 1024
 # same object, so a few dozen objects can stand for gigabytes of text.
 DEFAULT_MAX_OUTPUT_CHARS = 10 * 1024 * 1024
 
-# Upper bounds of the repr() of fixed-size values.
+# The bounds below cover repr() and str(), which format a result for an agent, and the JSON tracing writes: ASCII
+# escapes for non-ASCII text, and str() of types JSON lacks, escaped again.
+
+# Upper bounds for values whose size is fixed. A datetime or time with a tzinfo prints that tzinfo too, so it is
+# sized as a container of it instead.
 _FIXED_SIZES: dict[type, int] = {
     type(None): 4,
     bool: 5,
     float: 24,
-    complex: 52,
-    type(Ellipsis): 8,
+    complex: 56,
+    type(Ellipsis): 10,
     datetime.date: 40,
-    datetime.datetime: 96,
+    datetime.datetime: 64,
     datetime.time: 48,
-    datetime.timedelta: 64,
-    datetime.timezone: 96,
+    datetime.timedelta: 80,
 }
-_SEQUENCE_TYPES = (list, tuple, set, frozenset)
+# What follows each item in a container: ", ", plus the quotes JSON puts around a dict key that is not a string.
+_SEPARATOR_SIZE = 3
+# What a container prints besides its items and their separators. JSON has no set, class instance, datetime or
+# time, so a JSON encoder that falls back to str() also quotes them.
+_CONTAINER_OVERHEADS: dict[type, int] = {
+    list: 2,
+    tuple: 3,
+    set: 7,
+    frozenset: 15,
+    dict: 2,
+    pydantic_monty.MontyClassProxy: 38,
+    # A timezone-aware value prints its naive form, then ", tzinfo=" and its tzinfo.
+    datetime.datetime: 78,
+    datetime.time: 62,
+}
+# The longest repr() of a datetime.timezone besides its name, and of a zoneinfo.ZoneInfo besides its key.
+_TIMEZONE_SIZE = 112
+_ZONE_INFO_SIZE = 32
 # A reference back to an enclosing container prints as "[...]".
 _CYCLE_SIZE = 5
 
@@ -67,9 +88,9 @@ def _output_size(value: Any, limit: int) -> int:
             continue
         if children_sized:
             children = pending.pop(key)
-            size = 2 + sum(sizes.get(id(child), _CYCLE_SIZE) + 2 for child in children)
-            if type(item) is pydantic_monty.MontyClassProxy:
-                size += 32
+            size = _CONTAINER_OVERHEADS[type(item)] + sum(
+                sizes.get(id(child), _CYCLE_SIZE) + _SEPARATOR_SIZE for child in children
+            )
         elif (size := _leaf_size(item)) is None:
             if key in pending:  # a reference back to an enclosing container
                 continue
@@ -89,31 +110,48 @@ def _output_size(value: Any, limit: int) -> int:
 
 
 def _leaf_size(value: Any) -> int | None:
-    """Return the repr() size bound of a value that holds no other values, or None for a container."""
+    """Return the size bound of a value that holds no other values, or None for a container."""
     kind = type(value)
     if kind is str:
-        if value.isprintable():
-            return len(value) + value.count("\\") + value.count("'") + value.count('"') + 2
-        return 10 * len(value) + 2
+        if value.isascii() and value.isprintable():
+            # A backslash or double quote can be escaped twice: by repr(), then by JSON of that repr.
+            return len(value) + 3 * (value.count("\\") + value.count('"')) + 2 * value.count("'") + 2
+        # JSON escapes each non-ASCII UTF-16 unit as \uXXXX, so an astral character takes 12.
+        return 12 * len(value) + 2
     if kind is bytes or kind is bytearray:
-        return 4 * len(value) + 14
+        # bytearray(b'...') quoted by JSON, with each escape's backslash escaped again.
+        return 6 * len(value) + 18
     if kind is int:
         return value.bit_length() * 30103 // 100000 + 3
+    if kind in (datetime.datetime, datetime.time) and value.tzinfo is not None:
+        return None
     if kind in _FIXED_SIZES:
         return _FIXED_SIZES[kind]
+    # A timezone's name, and a zone's key, can be any length.
+    if kind is datetime.timezone:
+        return _TIMEZONE_SIZE + _leaf_size(value.tzname(None))
+    if kind is zoneinfo.ZoneInfo:
+        return _ZONE_INFO_SIZE + _leaf_size(str(value.key))
     if isinstance(value, pathlib.PurePath):
-        return 2 * len(value.as_posix()) + 32
-    if kind in _SEQUENCE_TYPES or kind is dict or kind is pydantic_monty.MontyClassProxy:
+        return 32 + _leaf_size(value.as_posix())
+    if kind in _CONTAINER_OVERHEADS:
         return None
     raise ValueError(f"run() returned a {kind.__name__}, which PythonMonty cannot pass on")
 
 
 def _children(value: Any) -> list[Any]:
-    """Return the values a container holds, keys included, and a class instance's name and attributes."""
-    if type(value) is dict:
+    """Return the values a container prints besides its own syntax.
+
+    These are its items and dict keys, a class instance's name and attributes, or a timezone-aware datetime's or
+    time's tzinfo.
+    """
+    kind = type(value)
+    if kind is dict:
         return [part for pair in value.items() for part in pair]
-    if type(value) is pydantic_monty.MontyClassProxy:
+    if kind is pydantic_monty.MontyClassProxy:
         return [value.name, value.attributes]
+    if kind is datetime.datetime or kind is datetime.time:
+        return [value.tzinfo]
     return list(value)
 
 
