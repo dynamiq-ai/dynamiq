@@ -1,6 +1,7 @@
 import json
 import re
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -125,9 +126,14 @@ class FakeGateway:
 def gateway(mocker):
     fake = FakeGateway()
     transport = httpx.MockTransport(fake.handle)
-    client, async_client = httpx.Client, httpx.AsyncClient
-    mocker.patch.object(agentcore.httpx, "Client", lambda **kwargs: client(transport=transport, **kwargs))
-    mocker.patch.object(agentcore.httpx, "AsyncClient", lambda **kwargs: async_client(transport=transport, **kwargs))
+    # Only agentcore's clients go to the fake gateway. Replacing httpx.Client itself would break every other client
+    # the test builds, such as the OpenAI SDK's, which checks its HTTP client against httpx.Client.
+    fake_httpx = {
+        **vars(httpx),
+        "Client": lambda **kwargs: httpx.Client(transport=transport, **kwargs),
+        "AsyncClient": lambda **kwargs: httpx.AsyncClient(transport=transport, **kwargs),
+    }
+    mocker.patch.object(agentcore, "httpx", SimpleNamespace(**fake_httpx))
     mocker.patch("botocore.auth.get_current_datetime", return_value=SIGNING_TIME)
     return fake
 
