@@ -1,10 +1,20 @@
 import enum
+import os
 from functools import cached_property
 from typing import Any, ClassVar
+
+from pydantic import Field
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms._strict import OpenAIStrictToolsMixin
 from dynamiq.nodes.llms.base import BaseLLM
+
+NATIVE_SDK_ENV_VAR = "DYNAMIQ_OPENAI_NATIVE_SDK"
+
+
+def _native_sdk_default() -> bool:
+    """`use_native_sdk` default: on when the environment variable is set to a true value."""
+    return os.getenv(NATIVE_SDK_ENV_VAR, "").strip().lower() in ("1", "true", "yes", "on")
 
 
 class ReasoningEffort(str, enum.Enum):
@@ -83,10 +93,21 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
             optionals re-encoded as nullable types, ``additionalProperties: false``
             on every object) and attaches ``strict: true``; a list of tool (function)
             names converts only those tools and ships the rest untouched.
+        use_native_sdk (bool): Send requests through the OpenAI SDK rather than LiteLLM. Streams cost several
+            times less CPU per chunk, so one process serves several times more concurrent streams. Requests using
+            params the SDK transport does not translate still go through LiteLLM. Defaults to the
+            ``DYNAMIQ_OPENAI_NATIVE_SDK`` environment variable, off when unset.
     """
     connection: OpenAIConnection | None = None
     reasoning_effort: ReasoningEffort | None = ReasoningEffort.AUTO
     verbosity: Verbosity | None = Verbosity.MEDIUM
+    use_native_sdk: bool = Field(
+        default_factory=_native_sdk_default,
+        description=(
+            "Send requests through the OpenAI SDK rather than LiteLLM, which costs several times less CPU per "
+            f"streamed chunk. Defaults to the {NATIVE_SDK_ENV_VAR} environment variable."
+        ),
+    )
     O_SERIES_MODEL_PREFIXES: ClassVar[tuple[str, ...]] = ("o1", "o3", "o4")
     GPT_REASONING_MODEL_PREFIXES: ClassVar[tuple[str, ...]] = ("gpt-5", "gpt-6")
     MODEL_PREFIX = "openai/"
@@ -159,3 +180,43 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
             new_params.pop("max_tokens", None)
 
         return new_params
+
+    def _native_request(self, params: dict[str, Any]) -> dict[str, Any] | None:
+        """The OpenAI SDK request for `params`, or None to send them through LiteLLM.
+
+        The SDK clients are the connection's, so a call whose endpoint or key differs from it (an `api_base` or
+        `api_key` set on the node) goes through LiteLLM, which sends it where it asks.
+        """
+        if not self.use_native_sdk or self.connection is None:
+            return None
+        if (params.get("api_base"), params.get("api_key")) != (self.connection.url, self.connection.api_key):
+            return None
+        from dynamiq.nodes.llms import _openai_sdk  # deferred: importing the node must not load the OpenAI SDK
+
+        return _openai_sdk.build_request(params, self.MODEL_PREFIX)
+
+    def _call_completion(self, params: dict[str, Any]) -> Any:
+        request = self._native_request(params)
+        if request is None:
+            return super()._call_completion(params)
+        from dynamiq.nodes.llms import _openai_sdk  # deferred: importing the node must not load the OpenAI SDK
+
+        if not isinstance(self.client, _openai_sdk.OpenAI):
+            return super()._call_completion(params)
+        return _openai_sdk.create(self.client, request)
+
+    async def _acall_completion(self, params: dict[str, Any]) -> Any:
+        request = self._native_request(params)
+        if request is None:
+            return await super()._acall_completion(params)
+        from dynamiq.nodes.llms import _openai_sdk  # deferred: importing the node must not load the OpenAI SDK
+
+        return await _openai_sdk.acreate(await self.get_async_client(), request)
+
+    def _build_streamed_response(self, chunks: list, messages: list[dict]) -> Any:
+        if self.use_native_sdk:
+            from dynamiq.nodes.llms import _openai_sdk  # deferred: importing the node must not load the OpenAI SDK
+
+            if _openai_sdk.is_sdk_stream(chunks):
+                return _openai_sdk.build_response(chunks, messages, self.model)
+        return super()._build_streamed_response(chunks, messages)

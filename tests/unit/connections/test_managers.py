@@ -6,7 +6,9 @@ import pytest
 
 from dynamiq.connections.connections import Chroma, DatabricksSQL
 from dynamiq.connections.connections import Http as HttpConnection
-from dynamiq.connections.connections import HTTPMethod, Snowflake, Whisper
+from dynamiq.connections.connections import HTTPMethod
+from dynamiq.connections.connections import OpenAI as OpenAIConnection
+from dynamiq.connections.connections import Snowflake, Whisper
 from dynamiq.connections.managers import (
     ConnectionClientInitType,
     ConnectionManager,
@@ -131,6 +133,17 @@ async def test_async_connection_manager_context_closes_clients():
 
 
 @pytest.mark.asyncio
+async def test_async_close_awaits_a_client_whose_close_is_a_coroutine():
+    """SDK clients such as AsyncOpenAI close with `async def close()` and have no `aclose`."""
+    connection = OpenAIConnection(api_key="k", url="https://api.openai.test/v1")
+
+    async with get_async_connection_manager() as cm:
+        client = await cm.get_async_connection_client(connection)
+
+    assert client.is_closed()
+
+
+@pytest.mark.asyncio
 async def test_get_async_connection_client_unsupported_connection():
     cm = ConnectionManager()
 
@@ -225,14 +238,15 @@ def test_close_skips_a_close_method_marked_as_a_coroutine():
 
 
 @pytest.mark.asyncio
-async def test_aclose_skips_a_close_method_marked_as_a_coroutine():
+async def test_aclose_awaits_a_close_method_marked_as_a_coroutine():
+    """aclose() awaits a coroutine close() when there is no aclose(), recognizing the marked kind too."""
     cm = ConnectionManager()
     client = MarkedCoroutineCloseClient()
     cm.connection_clients["marked"] = client
 
     await cm.aclose()
 
-    assert client.calls == []
+    assert client.calls == ["close"]
     assert cm.connection_clients == {}
 
 

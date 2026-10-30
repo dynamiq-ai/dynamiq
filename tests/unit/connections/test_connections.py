@@ -1,6 +1,8 @@
+import ssl
 from unittest.mock import MagicMock, patch
 
 import httpx
+import openai
 import pytest
 
 from dynamiq.connections.connections import AWS as AWSConnection
@@ -10,7 +12,9 @@ from dynamiq.connections.connections import HttpApiKey as HttpApiKeyConnection
 from dynamiq.connections.connections import HTTPMethod
 from dynamiq.connections.connections import Milvus as MilvusConnection
 from dynamiq.connections.connections import MilvusDeploymentType
+from dynamiq.connections.connections import OpenAI as OpenAIConnection
 from dynamiq.connections.connections import Qdrant as QdrantConnection
+from dynamiq.connections.connections import _shared_ssl_context
 from dynamiq.utils.user_agent import USER_AGENT
 
 
@@ -292,3 +296,32 @@ def test_connection_repr_hides_credentials():
         assert "private.example.com" not in text
     assert connection.id in repr(connection)
     assert connection.api_key == "e2b_secret_value"
+
+
+@pytest.fixture
+def ca_bundle_loads():
+    """Counts how many times a TLS context loads the CA bundle, starting from no shared context."""
+    _shared_ssl_context.cache_clear()
+    original = ssl.SSLContext.load_verify_locations
+    loads = []
+
+    def counting(self, *args, **kwargs):
+        loads.append(args)
+        return original(self, *args, **kwargs)
+
+    with patch.object(ssl.SSLContext, "load_verify_locations", counting):
+        yield loads
+
+
+@pytest.mark.asyncio
+async def test_openai_clients_load_the_ca_bundle_once(ca_bundle_loads):
+    connection = OpenAIConnection(api_key="k", url="https://api.openai.test/v1")
+
+    clients = [connection.connect() for _ in range(3)]
+    async_client = await connection.connect_async()
+
+    assert len(ca_bundle_loads) == 1
+    assert all(str(client.base_url) == "https://api.openai.test/v1/" for client in clients)
+    assert isinstance(async_client, openai.AsyncOpenAI)
+    assert (async_client.api_key, str(async_client.base_url)) == ("k", "https://api.openai.test/v1/")
+    await async_client.close()
