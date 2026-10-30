@@ -2,6 +2,7 @@ import ast
 import builtins
 import copy
 import io
+import string
 import sys
 import typing
 from collections import UserString
@@ -9,6 +10,7 @@ from copy import deepcopy
 from functools import singledispatch, singledispatchmethod, update_wrapper, wraps
 from types import BuiltinFunctionType, FunctionType, MethodType, ModuleType
 from typing import Any, Callable, ClassVar, Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 from RestrictedPython import compile_restricted, safe_builtins, utility_builtins
@@ -27,14 +29,19 @@ from dynamiq.utils.lazy_imports import optional_dependency_error
 from dynamiq.utils.logger import logger
 
 # Modules exposed to restricted code by default. Mostly pure-Python standard library that grants no
-# process, filesystem or native-code access, plus two deliberate additions: "requests" (HTTP egress is
-# contained by the deployment network policy, not by this sandbox; its file-write and credential helpers
-# atomic_open, get_netrc_auth, get_environ_proxies and compat.getproxies are refused by identity, but its
-# wider requests/urllib3 surface and trust_env behaviour are not a boundary for untrusted code) and
-# "typing" (whose eval entry points get_type_hints, ForwardRef and evaluate_forward_ref are refused
-# through _FORBIDDEN_BUILTINS, so string annotations can never be evaluated). "operator" (attrgetter,
-# methodcaller) and "string" (Formatter walks dunder fields) stay excluded: they resolve attributes in C,
-# outside every guard. "io" is kept for StringIO and BytesIO, but its file openers are refused too.
+# process, filesystem or native-code access, plus deliberate additions whose dangerous surface is wrapped
+# or refused rather than left open: "requests" (HTTP egress is contained by the deployment network policy,
+# not by this sandbox; its file-write and credential helpers atomic_open, get_netrc_auth,
+# get_environ_proxies and compat.getproxies are refused by identity, but its wider requests/urllib3 surface
+# and trust_env behaviour are not a boundary for untrusted code), "urllib" (urllib.parse and the error
+# classes are pure; urllib.request.urlopen is wrapped to http(s) so it cannot read file:// paths, and the
+# file-reading/writing helpers urlretrieve, URLopener, FancyURLopener, url2pathname and pathname2url are
+# refused by identity) and "typing" (whose eval entry points get_type_hints, ForwardRef and
+# evaluate_forward_ref are refused through _FORBIDDEN_BUILTINS, so string annotations can never be
+# evaluated). "operator" (attrgetter, methodcaller) and "string" (Formatter walks dunder fields) stay
+# excluded: they resolve attributes in C, outside every guard. "io" is kept for StringIO and BytesIO, but
+# its file openers are refused too. str.format/format_map are allowed through a wrapper that refuses a
+# replacement field doing attribute or index access (see _make_safe_format).
 DEFAULT_ALLOWED_MODULES = frozenset(
     {
         "base64",
@@ -55,6 +62,7 @@ DEFAULT_ALLOWED_MODULES = frozenset(
         "statistics",
         "time",
         "typing",
+        "urllib",
         "uuid",
     }
 )
@@ -67,7 +75,6 @@ EXTENDED_ALLOWED_MODULES = frozenset(
     {
         "numpy",
         "pandas",
-        "urllib",
         "pydantic",
         "openpyxl",
         "docx",
@@ -258,6 +265,58 @@ def _collect_requests_forbidden_helpers() -> tuple[Any, ...]:
 _FORBIDDEN_REQUESTS_HELPERS = _collect_requests_forbidden_helpers()
 
 
+def _collect_urllib_guards() -> tuple[Any, tuple[Any, ...], Any]:
+    """Return (urlopen, file_helpers, Request) from urllib.request for the default-allow urllib guards.
+
+    urllib is in the default allow-list, but urllib.request.urlopen opens file:// (arbitrary read) and
+    urlretrieve, URLopener, FancyURLopener, url2pathname and pathname2url read or write local files, all
+    past the open and io guards. urlopen is wrapped to http(s) schemes only (see _safe_urlopen); the rest
+    are refused by identity. urllib is stdlib, so the import is expected to succeed; it is guarded
+    defensively so this module still imports in a stripped-down environment.
+    """
+    try:
+        import urllib.request
+    except Exception:
+        return None, (), None
+    urlopen = getattr(urllib.request, "urlopen", None)
+    request_cls = getattr(urllib.request, "Request", None)
+    file_helpers = tuple(
+        obj
+        for obj in (
+            getattr(urllib.request, "urlretrieve", None),
+            getattr(urllib.request, "URLopener", None),
+            getattr(urllib.request, "FancyURLopener", None),
+            getattr(urllib.request, "url2pathname", None),
+            getattr(urllib.request, "pathname2url", None),
+        )
+        if obj is not None
+    )
+    return urlopen, file_helpers, request_cls
+
+
+_URLLIB_URLOPEN, _URLLIB_FILE_HELPERS, _URLLIB_REQUEST = _collect_urllib_guards()
+_URLOPEN_ALLOWED_SCHEMES = frozenset({"http", "https"})
+
+
+def _safe_urlopen(url: Any, *args: Any, **kwargs: Any) -> Any:
+    """urllib.request.urlopen restricted to http(s): file://, ftp:// and the like are refused.
+
+    This wrapper is handed to a snippet in place of the real urlopen. It reads the scheme from a str URL or
+    a Request and refuses anything but http and https, so urlopen cannot read local files through file://.
+    The http(s) egress itself is contained by the deployment network policy, not here.
+    """
+    target = url
+    if _URLLIB_REQUEST is not None and isinstance(target, _URLLIB_REQUEST):
+        scheme = (getattr(target, "type", "") or urlsplit(getattr(target, "full_url", "")).scheme or "").lower()
+    elif isinstance(target, str):
+        scheme = (urlsplit(target).scheme or "").lower()
+    else:
+        raise ValueError("urlopen accepts only an http(s) URL string or Request in the Python executor")
+    if scheme not in _URLOPEN_ALLOWED_SCHEMES:
+        raise ValueError(f"urlopen scheme '{scheme or '(none)'}' is not allowed; only http and https are")
+    return _URLLIB_URLOPEN(url, *args, **kwargs)
+
+
 def _is_blocked_attr_name(name: str) -> bool:
     """Report whether an attribute name is refused, mirroring the compile-time attribute checks.
 
@@ -333,8 +392,11 @@ def _forbidden_value_reason(value: Any, allowed_modules: frozenset[str]) -> str 
     filesystem or code-execution builtin (open, eval, ...) is refused by identity; a shared dispatch
     table (copy.dispatch_table) is refused by identity so it cannot be poisoned by item assignment; a
     requests file-write or credential helper (atomic_open, get_netrc_auth, get_environ_proxies,
-    compat.getproxies) is refused by identity; a ctypes object is refused by its type, so a native handle
-    from any path (numpy.ctypeslib.load_library) cannot be used. Everything else passes.
+    compat.getproxies) and a urllib file helper (urlretrieve, URLopener, FancyURLopener, url2pathname,
+    pathname2url) are refused by identity; a ctypes object is refused by its type, so a native handle from
+    any path (numpy.ctypeslib.load_library) cannot be used. str.format/format_map and urllib.request.urlopen
+    are not refused here; they are replaced by validating wrappers (see _wrapped_value). Everything else
+    passes.
     """
     if isinstance(value, ModuleType):
         root_module_name = (getattr(value, "__name__", "") or "").split(".")[0]
@@ -347,10 +409,10 @@ def _forbidden_value_reason(value: Any, allowed_modules: frozenset[str]) -> str 
         return "shared dispatch table"
     if any(value is helper for helper in _FORBIDDEN_REQUESTS_HELPERS):
         return "requests file or credential helper"
+    if _URLLIB_FILE_HELPERS and any(value is helper for helper in _URLLIB_FILE_HELPERS):
+        return "urllib file helper"
     if (getattr(type(value), "__module__", "") or "").split(".")[0] in ("ctypes", "_ctypes"):
         return "ctypes object"
-    if _is_str_format_method(value):
-        return "str.format"
     if isinstance(value, typing.ForwardRef):
         # A ForwardRef is reachable without the class, e.g. typing.get_args(typing.List["..."])[0], and on
         # 3.14 its public evaluate() compiles and evals the string. Refuse the instance wherever it surfaces.
@@ -361,9 +423,9 @@ def _forbidden_value_reason(value: Any, allowed_modules: frozenset[str]) -> str 
 def _is_str_format_method(value: Any) -> bool:
     """Report whether value is str.format or str.format_map, bound or unbound.
 
-    str.format and format_map resolve replacement fields in C, past every guard, so they are refused by
-    the resolved value rather than by the object they were reached through. Checking the value catches
-    every wrapper that forwards the lookup: a str literal, a str subclass, or a super() proxy.
+    str.format and format_map resolve replacement fields in C, past every guard, so they are handed back
+    through a validating wrapper (see _make_safe_format) rather than returned raw. Checking the value
+    catches every path that forwards the lookup: a str literal, a str subclass, or a super() proxy.
     """
     if value is str.format or value is str.format_map:
         return True
@@ -371,6 +433,60 @@ def _is_str_format_method(value: Any) -> bool:
         "format",
         "format_map",
     )
+
+
+def _format_string_is_safe(format_string: str) -> bool:
+    """Report whether a str.format template has no replacement field that resolves attributes or items.
+
+    str.format and format_map resolve a field's "." (attribute) and "[" (index) parts in C, past every
+    guard, which is how "{0.__globals__[os].environ}" reaches os. A field name with no "." or "[" only
+    selects a positional or keyword argument, which is safe; format specs are parsed recursively because
+    they can nest further fields ("{0:{1}}"). The template is only tokenised here, never resolved.
+    """
+    try:
+        for _literal, field_name, format_spec, _conversion in string.Formatter().parse(format_string):
+            if field_name is not None and ("." in field_name or "[" in field_name):
+                return False
+            if format_spec and not _format_string_is_safe(format_spec):
+                return False
+    except Exception:
+        return False
+    return True
+
+
+def _make_safe_format(format_method: Any) -> Callable[..., Any]:
+    """Wrap a str.format/format_map method so a template that walks attributes or items is refused.
+
+    The wrapper is handed to a snippet in place of str.format, so plain fields and format specs ("{}",
+    "{0}", "{name}", "{:.2f}", "{0:>{1}}") work, while a template reaching dunders ("{0.__globals__[os]}")
+    is rejected. The template is the bound method's string for "s.format(...)", or the first argument for
+    the unbound "str.format(s, ...)".
+    """
+
+    def safe_format(*args: Any, **kwargs: Any) -> Any:
+        owner = getattr(format_method, "__self__", None)
+        template = owner if isinstance(owner, str) else (args[0] if args and isinstance(args[0], str) else None)
+        if template is not None and not _format_string_is_safe(template):
+            raise ValueError(
+                "str.format with attribute or index access in a replacement field is not allowed; use f-strings"
+            )
+        return format_method(*args, **kwargs)
+
+    return safe_format
+
+
+def _wrapped_value(value: Any) -> Callable[..., Any] | None:
+    """Return a safe wrapper to hand back in place of value, or None to apply the normal checks.
+
+    urllib.request.urlopen is replaced by a scheme-restricted wrapper and str.format/format_map by a
+    template-validating wrapper, so both stay usable by default without exposing the file access or
+    C-level attribute resolution they do in library code.
+    """
+    if _URLLIB_URLOPEN is not None and value is _URLLIB_URLOPEN:
+        return _safe_urlopen
+    if _is_str_format_method(value):
+        return _make_safe_format(value)
+    return None
 
 
 def _make_restricted_import(allowed_modules: frozenset[str]) -> Callable[..., Any]:
@@ -401,7 +517,8 @@ def _make_restricted_import(allowed_modules: frozenset[str]) -> Callable[..., An
         # "from pkg.sub import name" resolves each name with a raw attribute read that the getattr guard
         # never sees, so a forbidden module or builtin could be bound directly (from numpy.ctypeslib import
         # ctypes, from io import open). Apply the same check to every imported name.
-        for item in _expand_fromlist(module, normalized_fromlist):
+        imported_names = _expand_fromlist(module, normalized_fromlist)
+        for item in imported_names:
             if _forbidden_value_reason(getattr(module, item, None), allowed_modules):
                 logger.warning(f"Import of '{item}' from '{name}' is not allowed")
                 raise ImportError(f"Import of '{item}' from '{name}' is not allowed")
@@ -419,6 +536,19 @@ def _make_restricted_import(allowed_modules: frozenset[str]) -> Callable[..., An
                 if submodule is not None and _forbidden_value_reason(submodule, allowed_modules):
                     logger.warning(f"Import of '{name}' is not allowed")
                     raise ImportError(f"Import of '{name}' is not allowed")
+
+        # "from urllib.request import urlopen" binds the raw urlopen through a C-level IMPORT_FROM the
+        # getattr guard never sees (the attribute path urllib.request.urlopen is wrapped there instead).
+        # Hand back a shallow copy of the module whose urlopen is the scheme-restricted wrapper, so the
+        # bound name is safe too. The copy is transient and the real module is left untouched; the file
+        # helpers are already refused by the fromlist check above.
+        if _URLLIB_URLOPEN is not None and any(
+            getattr(module, item, None) is _URLLIB_URLOPEN for item in imported_names
+        ):
+            sanitized = ModuleType(getattr(module, "__name__", name))
+            sanitized.__dict__.update(module.__dict__)
+            sanitized.urlopen = _safe_urlopen
+            return sanitized
         return module
 
     return restricted_import
@@ -452,6 +582,8 @@ def _make_guarded_getattr(allowed_modules: frozenset[str]) -> Callable[..., Any]
         if obj is typing.ForwardRef or isinstance(obj, typing.ForwardRef):
             raise ImportError("Access to typing.ForwardRef is not allowed")
         value = default_guarded_getattr(obj, name, *args, **kwargs)
+        if (wrapped := _wrapped_value(value)) is not None:
+            return wrapped
         if reason := _forbidden_value_reason(value, allowed_modules):
             raise ImportError(f"Access to {reason} through '{name}' is not allowed")
         return value
@@ -468,6 +600,8 @@ def _make_guarded_getitem(allowed_modules: frozenset[str]) -> Callable[..., Any]
 
     def guarded_getitem(obj: Any, index: Any) -> Any:
         value = default_guarded_getitem(obj, index)
+        if (wrapped := _wrapped_value(value)) is not None:
+            return wrapped
         if reason := _forbidden_value_reason(value, allowed_modules):
             raise ImportError(f"Access to {reason} by subscription is not allowed")
         return value
