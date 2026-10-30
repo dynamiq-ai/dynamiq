@@ -10,7 +10,6 @@ from copy import deepcopy
 from functools import singledispatch, singledispatchmethod, update_wrapper, wraps
 from types import BuiltinFunctionType, FunctionType, MethodType, ModuleType
 from typing import Any, Callable, ClassVar, Literal
-from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 from RestrictedPython import compile_restricted, safe_builtins, utility_builtins
@@ -265,54 +264,69 @@ def _collect_requests_forbidden_helpers() -> tuple[Any, ...]:
 _FORBIDDEN_REQUESTS_HELPERS = _collect_requests_forbidden_helpers()
 
 
-def _collect_urllib_guards() -> tuple[Any, Any, Any]:
-    """Return (urlopen, Request, urllib.request module) for the default-allow urllib guards.
+def _collect_urllib_guards() -> tuple[Any, Any, Any, Any]:
+    """Return (urlopen, Request, urllib.request module, http-only opener) for the urllib guards.
 
     urllib.request is an unbounded surface: beyond urlopen (file:// reads) and the file helpers, it exposes
     build_opener/OpenerDirector/FileHandler (another file:// path), ProxyHandler (reads the proxy
     environment) and install_opener (replaces the process-global opener for every run). Refusing members
     one by one never ends, so urllib.request is exposed by a positive allow-list instead: only Request and
     the wrapped urlopen are reachable (see _URLLIB_REQUEST_SAFE_NAMES, the getattr guard and the import
-    shim); everything else on the module is refused. urllib.parse and urllib.error stay fully available.
-    urllib is stdlib, so the import is expected to succeed; it is guarded defensively so this module still
-    imports in a stripped-down environment.
+    shim); everything else on the module is refused. urllib.parse and urllib.error stay fully available;
+    other submodules (robotparser, which calls urlopen itself, ...) are refused by _URLLIB_ALLOWED_SUBMODULES.
+
+    The wrapped urlopen dispatches through a private OpenerDirector built with only the HTTP(S), redirect
+    and error handlers plus UnknownHandler -- no File, FTP or Data handler. A request to file://, ftp:// or
+    data:, or one whose mutable .type is set to "file", then has no handler and raises URLError, so there
+    is no scheme string to validate and no way for the validated scheme to disagree with the handler the
+    opener dispatches to. ProxyHandler({}) is added with no proxies so the opener neither reads the
+    environment nor routes through a proxy. urllib is stdlib, so the import is expected to succeed; it is
+    guarded defensively so this module still imports in a stripped-down environment.
     """
     try:
         import urllib.request
     except Exception:
-        return None, None, None
-    return getattr(urllib.request, "urlopen", None), getattr(urllib.request, "Request", None), urllib.request
+        return None, None, None, None
+    opener = urllib.request.OpenerDirector()
+    for handler_name in (
+        "ProxyHandler",
+        "UnknownHandler",
+        "HTTPHandler",
+        "HTTPSHandler",
+        "HTTPDefaultErrorHandler",
+        "HTTPRedirectHandler",
+        "HTTPErrorProcessor",
+    ):
+        handler_cls = getattr(urllib.request, handler_name, None)
+        if handler_cls is None:
+            continue
+        try:
+            handler = urllib.request.ProxyHandler({}) if handler_name == "ProxyHandler" else handler_cls()
+        except Exception:
+            continue
+        opener.add_handler(handler)
+    urlopen = getattr(urllib.request, "urlopen", None)
+    request_cls = getattr(urllib.request, "Request", None)
+    return urlopen, request_cls, urllib.request, opener
 
 
-_URLLIB_URLOPEN, _URLLIB_REQUEST, _URLLIB_REQUEST_MODULE = _collect_urllib_guards()
+_URLLIB_URLOPEN, _URLLIB_REQUEST, _URLLIB_REQUEST_MODULE, _URLLIB_HTTP_OPENER = _collect_urllib_guards()
 _URLLIB_REQUEST_SAFE_NAMES = frozenset({"Request", "urlopen"})
-_URLOPEN_ALLOWED_SCHEMES = frozenset({"http", "https"})
+_URLLIB_ALLOWED_SUBMODULES = frozenset({"parse", "error", "request"})
 
 
 def _safe_urlopen(url: Any, *args: Any, **kwargs: Any) -> Any:
-    """urllib.request.urlopen restricted to http(s): file://, ftp:// and the like are refused.
+    """urllib.request.urlopen restricted to http(s) by dispatching through a private opener.
 
-    This wrapper is handed to a snippet in place of the real urlopen. It reads the scheme from a str URL or
-    an exact urllib.request.Request and refuses anything but http and https, so urlopen cannot read local
-    files through file://. A Request subclass is refused rather than trusted, since an overridden full_url
-    or type could report http to this check and resolve to file:// inside urlopen. The http(s) egress
-    itself is contained by the deployment network policy, not here.
+    Handed to a snippet in place of the real urlopen. The private opener has only HTTP(S), redirect and
+    error handlers (plus UnknownHandler) and no File/FTP/Data handler, so file://, ftp:// and data:, and a
+    Request whose mutable .type is set to "file", all raise URLError instead of reading a local file -- no
+    scheme string is validated, so there is nothing for a str/Request subclass or a .type write to spoof.
+    http(s) egress is contained by the deployment network policy, not here.
     """
-    if _URLLIB_REQUEST is not None and type(url) is _URLLIB_REQUEST:
-        # full_url is read after Request's own unwrap(), so a str-subclass URL has already been
-        # stringified here; the same value is what urlopen dispatches on, so there is no gap.
-        scheme = (urlsplit(getattr(url, "full_url", "") or "").scheme or "").lower()
-    elif isinstance(url, str):
-        # Normalise to a genuine str (str.__str__ ignores a subclass __str__ override), so a str subclass
-        # cannot report http here and resolve to file:// when urlopen re-stringifies the URL. The call
-        # below uses this normalised value, not the original.
-        url = str.__str__(url)
-        scheme = (urlsplit(url).scheme or "").lower()
-    else:
-        raise ValueError("urlopen accepts only an http(s) URL string or urllib.request.Request")
-    if scheme not in _URLOPEN_ALLOWED_SCHEMES:
-        raise ValueError(f"urlopen scheme '{scheme or '(none)'}' is not allowed; only http and https are")
-    return _URLLIB_URLOPEN(url, *args, **kwargs)
+    if _URLLIB_HTTP_OPENER is None:
+        raise ValueError("urlopen is not available in the Python executor")
+    return _URLLIB_HTTP_OPENER.open(url, *args, **kwargs)
 
 
 def _is_blocked_attr_name(name: str) -> bool:
@@ -397,9 +411,16 @@ def _forbidden_value_reason(value: Any, allowed_modules: frozenset[str]) -> str 
     _wrapped_value and _URLLIB_REQUEST_SAFE_NAMES). Everything else passes.
     """
     if isinstance(value, ModuleType):
-        root_module_name = (getattr(value, "__name__", "") or "").split(".")[0]
+        module_name = getattr(value, "__name__", "") or ""
+        root_module_name = module_name.split(".")[0]
         if root_module_name in FORBIDDEN_MODULES or root_module_name not in allowed_modules:
-            return f"module '{getattr(value, '__name__', '')}'"
+            return f"module '{module_name}'"
+        # urllib is allow-listed at the package root, but only a few submodules are safe. robotparser (and
+        # others) call the module-level urlopen inside the stdlib, around the wrapper, so reach file://; so
+        # only urllib.parse, urllib.error and the allow-listed urllib.request may be imported or resolved.
+        if root_module_name == "urllib" and module_name != "urllib":
+            if module_name.split(".")[1] not in _URLLIB_ALLOWED_SUBMODULES:
+                return f"module '{module_name}'"
         return None
     if any(value is forbidden for forbidden in _FORBIDDEN_BUILTINS):
         return "builtin"

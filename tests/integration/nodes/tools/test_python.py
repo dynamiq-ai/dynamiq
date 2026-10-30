@@ -552,38 +552,39 @@ def test_python_node_urllib_file_access_blocked(attack_name, attack_code):
     assert result.status == RunnableStatus.FAILURE
 
 
-def test_safe_urlopen_allows_http_and_blocks_other_schemes(monkeypatch):
-    """The urlopen wrapper lets http(s) through to the real urlopen and refuses every other scheme,
-    without a network call."""
+def test_urllib_http_opener_has_only_http_handlers():
+    """The private opener urlopen dispatches through carries only HTTP(S) (and unknown) handlers, so a
+    non-http scheme has no handler and raises URLError instead of reading a file -- no scheme string is
+    validated, so a str/Request subclass or a mutated .type has nothing to spoof. Checked directly, with
+    no network call."""
+    from urllib.error import URLError
+
+    from dynamiq.nodes.tools import python as python_module
+
+    opener = python_module._URLLIB_HTTP_OPENER
+    assert opener is not None
+    assert set(opener.handle_open) <= {"http", "https", "unknown"}
+    for blocked_url in ("file:///etc/hostname", "ftp://host/f", "data:text/plain,hi"):
+        with pytest.raises(URLError):
+            opener.open(blocked_url)
+
+
+def test_safe_urlopen_forwards_to_private_opener(monkeypatch):
+    """_safe_urlopen forwards the call (and its arguments) to the private http-only opener rather than the
+    global urlopen, so the opener's handler set -- not a scheme string -- is what gates the scheme."""
     from dynamiq.nodes.tools import python as python_module
 
     calls = []
-    monkeypatch.setattr(python_module, "_URLLIB_URLOPEN", lambda url, *a, **k: calls.append(url) or "RESPONSE")
 
-    assert python_module._safe_urlopen("https://example.com/path") == "RESPONSE"
-    assert calls == ["https://example.com/path"]
-    for blocked_url in ("file:///etc/hostname", "ftp://host/f", "data:text/plain,hi"):
-        with pytest.raises(ValueError):
-            python_module._safe_urlopen(blocked_url)
+    class _StubOpener:
+        def open(self, url, *args, **kwargs):
+            calls.append((url, args, kwargs))
+            return "RESPONSE"
 
+    monkeypatch.setattr(python_module, "_URLLIB_HTTP_OPENER", _StubOpener())
 
-def test_safe_urlopen_normalizes_str_subclass_url(monkeypatch):
-    """A str subclass with a malicious __str__ (built via the 3-arg type builtin) can report http to the
-    scheme check and resolve to file:// when urlopen re-stringifies the URL. The wrapper normalises the
-    URL to a genuine str, so the real urlopen receives the base characters, not the override, and a
-    subclass whose real characters are file:// is refused."""
-    from dynamiq.nodes.tools import python as python_module
-
-    received = []
-    monkeypatch.setattr(python_module, "_URLLIB_URLOPEN", lambda url, *a, **k: received.append(url) or "RESPONSE")
-
-    sneaky = type("Sneaky", (str,), {"__str__": lambda self: "file:///etc/hostname"})
-    assert python_module._safe_urlopen(sneaky("http://example.invalid/")) == "RESPONSE"
-    assert received == ["http://example.invalid/"]
-    assert str(received[0]) == "http://example.invalid/"
-
-    with pytest.raises(ValueError):
-        python_module._safe_urlopen(type("FileStr", (str,), {})("file:///etc/hostname"))
+    assert python_module._safe_urlopen("https://example.com/p", timeout=5) == "RESPONSE"
+    assert calls == [("https://example.com/p", (), {"timeout": 5})]
 
 
 @pytest.mark.parametrize(
@@ -630,8 +631,8 @@ def test_python_node_urllib_request_allowlist_refuses_non_safe_members(attack_na
 
 
 def test_python_node_urlopen_refuses_request_subclass():
-    """A Request subclass could report http to the wrapper's scheme check and resolve to file:// inside
-    urlopen, so the wrapper accepts only an exact urllib.request.Request, not a subclass."""
+    """A Request subclass (or any file:// request) has no file handler in the private http-only opener, so
+    urlopen raises URLError instead of reading the file."""
     code = (
         "import urllib.request\n"
         "class SneakyRequest(urllib.request.Request):\n    pass\n"
@@ -640,6 +641,54 @@ def test_python_node_urlopen_refuses_request_subclass():
     )
 
     result = Python(code=code).run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+
+
+def test_python_node_urlopen_refuses_type_spoofed_request():
+    """OpenerDirector.open dispatches on the mutable Request.type, not full_url, so a Request built with
+    an http URL whose .type is then set to 'file' would reach FileHandler. The private opener has no file
+    handler, so it raises URLError instead of reading the file."""
+    code = (
+        "import urllib.request\n"
+        "def run(input_data):\n"
+        "    r = urllib.request.Request('http://localhost/etc/hostname')\n"
+        "    r.type = 'file'\n"
+        "    return urllib.request.urlopen(r).read()\n"
+    )
+
+    result = Python(code=code).run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+
+
+@pytest.mark.parametrize(
+    ("attack_name", "attack_code"),
+    [
+        # robotparser calls the module-level urlopen inside the stdlib, around the wrapper and the
+        # urllib.request allow-list, so it could read file://; it is refused as a non-allow-listed submodule.
+        (
+            "robotparser_import",
+            "import urllib.robotparser\n"
+            "def run(input_data):\n"
+            "    rp = urllib.robotparser.RobotFileParser('file:///etc/hostname')\n"
+            "    rp.read()\n"
+            "    return rp.site_maps()\n",
+        ),
+        (
+            "robotparser_from_import",
+            "from urllib import robotparser\ndef run(input_data):\n    return robotparser\n",
+        ),
+        (
+            "response_submodule",
+            "import urllib.response\ndef run(input_data):\n    return 1\n",
+        ),
+    ],
+)
+def test_python_node_urllib_non_allowlisted_submodules_refused(attack_name, attack_code):
+    """urllib is allow-listed by submodule: only parse, error and request are importable; robotparser,
+    response and the rest are refused."""
+    result = Python(code=attack_code).run({}, None)
 
     assert result.status == RunnableStatus.FAILURE
 
