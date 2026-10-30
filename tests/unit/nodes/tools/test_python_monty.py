@@ -1,3 +1,4 @@
+import collections
 import datetime
 import json
 import pathlib
@@ -223,6 +224,10 @@ OVERSIZED_RESULTS |= {
     "aware datetime": LONG_TIMEZONE
     + "def run(inputs):\n    return [datetime.datetime(2020, 1, 1, tzinfo=tz)] * 1000\n",
     "aware time": LONG_TIMEZONE + "def run(inputs):\n    return [datetime.time(1, tzinfo=tz)] * 1000\n",
+    # A namedtuple prints its field names, so each reference to a shared one repeats them.
+    "namedtuple field names": "from collections import namedtuple\n"
+    + "P = namedtuple('P', ['f' * 1000])\n"
+    + "def run(inputs):\n    return [P(1)] * 20000\n",
 }
 
 
@@ -269,6 +274,8 @@ def zones(key: str) -> list[zoneinfo.ZoneInfo]:
 def test_output_size_bounds_every_rendering():
     named_zone = datetime.timezone(datetime.timedelta(hours=-23, minutes=-59, seconds=-59), "z'\"\\é" * 20)
     shared = ["é\U0001F600", b"\xff\x00", {1, "a"}]
+    Point = collections.namedtuple("Point", ["x", "y"])
+    Long = collections.namedtuple("L" * 300, ["f" * 500, "é" * 50])
     values = [
         None,
         False,
@@ -298,6 +305,10 @@ def test_output_size_bounds_every_rendering():
         datetime.timezone.utc,
         pathlib.PurePosixPath("/a'b/é\\c"),
         [shared, shared, (shared,), {"k": shared}],
+        Point(1, "a"),
+        [Long("v", None)] * 50,
+        int,
+        [str, bytes] * 10,
     ]
     for value in values:
         bound = _output_size(value, 10**12)
@@ -313,6 +324,23 @@ def run(inputs):
     output = PythonMonty(code=code).execute({})
     assert len(output["content"]["text"]) == 1024 * 1024
     assert len(output["content"]["numbers"]) == 100000
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        (
+            "from collections import namedtuple\nP = namedtuple('P', 'x y')\ndef run(inputs):\n    return P(1, 2)\n",
+            "P(x=1, y=2)",
+        ),
+        ("import sys\ndef run(inputs):\n    return sys.version_info\n", "version_info(major="),
+        ("def run(inputs):\n    return int\n", "<class 'int'>"),
+    ],
+    ids=["namedtuple", "sys.version_info", "builtin type"],
+)
+def test_namedtuple_and_builtin_type_results_pass(code, expected):
+    output = PythonMonty(code=code, is_optimized_for_agents=True).execute({})
+    assert output["content"].startswith(expected)
 
 
 def test_class_instance_result_passes_with_its_attributes():

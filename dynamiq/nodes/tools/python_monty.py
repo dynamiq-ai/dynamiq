@@ -61,6 +61,8 @@ _CONTAINER_OVERHEADS: dict[type, int] = {
 # The longest repr() of a datetime.timezone besides its name, and of a zoneinfo.ZoneInfo besides its key.
 _TIMEZONE_SIZE = 112
 _ZONE_INFO_SIZE = 32
+# Containers a result can hold a subclass of: Monty returns a namedtuple, and sys.version_info, as a tuple subclass.
+_SUBCLASSABLE_CONTAINERS = (tuple, list, dict, set, frozenset)
 # A reference back to an enclosing container prints as "[...]".
 _CYCLE_SIZE = 5
 
@@ -88,7 +90,7 @@ def _output_size(value: Any, limit: int) -> int:
             continue
         if children_sized:
             children = pending.pop(key)
-            size = _CONTAINER_OVERHEADS[type(item)] + sum(
+            size = _container_overhead(item) + sum(
                 sizes.get(id(child), _CYCLE_SIZE) + _SEPARATOR_SIZE for child in children
             )
         elif (size := _leaf_size(item)) is None:
@@ -134,9 +136,26 @@ def _leaf_size(value: Any) -> int | None:
         return _ZONE_INFO_SIZE + _leaf_size(str(value.key))
     if isinstance(value, pathlib.PurePath):
         return 32 + _leaf_size(value.as_posix())
-    if kind in _CONTAINER_OVERHEADS:
+    if kind is type:
+        # Monty returns only builtin types as type objects, and a class it defines as a string.
+        return _leaf_size(repr(value)) + 2
+    if kind in _CONTAINER_OVERHEADS or isinstance(value, _SUBCLASSABLE_CONTAINERS):
         return None
     raise ValueError(f"run() returned a {kind.__name__}, which PythonMonty cannot pass on")
+
+
+def _container_overhead(value: Any) -> int:
+    """Return what a container prints besides its items and their separators.
+
+    A subclass, such as a namedtuple, prints its base container's text plus its type name and, for a namedtuple,
+    each field name, which the snippet chooses and can make any length.
+    """
+    kind = type(value)
+    if kind in _CONTAINER_OVERHEADS:
+        return _CONTAINER_OVERHEADS[kind]
+    base = next(base for base in _SUBCLASSABLE_CONTAINERS if isinstance(value, base))
+    names = (kind.__qualname__, *getattr(kind, "_fields", ()))
+    return _CONTAINER_OVERHEADS[base] + sum(_leaf_size(name) for name in names)
 
 
 def _children(value: Any) -> list[Any]:
@@ -146,7 +165,7 @@ def _children(value: Any) -> list[Any]:
     time's tzinfo.
     """
     kind = type(value)
-    if kind is dict:
+    if isinstance(value, dict):
         return [part for pair in value.items() for part in pair]
     if kind is pydantic_monty.MontyClassProxy:
         return [value.name, value.attributes]
