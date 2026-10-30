@@ -4,7 +4,12 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.evaluations import BaseEvaluator
-from dynamiq.nodes.tools.python import compile_and_execute, get_restricted_globals
+from dynamiq.nodes.tools.python import (
+    DEFAULT_ALLOWED_MODULES,
+    EXTENDED_ALLOWED_MODULES,
+    compile_and_execute,
+    get_restricted_globals,
+)
 from dynamiq.utils.logger import logger
 
 
@@ -82,6 +87,15 @@ class PythonEvaluator(BaseEvaluator):
     """
     name: str = "python_metric"
     code: str = Field(..., description="User-defined Python code as a string.")
+    extra_allowed_modules: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Extra top-level packages the metric code may import on top of the standard library and the "
+            "data-science set, for example 'operator' or 'yaml' (both dropped from the default set). "
+            "str.format works for plain fields and format specs; a field that resolves an attribute or "
+            "item is refused. Metric code is developer-authored, so these are a trusted-code decision."
+        ),
+    )
 
     def __init__(self, **data: Any):
         super().__init__(**data)
@@ -92,7 +106,12 @@ class PythonEvaluator(BaseEvaluator):
         Compile the user code using restricted execution. Save the compiled
         globals and parse the "evaluate" function's parameter names.
         """
-        self._compiled_globals: dict = get_restricted_globals()
+        # Evaluator code is authored by developers, not end users, so it keeps the data-science libraries
+        # the safe default omits, plus anything in extra_allowed_modules. It still runs under the hardened
+        # import and attribute guards, so operator and yaml are no longer in the base set (opt in through
+        # extra_allowed_modules) and str.format refuses a field that resolves an attribute or item.
+        allowed = DEFAULT_ALLOWED_MODULES | EXTENDED_ALLOWED_MODULES | set(self.extra_allowed_modules)
+        self._compiled_globals: dict = get_restricted_globals(allowed)
         try:
             compile_and_execute(self.code, self._compiled_globals)
         except Exception as compile_error:

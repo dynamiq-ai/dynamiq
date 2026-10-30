@@ -98,6 +98,91 @@ def test_materialize_inline_files_malicious_filename_is_sanitized():
                 assert full_path.startswith(workspace_dir)
 
 
+def test_default_description_lists_importable_modules_not_whole_stdlib():
+    """The default refuses open() and every non-allow-listed import, so the description points at the
+    read_file() helpers and names the importable modules rather than claiming the whole standard library
+    or promising pd.read_csv."""
+    executor = PythonCodeExecutor(file_store=InMemoryFileStore())
+    description = executor.description
+
+    assert "read_file(" in description
+    assert "`open('notes.txt')` is refused" in description
+    assert "Only these modules can be imported" in description
+    assert "json" in description
+    assert "requests" in description
+    # Modules the node refuses must not be advertised to the agent.
+    assert "hashlib" not in description
+    assert "pd.read_csv" not in description
+
+
+def test_description_names_only_enabled_libraries():
+    """When a trusted instance enables pandas, the description names it and may show pd.read_csv; a
+    default instance never does."""
+    enabled = PythonCodeExecutor(file_store=InMemoryFileStore(), extra_allowed_modules=["pandas"])
+
+    assert "pandas" in enabled.description
+    assert "pd.read_csv" in enabled.description
+
+
+def test_description_refreshes_when_extra_modules_change():
+    """The description is derived, not stored: to_dict() dumps it, so a saved workflow whose
+    extra_allowed_modules is later edited (a UI/YAML change) must recompute the text rather than keep the
+    stale version that named the wrong importable modules."""
+    stale = PythonCodeExecutor(file_store=InMemoryFileStore()).description
+    assert "pd.read_csv" not in stale
+
+    reloaded = PythonCodeExecutor(
+        file_store=InMemoryFileStore(), extra_allowed_modules=["pandas"], description=stale
+    )
+
+    assert reloaded.description != stale
+    assert "pd.read_csv" in reloaded.description
+
+
+def test_custom_description_is_preserved():
+    """A caller's own description is kept verbatim; only a generated one is refreshed, so a saved workflow
+    with a tailored tool description does not lose it on load."""
+    custom = "Analyse sales CSVs only."
+    executor = PythonCodeExecutor(file_store=InMemoryFileStore(), extra_allowed_modules=["pandas"], description=custom)
+
+    assert executor.description == custom
+
+
+def test_seaborn_only_description_does_not_promise_matplotlib():
+    """A seaborn-only instance can't import matplotlib, so the description must not tell the agent to use
+    plt.savefig; it points at enabling matplotlib. With matplotlib enabled, the plotting guidance appears."""
+    seaborn_only = PythonCodeExecutor(file_store=InMemoryFileStore(), extra_allowed_modules=["seaborn"]).description
+    assert "plt.savefig" not in seaborn_only
+    assert "Enable matplotlib as well" in seaborn_only
+
+    with_mpl = PythonCodeExecutor(
+        file_store=InMemoryFileStore(), extra_allowed_modules=["matplotlib", "seaborn"]
+    ).description
+    assert "plt.savefig" in with_mpl
+
+
+def test_edited_default_opening_description_is_preserved():
+    """A custom description that reuses the default's opening words (the common way to customize, or a UI
+    user appending instructions to the pre-filled text) must not be overwritten — only a description that
+    is byte-for-byte a generated one is refreshed."""
+    custom = "Runs dynamic Python code for the finance team. Only use it for CSV reports."
+
+    executor = PythonCodeExecutor(file_store=InMemoryFileStore(), description=custom)
+
+    assert executor.description == custom
+
+
+def test_description_names_real_write_helpers():
+    """The description must name helpers that are actually injected (write_text/write_bytes), not
+    write_file_text/write_file_bytes, which do not exist."""
+    description = PythonCodeExecutor(file_store=InMemoryFileStore()).description
+
+    assert "write_text()" in description
+    assert "write_bytes()" in description
+    assert "write_file_text" not in description
+    assert "write_file_bytes" not in description
+
+
 def test_code_executor_captures_stdout_without_print_errors():
     """Ensure the RestrictedPython print hooks no longer crash and stdout is captured."""
     file_store = InMemoryFileStore()
@@ -151,7 +236,7 @@ def test_code_executor_reads_files_via_helper_function():
     file_store = InMemoryFileStore()
     file_store.store("transactions.csv", "amount\n10\n25\n")
 
-    executor = PythonCodeExecutor(file_store=file_store)
+    executor = PythonCodeExecutor(file_store=file_store, extra_allowed_modules=["pandas"])
     code = """
 import pandas as pd
 from io import StringIO
@@ -180,7 +265,11 @@ def test_concurrent_runs_read_their_own_files():
     def run(tenant):
         file_store = InMemoryFileStore()
         file_store.store("data.csv", tenant.encode())
-        return PythonCodeExecutor(file_store=file_store).run(input_data={"code": code}).output["content"]
+        return (
+            PythonCodeExecutor(file_store=file_store, extra_allowed_modules=["pandas"])
+            .run(input_data={"code": code})
+            .output["content"]
+        )
 
     tenants = [f"tenant-{i}" for i in range(6)]
     with ThreadPoolExecutor(len(tenants)) as pool:
@@ -197,7 +286,9 @@ def test_a_run_past_its_time_limit_keeps_its_directory_while_no_other_run_waits(
         "    return str(pd.read_csv('result.csv')['a'][0])\n"
     )
 
-    result = PythonCodeExecutor(file_store=InMemoryFileStore()).run(input_data={"code": code})
+    result = PythonCodeExecutor(file_store=InMemoryFileStore(), extra_allowed_modules=["pandas"]).run(
+        input_data={"code": code}
+    )
 
     assert result.output["content"] == "7"
     assert not (tmp_path / "result.csv").exists()
@@ -207,7 +298,7 @@ def test_a_run_past_its_time_limit_does_not_block_the_next_one():
     hung = PythonCodeExecutor(file_store=InMemoryFileStore(), error_handling=ErrorHandling(timeout_seconds=0.5))
     file_store = InMemoryFileStore()
     file_store.store("data.csv", b"next")
-    following = PythonCodeExecutor(file_store=file_store)
+    following = PythonCodeExecutor(file_store=file_store, extra_allowed_modules=["pandas"])
 
     with ThreadPoolExecutor(1) as pool:
         pool.submit(hung.run, input_data={"code": "import time\ndef run(params=None):\n    time.sleep(4)\n"})
