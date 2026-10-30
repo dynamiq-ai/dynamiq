@@ -24,6 +24,9 @@ MONTY_MAX_WORKERS = 4
 MONTY_CHECKOUT_TIMEOUT_SECONDS = 60.0
 # Workers run at the lowest CPU priority, so code that spins gives way to the service it shares a container with.
 MONTY_WORKER_NICENESS = 19
+# time.sleep() and asyncio.sleep() return at once. Monty stops its execution clock while code sleeps, so a sleeping
+# snippet would otherwise hold a worker far past its time limit, and sandboxed code has nothing to wait for.
+MONTY_OS_POLICY = pydantic_monty.OSPolicy(sleep="zero")
 
 _pool: pydantic_monty.Monty | None = None
 _pool_pid: int | None = None

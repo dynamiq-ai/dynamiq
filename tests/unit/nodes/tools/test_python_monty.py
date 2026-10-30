@@ -12,6 +12,7 @@ from dynamiq.flows import Flow  # noqa: E402
 from dynamiq.nodes.agents.exceptions import ToolExecutionException  # noqa: E402
 from dynamiq.nodes.node import ErrorHandling  # noqa: E402
 from dynamiq.nodes.tools.python_monty import PythonMonty  # noqa: E402
+from dynamiq.utils.monty import MONTY_MAX_WORKERS  # noqa: E402
 
 
 def test_basic_run_returns_dict():
@@ -152,6 +153,53 @@ def run(inputs):
         node.execute({})
     assert time.monotonic() - started < 5
     assert excinfo.value.recoverable is True
+
+
+def test_sleeps_return_at_once():
+    # Monty's time limit does not count sleeping, so a real sleep would hold the worker past it.
+    code = """
+import asyncio
+import time
+
+async def run(inputs):
+    for _ in range(1000):
+        time.sleep(10)
+        await asyncio.sleep(10)
+    return {"slept": True}
+"""
+    node = PythonMonty(code=code, error_handling=ErrorHandling(timeout_seconds=1))
+    started = time.monotonic()
+    assert node.execute({}) == {"content": {"slept": True}}
+    assert time.monotonic() - started < 2
+
+
+def test_sleeping_runs_leave_workers_free_for_other_runs():
+    sleeper = PythonMonty(
+        code="import time\ndef run(inputs):\n    for _ in range(4):\n        time.sleep(10)\n    return 1\n",
+        error_handling=ErrorHandling(timeout_seconds=0.5),
+    )
+    for _ in range(MONTY_MAX_WORKERS):
+        sleeper.run(input_data={})
+    started = time.monotonic()
+    assert PythonMonty(code="def run(inputs):\n    return 2\n").execute({}) == {"content": 2}
+    assert time.monotonic() - started < 1
+
+
+def test_result_with_shared_sublists_stops_at_the_output_limit():
+    # Each level references the previous list twice, so 22 levels of a few dozen objects print as ~29 million
+    # characters. The size is checked in the worker, so the host never builds that text.
+    code = """
+def run(inputs):
+    x = [0]
+    for _ in range(22):
+        x = [x, x]
+    return x
+"""
+    node = PythonMonty(code=code, is_optimized_for_agents=True)
+    started = time.monotonic()
+    with pytest.raises(ToolExecutionException, match="characters of output"):
+        node.execute({})
+    assert time.monotonic() - started < 10
 
 
 def test_host_environment_is_not_reachable(monkeypatch):

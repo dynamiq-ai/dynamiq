@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.evaluations import BaseEvaluator
 from dynamiq.utils.logger import logger
-from dynamiq.utils.monty import get_monty_pool
+from dynamiq.utils.monty import MONTY_OS_POLICY, get_monty_pool
 
 DEFAULT_TIME_LIMIT_SECONDS = 5.0
 DEFAULT_MAX_MEMORY_BYTES = 64 * 1024 * 1024
@@ -143,7 +143,7 @@ class PythonEvaluator(BaseEvaluator):
         limits = pydantic_monty.ResourceLimits(
             max_feed_duration_secs=self.timeout_seconds, max_memory=self.max_memory_bytes
         )
-        with get_monty_pool().checkout(script_name=_SCRIPT_NAME, limits=limits) as session:
+        with get_monty_pool().checkout(script_name=_SCRIPT_NAME, limits=limits, os_policy=MONTY_OS_POLICY) as session:
             # print() output is dropped rather than written to the host's stdout.
             return session.feed_run(code, inputs=inputs, print_callback=pydantic_monty.CollectString())
 

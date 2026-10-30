@@ -12,14 +12,18 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
-from dynamiq.utils.monty import get_monty_pool
+from dynamiq.utils.monty import MONTY_OS_POLICY, get_monty_pool
 
 _INPUTS_VAR = "dynamiq_monty_inputs_"
+_RESULT_VAR = "dynamiq_monty_result_"
 _TYPE_CHECK_STUBS = f"{_INPUTS_VAR}: dict = {{}}\n"
 _SCRIPT_NAME = "python_monty.py"
 # Applies when error_handling.timeout_seconds is unset, so code that never returns cannot hold a worker forever.
 DEFAULT_TIME_LIMIT_SECONDS = 60.0
 DEFAULT_MAX_MEMORY_BYTES = 256 * 1024 * 1024
+# The longest repr() a run() result may have. A result can share sublists, so a few dozen objects can stand for
+# gigabytes of text; it is measured inside the worker, under its limits, before the host formats or serializes it.
+DEFAULT_MAX_OUTPUT_CHARS = 10 * 1024 * 1024
 
 
 def _run_contains_async_def(code: str) -> bool:
@@ -35,14 +39,20 @@ def _run_contains_async_def(code: str) -> bool:
 
 
 def _wrap_user_code(code: str, use_multiple_params: bool) -> str:
-    """Append a trailing call to `run(...)` so Monty returns its value."""
+    """Append a call to `run(...)` that checks the size of its result and returns it, so Monty returns its value."""
     is_async = _run_contains_async_def(code)
     call_prefix = "await " if is_async else ""
     if use_multiple_params:
-        trailer = f"{call_prefix}run(**{_INPUTS_VAR})"
+        call = f"{call_prefix}run(**{_INPUTS_VAR})"
     else:
-        trailer = f"{call_prefix}run({_INPUTS_VAR})"
-    return f"{code}\n\n{trailer}\n"
+        call = f"{call_prefix}run({_INPUTS_VAR})"
+    return (
+        f"{code}\n\n"
+        f"{_RESULT_VAR} = {call}\n"
+        f"if len(repr({_RESULT_VAR})) > {DEFAULT_MAX_OUTPUT_CHARS}:\n"
+        f"    raise ValueError('run() returned more than {DEFAULT_MAX_OUTPUT_CHARS} characters of output')\n"
+        f"{_RESULT_VAR}\n"
+    )
 
 
 class PythonMonty(Node):
@@ -130,6 +140,7 @@ class PythonMonty(Node):
             with get_monty_pool().checkout(
                 script_name=_SCRIPT_NAME,
                 limits=limits,
+                os_policy=MONTY_OS_POLICY,
                 type_check=self.type_check,
                 type_check_stubs=_TYPE_CHECK_STUBS if self.type_check else None,
             ) as session:

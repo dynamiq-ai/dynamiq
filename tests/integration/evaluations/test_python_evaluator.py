@@ -133,6 +133,21 @@ def evaluate(answer):
     assert time.monotonic() - started < 5
 
 
+def test_python_evaluator_sleeps_return_at_once():
+    # Monty's time limit does not count sleeping, so a real sleep would hold the worker past it.
+    user_code = """
+import time
+def evaluate(answer):
+    for _ in range(1000):
+        time.sleep(10)
+    return 1.0
+"""
+    evaluator = PythonEvaluator(code=user_code, timeout_seconds=1)
+    started = time.monotonic()
+    assert evaluator.run_single({"answer": "Paris"}) == 1.0
+    assert time.monotonic() - started < 2
+
+
 def test_python_evaluator_stops_code_past_its_memory_limit():
     user_code = """
 def evaluate(answer):
