@@ -35,3 +35,10 @@ def test_split_by_title_lossless_edge_cases(content, split_length, split_overlap
     chunks = splitter.run([Document(id="d", content=content)])["documents"]
 
     assert "".join(chunk.content for chunk in chunks) == content
+
+
+def test_split_by_sentence_skips_chunks_of_only_whitespace():
+    splitter = DocumentSplitter(split_by="sentence", split_length=1)
+    chunks = splitter.run([Document(id="d", content="Wire transfers need a second review.\n")])["documents"]
+
+    assert [chunk.content for chunk in chunks] == ["Wire transfers need a second review."]

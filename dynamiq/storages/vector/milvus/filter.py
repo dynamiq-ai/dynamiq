@@ -43,23 +43,19 @@ class Filter:
         Returns:
             str: A Milvus-compatible filter expression.
         """
-        # Handle logical operators with nested conditions
         if "operator" in filter_term and "conditions" in filter_term:
             operator = filter_term["operator"]
             if operator not in self.LOGICAL_OPERATORS:
                 raise ValueError(f"Unsupported logical operator: {operator}")
 
-            # Process each condition recursively
             sub_expressions = [self._parse_filter(cond) for cond in filter_term["conditions"]]
             return f"({self.LOGICAL_OPERATORS[operator].join(sub_expressions)})"
 
-        # Handle comparison conditions
         elif "field" in filter_term and "operator" in filter_term and "value" in filter_term:
             field = filter_term["field"]
             operator = filter_term["operator"]
             value = filter_term["value"]
 
-            # Build comparison expression
             return self._build_comparison_expression(field, operator, value)
 
         else:

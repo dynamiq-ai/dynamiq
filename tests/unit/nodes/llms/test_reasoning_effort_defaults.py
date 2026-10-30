@@ -122,10 +122,15 @@ class TestExplicitOverrideRespected:
         params = _build(_llm(model, reasoning_effort=explicit))
         assert params["reasoning_effort"] == explicit
 
-    @pytest.mark.parametrize("model", ["gpt-5.1", "gpt-5"])
-    def test_explicit_none_omits_param(self, model):
+    @pytest.mark.parametrize("model", ["gpt-5"])
+    def test_unset_effort_omits_param_for_models_without_none(self, model):
         params = _build(_llm(model, reasoning_effort=None))
         assert "reasoning_effort" not in params
+
+    @pytest.mark.parametrize("model", ["gpt-5.1", "gpt-5.4", "gpt-6-luna", "openai/gpt-6-luna", "gpt-6-sol"])
+    def test_unset_effort_sends_none_for_models_that_support_it(self, model):
+        params = _build(_llm(model, reasoning_effort=None))
+        assert params["reasoning_effort"] == ReasoningEffort.NONE
 
 
 class TestPrefixedModelIds:

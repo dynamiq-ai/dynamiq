@@ -23,7 +23,6 @@ class JSONInnerThoughtsExtractor:
         self.inner_thoughts_buffer: str = ""
         self.main_json_held_buffer: str = ""
 
-        # Parser state.
         self.state: str = "start"
         self.in_string: bool = False
         self.escaped: bool = False
@@ -102,7 +101,6 @@ class JSONInnerThoughtsExtractor:
         if self.in_string:
             return self._consume_value_char(c)
 
-        # Structural characters (outside any string).
         if c == "{":
             return self._handle_open_object()
 

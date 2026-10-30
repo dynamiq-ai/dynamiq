@@ -192,12 +192,12 @@ class FileSystem(CheckpointBackend):
         return results[0] if results else None
 
     def get_list_by_run(self, run_id: str, *, limit: int | None = None) -> list[FlowCheckpoint]:
-        pattern = f"*__{self._safe_id(run_id)}"
         checkpoints = []
         for flow_dir in self._base_dir.iterdir():
             if not flow_dir.is_dir():
                 continue
-            for run_dir in flow_dir.glob(pattern):
+            # Directories use wf_run_id when present, so match the IDs stored in each checkpoint.
+            for run_dir in flow_dir.iterdir():
                 if not run_dir.is_dir():
                     continue
                 for cp_file in run_dir.glob("*.json"):
@@ -217,26 +217,15 @@ class FileSystem(CheckpointBackend):
         status: CheckpointStatus | None = None,
         limit: int | None = None,
     ) -> list[FlowCheckpoint]:
-        run_dir = self._find_existing_run_dir(flow_id, run_id, wf_run_id)
-        if not run_dir:
-            return []
-
         ids_to_match = {run_id}
         if wf_run_id:
             ids_to_match.add(wf_run_id)
 
-        checkpoints = []
-        for cp_file in run_dir.glob("*.json"):
-            cp = self._load_file(cp_file)
-            if not cp:
-                continue
-            if cp.run_id not in ids_to_match and cp.wf_run_id not in ids_to_match:
-                continue
-            if status and cp.status != status:
-                continue
-            checkpoints.append(cp)
-
-        checkpoints.sort(key=lambda c: c.created_at, reverse=True)
+        checkpoints = [
+            cp
+            for cp in self.get_list_by_flow(flow_id, status=status)
+            if cp.run_id in ids_to_match or cp.wf_run_id in ids_to_match
+        ]
         return checkpoints[:limit] if limit is not None else checkpoints
 
     def _load_file(self, path: Path) -> FlowCheckpoint | None:

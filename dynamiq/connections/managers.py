@@ -1,7 +1,6 @@
 import asyncio
 import enum
 import hashlib
-import importlib
 import threading
 import weakref
 from contextlib import asynccontextmanager, contextmanager
@@ -10,6 +9,7 @@ from typing import Any
 from dynamiq.components.serializers import JsonPickleSerializer
 from dynamiq.connections import BaseConnection
 from dynamiq.utils import is_coroutine_function
+from dynamiq.utils.lazy_imports import OptionalDependencyError, import_type, optional_dependency_error
 from dynamiq.utils.logger import logger
 
 
@@ -70,14 +70,15 @@ class ConnectionManager:
 
         Raises:
             ValueError: If the connection type is not found.
+            OptionalDependencyError: If the type needs an optional dependency that is not installed.
         """
         try:
-            entity_module, entity_name = conn_type.rsplit(".", 1)
-            imported_module = importlib.import_module(entity_module)
-            if entity := getattr(imported_module, entity_name, None):
+            if entity := import_type(conn_type):
                 return entity
-        except (ModuleNotFoundError, ImportError):
-            raise ValueError(f"Connection type {conn_type} not found")
+        except OptionalDependencyError:
+            raise
+        except (ModuleNotFoundError, ImportError, AttributeError) as e:
+            raise ValueError(f"Connection type {conn_type} not found") from e
 
     def _get_conn_lock(self, conn_id: str) -> threading.Lock:
         """Get or create a per-connection lock for the given conn_id."""
@@ -193,7 +194,12 @@ class ConnectionManager:
                     f"Connection '{connection.id}-{connection.type}' not support '{init_type.value}' initialization"
                 )
 
-            conn_client = conn_method()
+            try:
+                conn_client = conn_method()
+            except ImportError as e:
+                if optional_error := optional_dependency_error(e, connection.type):
+                    raise optional_error from e
+                raise
             self._cache_client(conn_id, conn_client)
 
             return conn_client

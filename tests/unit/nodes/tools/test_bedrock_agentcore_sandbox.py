@@ -308,7 +308,6 @@ def test_description_steers_agent_to_workspace_relative_paths(mock_agentcore):
     assert "./output/result.csv" in tool.description
     assert "no public URLs or ports" in tool.description
 
-    # base_path aware
     scoped = BedrockAgentCoreInterpreterTool(persistent_sandbox=False, base_path="workspace")
     assert "workspace/input/data.csv" in scoped.description
 

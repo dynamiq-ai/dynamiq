@@ -189,10 +189,8 @@ class Choice(Node):
                 )
             cond = cond.model_copy(update={"operator": PATH_OPERATORS[cond.operator], "value": matches[0]})
 
-        # boolean
         if cond.operator == ConditionOperator.BOOLEAN_EQUALS:
             return (value == cond.value) == (not cond.is_not)
-        # numeric
         if cond.operator == ConditionOperator.NUMERIC_EQUALS:
             return (value == cond.value) == (not cond.is_not)
         elif cond.operator == ConditionOperator.NUMERIC_GREATER_THAN:
@@ -203,7 +201,6 @@ class Choice(Node):
             return (value < cond.value) == (not cond.is_not)
         elif cond.operator == ConditionOperator.NUMERIC_LESS_THAN_OR_EQUALS:
             return (value <= cond.value) == (not cond.is_not)
-        # string
         elif cond.operator == ConditionOperator.STRING_EQUALS:
             return (value == cond.value) == (not cond.is_not)
         elif cond.operator == ConditionOperator.STRING_GREATER_THAN:
@@ -295,7 +292,8 @@ class Map(Node):
         ):
             self._dry_run_nodes.append(node_copy)
 
-        # Create an isolated config per iteration with unique streaming override for the cloned node
+        # A copy per iteration that gives the clone the streaming override of the node it copies. The copy is
+        # shallow, so the clone's entry is added to the caller's nodes_override too.
         local_config = config
         try:
             local_config = config.model_copy(deep=False) if config is not None else RunnableConfig()

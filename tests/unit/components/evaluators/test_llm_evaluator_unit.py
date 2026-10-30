@@ -2,7 +2,6 @@ from dynamiq.evaluations.llm_evaluator import LLMEvaluator
 
 
 def test_prepare_prompt_template():
-    # Sample data for the test
     instructions = "Evaluate the following answers for correctness."
     inputs = [
         {"name": "question", "type": str},
@@ -23,7 +22,6 @@ def test_prepare_prompt_template():
         },
     ]
 
-    # Create an instance of LLMEvaluator
     evaluator = LLMEvaluator(
         instructions=instructions,
         inputs=inputs,
@@ -32,10 +30,8 @@ def test_prepare_prompt_template():
         llm=None,  # LLM is not needed for this test
     )
 
-    # Call the method to test
     prompt_template = evaluator._prepare_prompt_template()
 
-    # Prepare the expected prompt
     expected_prompt = """Instructions:
 Evaluate the following answers for correctness.
 
@@ -81,16 +77,13 @@ Now, process the following input:
 
 Provide the output as per the format specified above."""
 
-    # Normalize line endings to ensure consistency
     prompt_template_normalized = prompt_template.replace("\r\n", "\n").strip()
     expected_prompt_normalized = expected_prompt.replace("\r\n", "\n").strip()
 
-    # Assert that the generated prompt matches the expected prompt
     assert prompt_template_normalized == expected_prompt_normalized
 
 
 def test_prepare_prompt_template_no_examples():
-    # Sample data for the test
     instructions = "Evaluate the following answers for correctness."
     inputs = [
         {"name": "question", "type": str},
@@ -100,9 +93,8 @@ def test_prepare_prompt_template_no_examples():
         {"name": "is_correct", "type": bool},
         {"name": "feedback", "type": str},
     ]
-    examples = []  # No examples provided
+    examples = []
 
-    # Create an instance of LLMEvaluator
     evaluator = LLMEvaluator(
         instructions=instructions,
         inputs=inputs,
@@ -111,10 +103,8 @@ def test_prepare_prompt_template_no_examples():
         llm=None,  # LLM is not needed for this test
     )
 
-    # Call the method to test
     prompt_template = evaluator._prepare_prompt_template()
 
-    # Prepare the expected prompt
     expected_prompt = """Instructions:
 Evaluate the following answers for correctness.
 
@@ -135,16 +125,13 @@ Now, process the following input:
 
 Provide the output as per the format specified above."""
 
-    # Normalize line endings to ensure consistency
     prompt_template_normalized = prompt_template.replace("\r\n", "\n").strip()
     expected_prompt_normalized = expected_prompt.replace("\r\n", "\n").strip()
 
-    # Assert that the generated prompt matches the expected prompt
     assert prompt_template_normalized == expected_prompt_normalized
 
 
 def test_prepare_prompt_template_single_input():
-    # Sample data for the test
     instructions = "Determine if the provided text is positive or negative."
     inputs = [
         {"name": "text", "type": str},
@@ -163,7 +150,6 @@ def test_prepare_prompt_template_single_input():
         },
     ]
 
-    # Create an instance of LLMEvaluator
     evaluator = LLMEvaluator(
         instructions=instructions,
         inputs=inputs,
@@ -172,10 +158,8 @@ def test_prepare_prompt_template_single_input():
         llm=None,  # LLM is not needed for this test
     )
 
-    # Call the method to test
     prompt_template = evaluator._prepare_prompt_template()
 
-    # Prepare the expected prompt
     expected_prompt = """Instructions:
 Determine if the provided text is positive or negative.
 
@@ -215,24 +199,20 @@ Now, process the following input:
 
 Provide the output as per the format specified above."""
 
-    # Normalize line endings to ensure consistency
     prompt_template_normalized = prompt_template.replace("\r\n", "\n").strip()
     expected_prompt_normalized = expected_prompt.replace("\r\n", "\n").strip()
 
-    # Assert that the generated prompt matches the expected prompt
     assert prompt_template_normalized == expected_prompt_normalized
 
 
 def test_prepare_prompt_template_no_inputs():
-    # Sample data for the test
     instructions = "Provide a random motivational quote."
-    inputs = []  # No inputs provided
+    inputs = []
     outputs = [
         {"name": "quote", "type": str},
     ]
-    examples = []  # No examples provided
+    examples = []
 
-    # Create an instance of LLMEvaluator
     evaluator = LLMEvaluator(
         instructions=instructions,
         inputs=inputs,
@@ -241,10 +221,8 @@ def test_prepare_prompt_template_no_inputs():
         llm=None,  # LLM is not needed for this test
     )
 
-    # Call the method to test
     prompt_template = evaluator._prepare_prompt_template()
 
-    # Prepare the expected prompt
     expected_prompt = """Instructions:
 Provide a random motivational quote.
 
@@ -258,24 +236,20 @@ Expected JSON format:
 
 Provide the output as per the format specified above."""
 
-    # Normalize line endings to ensure consistency
     prompt_template_normalized = prompt_template.replace("\r\n", "\n").strip()
     expected_prompt_normalized = expected_prompt.replace("\r\n", "\n").strip()
 
-    # Assert that the generated prompt matches the expected prompt
     assert prompt_template_normalized == expected_prompt_normalized
 
 
 def test_prepare_prompt_template_no_outputs():
-    # Sample data for the test
     instructions = "Process the input and do nothing."
     inputs = [
         {"name": "data", "type": str},
     ]
-    outputs = []  # No outputs provided
-    examples = []  # No examples provided
+    outputs = []
+    examples = []
 
-    # Create an instance of LLMEvaluator
     evaluator = LLMEvaluator(
         instructions=instructions,
         inputs=inputs,
@@ -284,10 +258,8 @@ def test_prepare_prompt_template_no_outputs():
         llm=None,  # LLM is not needed for this test
     )
 
-    # Call the method to test
     prompt_template = evaluator._prepare_prompt_template()
 
-    # Prepare the expected prompt
     expected_prompt = """Instructions:
 Process the input and do nothing.
 
@@ -298,9 +270,7 @@ Now, process the following input:
 
 Provide the output as per the format specified above."""
 
-    # Normalize line endings to ensure consistency
     prompt_template_normalized = prompt_template.replace("\r\n", "\n").strip()
     expected_prompt_normalized = expected_prompt.replace("\r\n", "\n").strip()
 
-    # Assert that the generated prompt matches the expected prompt
     assert prompt_template_normalized == expected_prompt_normalized

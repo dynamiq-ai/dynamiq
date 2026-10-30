@@ -1,3 +1,7 @@
+from typing import Literal
+
+from pydantic import Field
+
 from dynamiq.components.embedders.bedrock import BedrockEmbedder as BedrockEmbedderComponent
 from dynamiq.connections import AWS as BedrockConnection
 from dynamiq.connections.managers import ConnectionManager
@@ -26,6 +30,20 @@ class BedrockDocumentEmbedder(DocumentEmbedder):
     name: str = "bedrock-document-embedder"
     connection: BedrockConnection | None = None
     model: str = "amazon.titan-embed-text-v1"
+    input_type: Literal["search_document", "search_query", "classification", "clustering"] = Field(
+        default="search_document",
+        description="Cohere embedding task, sent only for Cohere models. "
+        "Use search_document for chunks stored in a RAG index.",
+    )
+    truncate: Literal["NONE", "START", "END"] = Field(
+        default="NONE",
+        description="Cohere truncation policy, sent only for Cohere models. NONE fails instead of dropping content.",
+    )
+    dimensions: Literal[256, 512, 1024, 1536] | None = Field(
+        default=None,
+        description="Output dimensions, sent only for Cohere models that support it (embed-v4). "
+        "Must match the other embedder and the vector index.",
+    )
     document_embedder: BedrockEmbedderComponent | None = None
 
     def __init__(self, **kwargs):
@@ -55,7 +73,12 @@ class BedrockDocumentEmbedder(DocumentEmbedder):
         super().init_components(connection_manager)
         if self.document_embedder is None:
             self.document_embedder = BedrockEmbedderComponent(
-                connection=self.connection, model=self.model, client=self.client
+                connection=self.connection,
+                model=self.model,
+                client=self.client,
+                input_type=self.input_type,
+                truncate=self.truncate,
+                dimensions=self.dimensions,
             )
 
 
@@ -83,6 +106,19 @@ class BedrockTextEmbedder(TextEmbedder):
     name: str = "bedrock-text-embedder"
     connection: BedrockConnection | None = None
     model: str = "amazon.titan-embed-text-v1"
+    input_type: Literal["search_document", "search_query", "classification", "clustering"] = Field(
+        default="search_query",
+        description="Cohere embedding task, sent only for Cohere models. Use search_query for RAG retrieval queries.",
+    )
+    truncate: Literal["NONE", "START", "END"] = Field(
+        default="NONE",
+        description="Cohere truncation policy, sent only for Cohere models. NONE fails instead of dropping content.",
+    )
+    dimensions: Literal[256, 512, 1024, 1536] | None = Field(
+        default=None,
+        description="Output dimensions, sent only for Cohere models that support it (embed-v4). "
+        "Must match the other embedder and the vector index.",
+    )
     text_embedder: BedrockEmbedderComponent = None
 
     def __init__(self, **kwargs):
@@ -111,5 +147,10 @@ class BedrockTextEmbedder(TextEmbedder):
         super().init_components(connection_manager)
         if self.text_embedder is None:
             self.text_embedder = BedrockEmbedderComponent(
-                connection=self.connection, model=self.model, client=self.client
+                connection=self.connection,
+                model=self.model,
+                client=self.client,
+                input_type=self.input_type,
+                truncate=self.truncate,
+                dimensions=self.dimensions,
             )

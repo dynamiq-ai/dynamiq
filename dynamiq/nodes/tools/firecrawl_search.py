@@ -8,6 +8,7 @@ from dynamiq.connections import Firecrawl
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.tools.utils import http_error_detail
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
@@ -199,11 +200,15 @@ class FirecrawlSearchTool(ConnectionNode):
         section = [f"### {label}"]
         for index, item in enumerate(results, start=1):
             title = item.get("title") or "Untitled result"
-            description = self._truncate(item.get("description") or item.get("snippet"), self.MAX_DESCRIPTION_CHARS)
+            description = self._truncate(
+                item.get("description") or item.get("snippet") or item.get("abstract"), self.MAX_DESCRIPTION_CHARS
+            )
             url = item.get("url") or item.get("imageUrl")
 
             if url:
                 section.append(f"- {index}. [{title}]({url})")
+            elif paper_id := item.get("primaryId"):
+                section.append(f"- {index}. {title} ({paper_id})")
             else:
                 section.append(f"- {index}. {title}")
             if description:
@@ -215,6 +220,8 @@ class FirecrawlSearchTool(ConnectionNode):
         sections.extend(self._format_result_list("Web Results", data.get("web", [])))
         sections.extend(self._format_result_list("News Results", data.get("news", [])))
         sections.extend(self._format_result_list("Image Results", data.get("images", [])))
+        # The research category returns paper records, which carry an abstract and a source id instead of a URL.
+        sections.extend(self._format_result_list("Research Results", data.get("research", [])))
 
         if len(sections) == 1:
             sections.append("No results returned.")
@@ -239,9 +246,10 @@ class FirecrawlSearchTool(ConnectionNode):
         return query, search_payload, connection_url
 
     def _wrap_search_exception(self, exc: Exception) -> ToolExecutionException:
-        logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(exc)}")
+        error = http_error_detail(exc)
+        logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {error}")
         return ToolExecutionException(
-            f"Tool '{self.name}' failed to execute the requested action. Error: {str(exc)}. "
+            f"Tool '{self.name}' failed to execute the requested action. Error: {error}. "
             f"Please analyze the error and take appropriate action.",
             recoverable=True,
         )

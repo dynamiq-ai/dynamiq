@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 from dynamiq.connections import BaseConnection
 from dynamiq.types import Document
 from dynamiq.utils import TruncationMethod, truncate_text_for_embedding
+from dynamiq.utils.litellm import get_litellm
 from dynamiq.utils.logger import logger
 
 
@@ -118,12 +119,10 @@ class BaseEmbedder(BaseModel):
     _aembedding: Callable = PrivateAttr()
 
     def __init__(self, *args, **kwargs):
-        # Import in runtime to save memory
         super().__init__(**kwargs)
-        from litellm import aembedding, embedding
-
-        self._embedding = embedding
-        self._aembedding = aembedding
+        litellm = get_litellm()
+        self._embedding = litellm.embedding
+        self._aembedding = litellm.aembedding
 
     @property
     def embed_params(self) -> dict:
@@ -337,7 +336,6 @@ class BaseEmbedder(BaseModel):
             raise TypeError(msg)
 
         if not documents:
-            # return early if we were passed an empty list
             return {"documents": [], "meta": {}}
 
         empty_index = next((index for index, document in enumerate(documents) if not document.content.strip()), None)

@@ -153,3 +153,33 @@ def test_firecrawl_search_agent_output(mock_firecrawl_search_requests, mock_fire
     assert "https://www.firecrawl.dev/" in content
     assert "News Results" in content
     assert "Image Results" in content
+
+
+def test_firecrawl_search_agent_output_includes_research_papers(mocker):
+    # From 2026-11-16 the research category returns paper records in data.research instead of data.web.
+    response = mocker.Mock()
+    response.json.return_value = {
+        "success": True,
+        "data": {
+            "research": [
+                {
+                    "paperId": "p-1",
+                    "primaryId": "arxiv:1706.03762",
+                    "ids": {"arxiv": "1706.03762"},
+                    "title": "Attention Is All You Need",
+                    "abstract": "The dominant sequence transduction models are based on recurrent networks.",
+                    "score": 0.92,
+                }
+            ]
+        },
+    }
+    mocker.patch("requests.request", return_value=response)
+    tool = FirecrawlSearchTool(connection=Firecrawl(api_key="test_key"), is_optimized_for_agents=True)
+
+    result = tool.run({"query": "transformer architectures", "categories": ["research"]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = result.output["content"]
+    assert "Attention Is All You Need" in content
+    assert "arxiv:1706.03762" in content
+    assert "The dominant sequence transduction models" in content

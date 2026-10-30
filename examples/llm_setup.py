@@ -12,7 +12,7 @@ from dynamiq.nodes.llms.novita import Novita
 from dynamiq.nodes.llms.openai import OpenAI
 
 MODEL_NAME_GPT = "gpt-4o"
-MODEL_NAME_CLAUDE = "claude-3-5-sonnet-20240620"
+MODEL_NAME_CLAUDE = "claude-sonnet-5-5"
 MODEL_NAME_COHERE = "command-r-plus"
 MODEL_NAME_GROQ = "groq/llama3-70b-8192"
 MODEL_NAME_GEMINI = "gemini/gemini-1.5-pro-latest"
@@ -56,7 +56,8 @@ def setup_llm(
             name="OpenAI LLM",
             connection=OpenAIConnection(),
             model=model_name,
-            temperature=temperature,
+            # gpt-5 / gpt-6 reasoning models do not take a custom temperature
+            temperature=None if model_name.startswith(("gpt-5", "gpt-6")) else temperature,
             max_tokens=max_tokens,
         )
     elif model_provider == "cohere":

@@ -169,12 +169,26 @@ class ScaleSerpTool(ConnectionNode):
         return request_kwargs, search_type, query, url
 
     def _wrap_request_exception(self, exc: Exception) -> ToolExecutionException:
-        logger.error(f"Tool {self.name} - {self.id}: unexpected error occurred. Error: {str(exc)}")
+        # A request error quotes the URL, whose query carries the API key.
+        error = str(exc).replace(self.connection.api_key, "***") if self.connection.api_key else str(exc)
+        logger.error(f"Tool {self.name} - {self.id}: unexpected error occurred. Error: {error}")
         return ToolExecutionException(
             f"Tool '{self.name}' encountered an unexpected error. "
-            f"Error: {str(exc)}. Please analyze the error and take appropriate action.",
+            f"Error: {error}. Please analyze the error and take appropriate action.",
             recoverable=True,
         )
+
+    def _handle_response(
+        self, response: Any, request_kwargs: dict, search_type: Any, query: str | None, url: str | None
+    ) -> dict[str, Any]:
+        if response.status_code < 400 and request_kwargs["params"].get("output") in ("html", "csv"):
+            # These outputs are the page or a table rather than JSON, so there are no results to pick out.
+            if self.is_optimized_for_agents:
+                return {"content": response.text}
+            return {
+                "content": {"result": response.text, "sources_with_url": [], "urls": [], "raw_response": response.text}
+            }
+        return self._handle_search_response(response.json(), response.status_code, search_type, query, url)
 
     def _handle_search_response(
         self, search_result: dict, status_code: int, search_type: Any, query: str | None, url: str | None
@@ -226,12 +240,11 @@ class ScaleSerpTool(ConnectionNode):
         request_kwargs, search_type, query, url = self._build_request_kwargs(input_data)
         try:
             response = self.client.request(**request_kwargs)
-            search_result = response.json()
-            return self._handle_search_response(search_result, response.status_code, search_type, query, url)
+            return self._handle_response(response, request_kwargs, search_type, query, url)
         except ToolExecutionException:
             raise
         except Exception as e:
-            raise self._wrap_request_exception(e)
+            raise self._wrap_request_exception(e) from None
 
     async def execute_async(
         self, input_data: ScaleSerpInputSchema, config: RunnableConfig | None = None, **kwargs
@@ -245,12 +258,11 @@ class ScaleSerpTool(ConnectionNode):
         client = await self.get_async_client()
         try:
             response = await client.request(**request_kwargs)
-            search_result = response.json()
-            return self._handle_search_response(search_result, response.status_code, search_type, query, url)
+            return self._handle_response(response, request_kwargs, search_type, query, url)
         except ToolExecutionException:
             raise
         except Exception as e:
-            raise self._wrap_request_exception(e)
+            raise self._wrap_request_exception(e) from None
 
     def get_params(
         self,
@@ -269,7 +281,8 @@ class ScaleSerpTool(ConnectionNode):
         current_search_type = search_type or self.search_type
 
         if current_search_type != SearchType.WEB:
-            params["search_type"] = current_search_type
+            # httpx renders a str enum by its name, not its value.
+            params["search_type"] = SearchType(current_search_type).value
 
         if query:
             params["q"] = query

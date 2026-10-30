@@ -1,9 +1,32 @@
-from jsonpath_ng import parse
+from functools import lru_cache
+
+from jsonpath_ng import JSONPath
+from jsonpath_ng import parse as parse_jsonpath
 from jsonpath_ng.exceptions import JsonPathParserError
 
 JSONPATH_EXPRESSION_PREFIXES = ("$", "@")
 JSONPATH_ROOT_ACCESSORS = (".", "[")
 COALESCE_SEPARATOR = "||"
+PARSED_EXPRESSIONS_CACHE_SIZE = 1024
+
+
+@lru_cache(maxsize=PARSED_EXPRESSIONS_CACHE_SIZE)
+def parse(path: str) -> JSONPath:
+    """
+    Parse a JSONPath expression, reusing the result for an expression parsed before.
+
+    jsonpath_ng builds a new lexer and parser for every expression it parses, which costs
+    milliseconds of CPU, while nodes resolve the same few selectors on every run. A parsed
+    expression is never mutated, so threads share it. An expression that fails to parse is
+    not cached and raises every time.
+
+    Args:
+        path (str): The JSONPath expression.
+
+    Returns:
+        JSONPath: The parsed expression.
+    """
+    return parse_jsonpath(path)
 
 
 def is_jsonpath(path: str) -> bool:

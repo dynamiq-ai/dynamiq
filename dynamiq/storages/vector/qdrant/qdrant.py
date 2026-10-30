@@ -196,7 +196,8 @@ class QdrantVectorStore(BaseVectorStore, DryRunMixin):
             optimizers_config: Params for optimizer.
             wal_config: Params for Write-Ahead-Log.
             quantization_config: Params for quantization. If `None`, quantization will be disabled.
-            init_from: Use data stored in another collection to initialize this collection.
+            init_from: Use data stored in another collection to initialize this collection. Needs qdrant-client
+                older than 1.16.
             wait_result_from_api: Whether to wait for the result from the API after each request.
             metadata: Additional metadata to include with the documents.
             write_batch_size: The batch size for writing documents.
@@ -272,8 +273,8 @@ class QdrantVectorStore(BaseVectorStore, DryRunMixin):
                 path=self.path,
                 metadata=self.metadata,
                 force_disable_check_same_thread=self.force_disable_check_same_thread,
+                check_compatibility=False,
             )
-            # Make sure the collection is properly set up
             self._set_up_collection(
                 collection_name=self.index_name,
                 embedding_dim=self.dimension,
@@ -494,8 +495,8 @@ class QdrantVectorStore(BaseVectorStore, DryRunMixin):
         """
         if filters:
             documents = self.filter_documents(filters=filters)
-            document_ids = [doc.id for doc in documents]
-            self.delete_documents(document_ids=document_ids)
+            if document_ids := [doc.id for doc in documents]:
+                self.delete_documents(document_ids=document_ids)
         else:
             raise ValueError("No filters provided to delete documents.")
 
@@ -1006,15 +1007,17 @@ class QdrantVectorStore(BaseVectorStore, DryRunMixin):
 
         if should_create:
             logger.info(f"{'Creating' if not collection_exists else 'Recreating'} collection {collection_name}")
-            self.recreate_collection(
+            created = self.recreate_collection(
                 collection_name=collection_name,
                 distance=distance,
                 embedding_dim=embedding_dim,
                 on_disk=on_disk,
                 use_sparse_embeddings=use_sparse_embeddings,
                 sparse_idf=sparse_idf,
+                delete_existing=recreate_collection,
             )
-            self._track_collection(collection_name)
+            if created:
+                self._track_collection(collection_name)
             if payload_fields_to_index:
                 self._create_payload_index(collection_name, payload_fields_to_index)
             return
@@ -1078,7 +1081,8 @@ class QdrantVectorStore(BaseVectorStore, DryRunMixin):
         on_disk: bool | None = None,
         use_sparse_embeddings: bool | None = None,
         sparse_idf: bool = False,
-    ):
+        delete_existing: bool = True,
+    ) -> bool:
         """Recreates the Qdrant collection with the specified parameters.
 
         Args:
@@ -1089,6 +1093,11 @@ class QdrantVectorStore(BaseVectorStore, DryRunMixin):
             use_sparse_embeddings: Whether to use sparse embeddings.
             sparse_idf: Whether to compute the Inverse Document Frequency (IDF) when using sparse embeddings. Required
                 for BM42.
+            delete_existing: Whether to delete the collection first if it exists. When False, a collection that
+                another writer created in the meantime is kept.
+
+        Returns:
+            bool: Whether this call created the collection.
         """
         if on_disk is None:
             on_disk = self.on_disk
@@ -1096,7 +1105,6 @@ class QdrantVectorStore(BaseVectorStore, DryRunMixin):
         if use_sparse_embeddings is None:
             use_sparse_embeddings = self.use_sparse_embeddings
 
-        # dense vectors configuration
         vectors_config = rest.VectorParams(size=embedding_dim, on_disk=on_disk, distance=distance)
 
         # Reset cached payload index information when recreating a collection
@@ -1116,7 +1124,7 @@ class QdrantVectorStore(BaseVectorStore, DryRunMixin):
                 ),
             }
 
-        if self._collection_exists(collection_name):
+        if delete_existing and self._collection_exists(collection_name):
             self.client.delete_collection(collection_name)
 
         try:
@@ -1132,7 +1140,8 @@ class QdrantVectorStore(BaseVectorStore, DryRunMixin):
                 optimizers_config=self.optimizers_config,
                 wal_config=self.wal_config,
                 quantization_config=self.quantization_config,
-                init_from=self.init_from,
+                # qdrant-client 1.16 rejects init_from, so it is only sent when set.
+                **({"init_from": self.init_from} if self.init_from is not None else {}),
             )
         except UnexpectedResponse as exc:
             if getattr(exc, "status_code", None) == 404:
@@ -1141,7 +1150,11 @@ class QdrantVectorStore(BaseVectorStore, DryRunMixin):
                     f"Double-check the service URL or required prefix for your deployment."
                 )
                 raise QdrantStoreError(msg) from exc
+            if getattr(exc, "status_code", None) == 409 and not delete_existing:
+                logger.info(f"Collection '{collection_name}' was created by another writer.")
+                return False
             raise
+        return True
 
     def _handle_duplicate_documents(
         self,

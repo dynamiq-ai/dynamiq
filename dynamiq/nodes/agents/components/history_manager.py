@@ -2,11 +2,10 @@
 
 import json
 
-from litellm import token_counter
-
 from dynamiq.nodes.agents.prompts.secondary_instructions import AGENT_NOTES_FILENAME, NOTES_REVISIT_INSTRUCTION_TEMPLATE
 from dynamiq.nodes.agents.utils import extract_message_text
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
+from dynamiq.utils.litellm import token_counter
 from dynamiq.utils.logger import logger
 
 

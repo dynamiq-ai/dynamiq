@@ -27,9 +27,6 @@ inference = click.Group(name="inference", help="Deploy and call self-hosted mode
 database = click.Group(name="database", help="Deploy vector databases")
 
 
-# --------------------------------------------------------------------------- fine-tuning
-
-
 @finetuning.command("jobs")
 @pagination_options
 @with_api_and_settings
@@ -108,9 +105,6 @@ def list_adapters(*, api: ApiClient, settings: Settings, page, page_size, fetch_
 def get_adapter(*, api: ApiClient, settings: Settings, adapter_id: str):
     """Fetch one adapter."""
     echo_response(api.get(f"/v1/fine-tuning/adapters/{adapter_id}"))
-
-
-# ---------------------------------------------------------------------------- inference
 
 
 @inference.command("list")
@@ -287,9 +281,6 @@ def restart_inference(*, api: ApiClient, settings: Settings, inference_id: str):
 def delete_inference(*, api: ApiClient, settings: Settings, inference_id: str):
     """Tear down the deployment and stop the billing."""
     echo_response(api.delete(f"/v1/inferences/{inference_id}"))
-
-
-# ----------------------------------------------------------------------------- database
 
 
 @database.command("list")

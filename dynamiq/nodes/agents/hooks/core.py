@@ -22,7 +22,6 @@ data goes in ``ctx.hook_state``, never on the hook.
 import contextvars
 import dataclasses
 import fnmatch
-import importlib
 import re
 import sys
 import threading
@@ -44,6 +43,7 @@ from dynamiq.nodes.agents.exceptions import (
 )
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.feedback import FeedbackMethod
+from dynamiq.utils.lazy_imports import import_type
 from dynamiq.utils.logger import logger
 
 
@@ -183,7 +183,9 @@ class HookContext:
     hooks: list[tuple[str, "Hook"]] = field(default_factory=list)
     memory_transforms: list = field(default_factory=list)
     approval_lock: Any = field(default_factory=threading.Lock)
-    pending_approvals: dict[str, tuple["HookContext", ToolCall]] = field(default_factory=dict)
+    # Calls that are waiting for an approval or running: a checkpoint taken meanwhile leaves out the slots they
+    # took (e.g. a call count), since such a call is replayed on resume and takes them again.
+    pending_calls: dict[str, tuple["HookContext", ToolCall]] = field(default_factory=dict)
     approver: Any = None  # the agent whose input stream carries this run's approval requests
     trusted: dict[str, Any] = field(default_factory=dict)
 
@@ -238,7 +240,9 @@ def register_hook(name: str):
     with its import path (``Hook.import_path``); the short name stays a shorthand that configs may use."""
 
     def decorator(cls):
-        if HOOK_REGISTRY.get(name, cls) is not cls:
+        registered = HOOK_REGISTRY.get(name, cls)
+        # The same class registers again when its module runs again after a failed import.
+        if (registered.__module__, registered.__qualname__) != (cls.__module__, cls.__qualname__):
             raise ValueError(f"Hook type {name!r} is already registered")
         cls.hook_type = name
         HOOK_REGISTRY[name] = cls
@@ -377,9 +381,8 @@ def resolve_hook(item: Any) -> Hook:
     if hook_type in HOOK_REGISTRY:
         hook_class = HOOK_REGISTRY[hook_type]
     elif "." in hook_type:
-        module_name, _, class_name = hook_type.rpartition(".")
         try:
-            hook_class = getattr(importlib.import_module(module_name), class_name)
+            hook_class = import_type(hook_type)
         except (ImportError, AttributeError, ValueError) as e:
             raise ValueError(f"Hook type {hook_type!r} could not be imported: {e}") from e
         if not (isinstance(hook_class, type) and issubclass(hook_class, Hook)):

@@ -7,6 +7,7 @@ import inspect
 import logging
 import random
 import reprlib
+import sys
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -161,6 +162,8 @@ def is_retryable_error(exc: BaseException) -> bool:
     """
     if getattr(exc, "retryable", True) is False:
         return False
+    if "litellm" not in sys.modules:  # the error cannot come from litellm, and importing it takes seconds
+        return True
     try:
         from litellm.exceptions import (
             AuthenticationError,
@@ -729,11 +732,9 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         """
         params = inspect.signature(func).parameters
 
-        # Check if the function accepts the at least 'inputs' and 'outputs' parameters
         if len(params) >= 2:
             return
 
-        # Check if the function accepts **kwargs
         elif params and list(params.values())[0].kind == inspect.Parameter.VAR_KEYWORD:
             return
 
@@ -797,14 +798,12 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         Returns:
             dict: Transformed input data.
         """
-        # Apply input transformer
         if (self.input_transformer.path or self.input_transformer.selector) and use_input_transformer:
             depends_result_as_dict = {k: result.to_depend_dict() for k, result in depends_result.items()}
             inputs = self.transform(input_data | depends_result_as_dict, self.input_transformer)
         else:
             inputs = input_data | {k: result.to_tracing_depend_dict() for k, result in depends_result.items()}
 
-        # Apply input bindings
         for key, value in self.input_mapping.items():
             if isinstance(value, NodeOutputReference):
                 depend_result = depends_result.get(value.node.id)
@@ -886,7 +885,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         cloned_node = self.model_copy(deep=False)
 
         def _clone_nested(value: Any) -> Any:
-            # Do not attempt to copy modules/functions/classes or other callables
             if isinstance(value, (ModuleType, FunctionType)) or isinstance(value, type) or callable(value):
                 return value
             if getattr(value, "_clone_shared", False):
@@ -1427,7 +1425,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         transformed_output = self.transform_output(output, config=config, **kwargs)
         self.run_on_node_end(config.callbacks, transformed_output, **callback_kwargs)
 
-        # Clear stored approval response after successful completion
         self._pending_approval_response = None
 
         logger.info(
@@ -1863,9 +1860,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         try:
             return future.result(timeout=timeout)
         except TimeoutError:
-            # Cancel the future to prevent further execution if possible.
-            # Note: cancel() only works if the task hasn't started yet.
-            # For running tasks, we rely on executor.shutdown(cancel_futures=True).
+            # cancel() stops only a task that has not started; a running task is left to finish in its thread.
             future.cancel()
             raise
 
@@ -2007,7 +2002,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             ValueError: If input streaming is not enabled, timeout is exceeded, or the done event is set
                 before receiving valid data.
         """
-        # Use runnable streaming configuration. If not found use node streaming configuration
         streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
         if not streaming.input_streaming_enabled:
             raise ValueError("Input streaming is not enabled.")
@@ -2636,7 +2630,6 @@ class VectorStoreNode(ConnectionNode, BaseVectorStoreParams, ABC):
         connection_manager = connection_manager or ConnectionManager()
         self._connection_manager = connection_manager
 
-        # Use vector_store client if it is already initialized
         if self.vector_store:
             self.client = self.vector_store.client
 

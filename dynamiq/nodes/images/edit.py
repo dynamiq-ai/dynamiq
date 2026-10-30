@@ -13,6 +13,7 @@ from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.utils.litellm import get_litellm
 from dynamiq.utils.logger import logger
 
 from .generation import ImageResponseFormat, ImageSize, create_image_file, download_image_from_url
@@ -163,10 +164,7 @@ Examples:
         if kwargs.get("client") is None and kwargs.get("connection") is None:
             kwargs["connection"] = OpenAIConnection()
         super().__init__(**kwargs)
-
-        from litellm import image_edit
-
-        self._image_edit = image_edit
+        self._image_edit = get_litellm().image_edit
 
     @property
     def edit_params(self) -> dict:

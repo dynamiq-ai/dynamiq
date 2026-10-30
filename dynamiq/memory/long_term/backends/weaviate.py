@@ -8,6 +8,7 @@ from pydantic import ConfigDict, Field, PrivateAttr
 from dynamiq.connections import Weaviate as WeaviateConnection
 from dynamiq.memory.long_term.base import LongTermMemoryBackend
 from dynamiq.memory.long_term.schemas import Fact
+from dynamiq.utils.lazy_imports import optional_dependency_error
 
 if TYPE_CHECKING:
     from weaviate import WeaviateClient
@@ -90,7 +91,12 @@ class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
         return data
 
     def model_post_init(self, __context) -> None:
-        self._client = self.connection.connect()
+        try:
+            self._client = self.connection.connect()
+        except ImportError as e:
+            if optional_error := optional_dependency_error(e, type(self).__name__):
+                raise optional_error from e
+            raise
 
     @property
     def _collection(self):
