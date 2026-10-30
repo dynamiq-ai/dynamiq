@@ -228,6 +228,11 @@ _STOP_PARAM_RE = re.compile(r"(?<![a-z_])stop(?:[_ ]?sequences?)?(?![a-z])")
 _ONLY_AUTO_TOOL_CHOICE_RE = re.compile(r"only\W*auto\b")
 
 
+def _chunk_data(chunk: Any) -> dict:
+    """A streamed chunk as the stream callbacks read it: LiteLLM's chunk dumped, or the dict a transport streams."""
+    return chunk if isinstance(chunk, dict) else chunk.model_dump()
+
+
 def provider_error_text(exc: BaseException) -> str:
     """The error's text with the backslash escapes a bytes repr adds removed.
 
@@ -756,13 +761,13 @@ class BaseLLM(ConnectionNode):
                     if emit_chunks:
                         self.run_on_node_execute_stream(
                             config.callbacks,
-                            chunk.model_dump(),
+                            _chunk_data(chunk),
                             **kwargs,
                         )
         finally:
             self._close_stream(response)
 
-        full_response = self._build_streamed_response(chunks=chunks, messages=messages)
+        full_response = self._build_streamed_response(chunks=chunks, messages=messages, stream=response)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
 
     async def _handle_streaming_completion_response_async(
@@ -794,13 +799,13 @@ class BaseLLM(ConnectionNode):
                     if emit_chunks:
                         self.run_on_node_execute_stream(
                             config.callbacks,
-                            chunk.model_dump(),
+                            _chunk_data(chunk),
                             **kwargs,
                         )
         finally:
             await self._aclose_stream(response)
 
-        full_response = self._build_streamed_response(chunks=chunks, messages=messages)
+        full_response = self._build_streamed_response(chunks=chunks, messages=messages, stream=response)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
 
     def _call_completion(self, params: dict[str, Any]) -> Union["ModelResponse", "CustomStreamWrapper"]:
@@ -811,8 +816,8 @@ class BaseLLM(ConnectionNode):
         """Send one completion request asynchronously."""
         return await self._acompletion(**params)
 
-    def _build_streamed_response(self, chunks: list, messages: list[dict]) -> "ModelResponse":
-        """Assemble a streamed response's chunks into one complete response."""
+    def _build_streamed_response(self, chunks: list, messages: list[dict], stream: Any = None) -> "ModelResponse":
+        """Assemble a streamed response's chunks into one complete response. `stream` is the response they came from."""
         return self._stream_chunk_builder(chunks=chunks, messages=messages)
 
     def _get_response_format_and_tools(
