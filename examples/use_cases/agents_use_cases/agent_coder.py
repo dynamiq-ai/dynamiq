@@ -83,8 +83,7 @@ def create_agent():
     """
     llm = AnthropicLLM(
         name="claude",
-        model="claude-sonnet-4-20250514",
-        temperature=1,
+        model="claude-sonnet-5-5",
         max_tokens=32000,
         thinking_enabled=True,
         budget_tokens=4000,

@@ -38,8 +38,7 @@ def create_orchestrator() -> GraphOrchestrator:
     llm = Anthropic(
         name="LLM",
         connection=AnthropicConnection(),
-        model="claude-3-5-sonnet-20241022",
-        temperature=0.1,
+        model="claude-sonnet-5-5",
     )
 
     def process_feedback(context: dict[str, Any], **kwargs):

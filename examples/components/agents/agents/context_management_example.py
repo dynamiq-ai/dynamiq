@@ -51,7 +51,7 @@ def create_enhanced_context_agent() -> Agent:
     search_tool = ScaleSerpTool(connection=exa_conn, name="web-search")
     code_tool = E2BInterpreterTool(connection=e2b_conn, name="code-executor")
 
-    llm = setup_llm(model_provider="claude", model_name="claude-3-5-sonnet-20240620")
+    llm = setup_llm(model_provider="claude", model_name="claude-sonnet-5-5")
 
     context_config = SummarizationConfig(
         enabled=True,
