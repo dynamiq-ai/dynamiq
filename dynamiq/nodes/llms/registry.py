@@ -29,10 +29,12 @@ def _sync_to_litellm_enabled() -> bool:
 class ModelMetadata(BaseModel):
     """Structured, litellm-compatible model metadata.
 
-    The common litellm fields are typed for validation/discoverability. Unknown fields are
+    The common litellm fields are typed for validation/discoverability. ``is_legacy``
+    controls registry listings without restricting lookup or requests. Unknown fields are
     ignored (Pydantic default), so only the fields listed here are carried into the registry.
     """
 
+    is_legacy: bool | None = None
     max_tokens: int | None = None
     max_input_tokens: int | None = None
     max_output_tokens: int | None = None
@@ -49,6 +51,7 @@ class ModelMetadata(BaseModel):
     supports_prompt_caching: bool | None = None
     supports_reasoning: bool | None = None
     supports_adaptive_thinking: bool | None = None
+    supports_xhigh_reasoning_effort: bool | None = None
     input_cost_per_token: float | None = None
     output_cost_per_token: float | None = None
     cache_creation_input_token_cost: float | None = None
@@ -262,9 +265,13 @@ class ModelRegistry:
             return None
         return info.get("supports_video_input")
 
-    def list_models(self) -> list[str]:
-        """Return all registered model identifiers."""
-        return list(self._models)
+    def list_models(self, *, include_legacy: bool = False) -> list[str]:
+        """Return current model identifiers in registry order.
+
+        Legacy entries remain available for explicit lookups and saved configurations.
+        Pass ``include_legacy=True`` to include them in the listing as well.
+        """
+        return [model for model, info in self._models.items() if include_legacy or not info.get("is_legacy", False)]
 
 
 model_registry = ModelRegistry(path=REGISTRY_FILE)

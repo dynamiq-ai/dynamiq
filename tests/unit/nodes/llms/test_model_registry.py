@@ -488,6 +488,16 @@ def test_sync_is_exception_safe_without_litellm(monkeypatch):
     ("model_id", "expected"),
     [
         (
+            "MiniMax-M3.1-Flash",
+            {
+                "max_input_tokens": 1_000_000,
+                "max_output_tokens": 524_288,
+                "supports_vision": True,
+                "supports_video_input": True,
+                "supports_adaptive_thinking": True,
+            },
+        ),
+        (
             "MiniMax-M3",
             {
                 "max_input_tokens": 1_000_000,
@@ -517,8 +527,42 @@ def test_minimax_registry_resolves_official_model_ids(model_id, expected):
     assert {field: info[field] for field in expected} == expected
     assert model_registry.get_model_info(f"minimax/{model_id}") == info
     assert model_registry.get_model_info(f"anthropic/{model_id}") == info
-    assert f"minimax/{model_id}".lower() in model_registry.list_models()
+    assert f"minimax/{model_id}".lower() in model_registry.list_models(include_legacy=True)
     assert ModelMetadata(**info).model_dump(exclude_none=True) == info
+
+
+def test_minimax_listing_keeps_legacy_lookup_and_custom_registrations():
+    current = model_registry.list_models()
+    assert [model for model in current if "minimax" in model] == [
+        "minimax/minimax-m3.1-flash",
+        "minimax/minimax-m3",
+    ]
+    legacy = {
+        "minimaxai/minimax-m2.5",
+        "minimax/minimax-m2.7",
+        "accounts/fireworks/models/minimax-m2p5",
+    }
+    assert set(model_registry.list_models(include_legacy=True)) - set(current) == legacy
+    for model in legacy:
+        assert model_registry.get_model_info(model) is not None
+
+    registry = ModelRegistry()
+    registry.register("minimax/custom-deployment", ModelMetadata(litellm_provider="minimax"))
+    assert registry.list_models() == ["minimax/custom-deployment"]
+
+
+def test_minimax_flash_pricing():
+    import litellm
+
+    info = model_registry.get_model_info("MiniMax-M3.1-Flash")
+    assert info["input_cost_per_token"] == 0.00000015
+    assert info["output_cost_per_token"] == 0.0000006
+    assert info["cache_read_input_token_cost"] == 0.000000015
+    assert "cache_creation_input_token_cost" not in info
+    assert not any("priority" in key or "above_512k" in key for key in info)
+    assert litellm.cost_per_token(
+        model="MiniMax-M3.1-Flash", custom_llm_provider="minimax", prompt_tokens=1, completion_tokens=1
+    ) == pytest.approx((0.00000015, 0.0000006))
 
 
 def test_minimax_m3_registry_preserves_tiered_pricing():

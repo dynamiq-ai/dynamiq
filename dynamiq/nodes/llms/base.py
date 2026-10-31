@@ -661,6 +661,9 @@ class BaseLLM(ConnectionNode):
         """
         content = response.choices[0].message.content
         result = {"content": content}
+        for field in ("reasoning_content", "thinking_blocks"):
+            if (value := getattr(response.choices[0].message, field, None)) is not None:
+                result[field] = value
         if tool_calls := response.choices[0].message.tool_calls:
             tool_calls_parsed = []
             for tc in tool_calls:
@@ -761,7 +764,7 @@ class BaseLLM(ConnectionNode):
         finally:
             self._close_stream(response)
 
-        full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
+        full_response = self._build_stream_response(chunks, messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
 
     async def _handle_streaming_completion_response_async(
@@ -798,8 +801,11 @@ class BaseLLM(ConnectionNode):
         finally:
             await self._aclose_stream(response)
 
-        full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
+        full_response = self._build_stream_response(chunks, messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
+
+    def _build_stream_response(self, chunks, messages):
+        return self._stream_chunk_builder(chunks=chunks, messages=messages)
 
     def _get_response_format_and_tools(
         self,
