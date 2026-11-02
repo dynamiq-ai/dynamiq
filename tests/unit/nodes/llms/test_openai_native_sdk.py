@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import litellm
 import pytest
+from litellm.completion_extras import responses_api_bridge
 from openai import AsyncOpenAI
 from openai import OpenAI as OpenAIClient
 
@@ -19,6 +20,7 @@ from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingConfig
 
 BASE_URL = "https://api.openai.test/v1"
+OPENAI_URL = "https://api.openai.com/v1"
 USAGE = {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
 
 
@@ -222,6 +224,35 @@ class TestBuildRequest:
 
         assert request == {"model": "gpt-5", "messages": [], "extra_body": {"verbosity": "low", "x": 1}}
 
+    TOOLS = [{"type": "function", "function": {"name": "f", "parameters": {"type": "object", "properties": {}}}}]
+
+    @pytest.mark.parametrize(
+        "model, extra, endpoint, responses",
+        [
+            ("gpt-5-pro", {}, BASE_URL, True),
+            ("o3-pro", {}, BASE_URL, True),
+            ("gpt-5.1-codex", {}, BASE_URL, True),
+            ("responses/gpt-5.5", {}, BASE_URL, True),
+            ("gpt-5.5", {"tools": TOOLS, "reasoning_effort": "low"}, BASE_URL, True),
+            # OpenAI's API reasons by default; LiteLLM assumes a compatible server does not.
+            ("gpt-5.5", {"tools": TOOLS}, OPENAI_URL, True),
+            ("gpt-5.5", {"tools": TOOLS}, BASE_URL, False),
+            ("gpt-5.5", {"tools": TOOLS, "reasoning_effort": "none"}, OPENAI_URL, False),
+            ("gpt-5-mini", {"tools": TOOLS, "reasoning_effort": "low"}, OPENAI_URL, False),
+            ("gpt-4o-mini", {"tools": TOOLS}, OPENAI_URL, False),
+        ],
+    )
+    def test_leaves_what_litellm_sends_to_the_responses_api_to_litellm(self, model, extra, endpoint, responses):
+        def params():
+            messages = [{"role": "user", "content": "hi"}]
+            return {"model": f"openai/{model}", "messages": messages, "api_base": endpoint, "api_key": "k"} | extra
+
+        with patch.object(responses_api_bridge, "completion") as bridge:
+            litellm.completion(**params(), client=FakeOpenAI().client(endpoint))
+
+        assert bridge.called is responses
+        assert (_openai_sdk.build_request(params(), "openai/") is None) is responses
+
 
 class TestNativeStreaming:
     @pytest.mark.asyncio
@@ -352,6 +383,23 @@ class TestNativeErrors:
         assert is_retryable_error(raised.value) is retryable
         assert message in str(raised.value)
 
+    @pytest.mark.asyncio
+    async def test_raises_the_litellm_exception_for_a_transport_error_building_the_body(self):
+        fake = FakeOpenAI()
+        request = _openai_sdk.build_request({"model": "gpt-4o-mini", "messages": []}, "openai/")
+        config = MagicMock()
+        # The transform fetches a PDF a file part links to.
+        failure = httpx.ConnectError("refused", request=httpx.Request("GET", "https://example.test/a.pdf"))
+        config.transform_request.side_effect = config.async_transform_request.side_effect = failure
+
+        with patch.object(_openai_sdk, "_litellm_config", return_value=config):
+            with pytest.raises(litellm.APIConnectionError):
+                _openai_sdk.create(fake.client(), request)
+            with pytest.raises(litellm.APIConnectionError):
+                await _openai_sdk.acreate(fake.async_client(), request)
+
+        assert fake.requests == []
+
     def test_recovers_from_a_rejected_param_like_the_litellm_path(self):
         fake = FakeOpenAI(status_code=400, error_message="Unsupported parameter: 'stop' is not supported")
         node = make_node(fake, stop=["END"])
@@ -395,7 +443,9 @@ class TestTransportChoice:
         assert dumped["use_native_sdk"] is None
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("native, extra", [(False, {}), (True, {"thinking_enabled": True})])
+    @pytest.mark.parametrize(
+        "native, extra", [(False, {}), (True, {"thinking_enabled": True}), (True, {"model": "gpt-5-pro"})]
+    )
     async def test_goes_through_litellm_when_off_or_untranslatable(self, async_sdk_client, native, extra):
         fake = FakeOpenAI()
         node = make_node(fake, native=native, **extra)
@@ -406,6 +456,29 @@ class TestTransportChoice:
             output = await node.execute_async(input_data=MagicMock(), config=RunnableConfig(callbacks=[]))
 
         assert output["content"] == "via litellm"
+        assert fake.requests == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("internal", ["_litellm_model_params", "_litellm_config"])
+    @pytest.mark.parametrize("streaming", [False, True])
+    async def test_goes_through_litellm_when_a_litellm_internal_it_calls_fails(
+        self, async_sdk_client, internal, streaming
+    ):
+        fake = FakeOpenAI()
+        node = make_node(fake, streaming=StreamingConfig(enabled=streaming))
+        response = litellm.ModelResponse(choices=[{"message": {"role": "assistant", "content": "via litellm"}}])
+        node._completion = MagicMock(return_value=response)
+        node._acompletion = AsyncMock(return_value=response)
+        # What a LiteLLM upgrade that changes a signature raises.
+        failure = TypeError("got an unexpected keyword argument")
+
+        with async_sdk_client(fake), patch.object(_openai_sdk, internal, side_effect=failure):
+            sync_result = node.run_sync(input_data={}, config=RunnableConfig(callbacks=[]))
+            async_result = await node.run_async(input_data={}, config=RunnableConfig(callbacks=[]))
+
+        for result in (sync_result, async_result):
+            assert result.status == RunnableStatus.SUCCESS, result.error
+        assert node._completion.called and node._acompletion.called
         assert fake.requests == []
 
 
@@ -581,24 +654,30 @@ class TestRequestShapeFallbacks:
 
     @pytest.mark.asyncio
     async def test_an_endpoint_rejecting_stream_options_gets_streams_as_asked(self, async_sdk_client, monkeypatch):
-        monkeypatch.setattr(_openai_sdk, "_ENDPOINTS_WITHOUT_STREAM_OPTIONS", set())
+        monkeypatch.setattr(_openai_sdk, "_WITHOUT_STREAM_OPTIONS", set())
         fake = self.RejectsStreamOptions()
         collector = Collector()
 
         with async_sdk_client(fake):
-            for _ in range(2):
-                node = make_node(fake, streaming=StreamingConfig(enabled=True))
+            for model in ("gpt-4o-mini", "gpt-4o-mini", "gpt-4.1"):
+                node = make_node(fake, model=model, streaming=StreamingConfig(enabled=True))
                 result = await node.run_async(input_data={}, config=RunnableConfig(callbacks=[collector]))
                 assert result.status == RunnableStatus.SUCCESS, result.error
                 assert result.output["content"] == "Hello"
 
-        # Rejected once, sent again as asked, and remembered for the endpoint's later streams.
-        assert ["stream_options" in r for r in fake.requests] == [True, False, False]
+        # Rejected once, sent again as asked, and remembered for the model's later streams on the endpoint.
+        assert [("stream_options" in r, r["model"]) for r in fake.requests] == [
+            (True, "gpt-4o-mini"),
+            (False, "gpt-4o-mini"),
+            (False, "gpt-4o-mini"),
+            (True, "gpt-4.1"),
+            (False, "gpt-4.1"),
+        ]
         assert collector.usage["prompt_tokens"] > 0 and collector.usage["completion_tokens"] > 0
 
     @pytest.mark.asyncio
     async def test_an_endpoint_rejecting_stream_options_the_caller_asked_for_fails(self, async_sdk_client, monkeypatch):
-        monkeypatch.setattr(_openai_sdk, "_ENDPOINTS_WITHOUT_STREAM_OPTIONS", set())
+        monkeypatch.setattr(_openai_sdk, "_WITHOUT_STREAM_OPTIONS", set())
         fake = self.RejectsStreamOptions()
         node = make_node(fake, streaming=StreamingConfig(enabled=True, include_usage=True))
 
@@ -606,6 +685,49 @@ class TestRequestShapeFallbacks:
             await node.execute_async(input_data=MagicMock(), config=RunnableConfig(callbacks=[Collector()]))
 
         assert len(fake.requests) == 1
+
+    class FailsEveryRequest(FakeOpenAI):
+        def __init__(self, status_code: int, error):
+            super().__init__()
+            self.status_code = status_code
+            self.error = error
+
+        def handler(self, request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            self.requests.append(body)
+            return httpx.Response(self.status_code, json=self.error(body))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "status_code, error, sent",
+        [
+            # FastAPI's validation errors echo the body, so only the retry tells this from a rejected option.
+            (
+                422,
+                lambda body: {"detail": [{"type": "missing", "loc": ["body", "x"], "msg": "Missing", "input": body}]},
+                [True, False],
+            ),
+            # An OpenAI-style error names the param it is about.
+            (
+                400,
+                lambda body: {"error": {"message": f"Invalid request: {body}", "type": "x", "param": "messages"}},
+                [True],
+            ),
+        ],
+    )
+    async def test_an_unrelated_error_mentioning_stream_options_leaves_later_streams_asking_for_usage(
+        self, async_sdk_client, monkeypatch, status_code, error, sent
+    ):
+        monkeypatch.setattr(_openai_sdk, "_WITHOUT_STREAM_OPTIONS", set())
+        fake = self.FailsEveryRequest(status_code, error)
+
+        with async_sdk_client(fake):
+            for _ in range(2):
+                node = make_node(fake, streaming=StreamingConfig(enabled=True))
+                with pytest.raises((litellm.BadRequestError, litellm.UnprocessableEntityError)):
+                    await node.execute_async(input_data=MagicMock(), config=RunnableConfig(callbacks=[Collector()]))
+
+        assert ["stream_options" in r for r in fake.requests] == sent * 2
 
 
 @pytest.mark.parametrize("model", ["gpt-4o-mini", "gpt-4.1", "gpt-5-mini", "o3-mini"])

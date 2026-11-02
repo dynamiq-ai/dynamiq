@@ -7,8 +7,9 @@ and keeps everything around it the same: the body goes through LiteLLM's own tra
 re-raised as the LiteLLM exceptions the retry and fallback logic classify, streamed chunks get the shape LiteLLM gives
 them, and the assembled response has the attributes the node reads.
 
-`build_request` returns None for a request using anything it does not translate, and the node then sends that request
-through LiteLLM.
+`build_request` returns None for a request using anything it does not translate, or one LiteLLM sends to the Responses
+API, and the node then sends that request through LiteLLM. So does a failure in the LiteLLM internals this module calls
+to translate a request, which an upgrade may change.
 """
 
 import inspect
@@ -108,12 +109,44 @@ def _litellm_model_params(model: str, params: dict[str, Any], allowed_openai_par
     )
 
 
+def _litellm_uses_responses_api(request: dict[str, Any], api_base: str | None) -> bool:
+    """Whether LiteLLM sends `request` to the Responses API rather than to Chat Completions.
+
+    It does for models only that API serves, for a "responses/" model, and for function tools with reasoning on
+    GPT-5.4 and later, which Chat Completions rejects.
+    """
+    from litellm.main import responses_api_bridge_check
+    from litellm.utils import peek_reasoning_summary_aliases
+
+    model_info, _ = responses_api_bridge_check(
+        model=request["model"],
+        custom_llm_provider="openai",
+        web_search_options=request.get("web_search_options"),
+        tools=request.get("tools"),
+        reasoning_effort=request.get("reasoning_effort"),
+        reasoning_summary=peek_reasoning_summary_aliases(request),
+        api_base=api_base,
+    )
+    return model_info.get("mode") == "responses"
+
+
 def build_request(params: dict[str, Any], model_prefix: str | None) -> dict[str, Any] | None:
     """The SDK arguments for LiteLLM completion `params`, or None if this transport does not translate them.
 
     Params set to None, and `stream` when off, are left out, as LiteLLM leaves them out, and the model's params go
-    through LiteLLM's per-model filter, as `drop_params` has LiteLLM do.
+    through LiteLLM's per-model filter, as `drop_params` has LiteLLM do. A failure in a LiteLLM internal it calls,
+    which an upgrade may change, also returns None, so LiteLLM sends the request.
     """
+    try:
+        return _build_request(params, model_prefix)
+    except Exception:
+        logger.warning(
+            "OpenAI SDK transport: failed to translate the request; sending it through LiteLLM.", exc_info=True
+        )
+        return None
+
+
+def _build_request(params: dict[str, Any], model_prefix: str | None) -> dict[str, Any] | None:
     request: dict[str, Any] = {}
     for key, value in params.items():
         if value is None or key in _LITELLM_PARAMS or (key == "stream" and not value):
@@ -128,6 +161,9 @@ def build_request(params: dict[str, Any], model_prefix: str | None) -> dict[str,
         return None
     if model_prefix:
         request["model"] = request["model"].removeprefix(model_prefix)
+    if _litellm_uses_responses_api(request, params.get("api_base")):
+        logger.debug("OpenAI SDK transport: the request is for the Responses API; sending it through LiteLLM.")
+        return None
 
     envelope = {key: value for key, value in request.items() if key in _REQUEST_ENVELOPE}
     model_params = {key: value for key, value in request.items() if key not in _REQUEST_ENVELOPE}
@@ -186,26 +222,34 @@ async def _alitellm_body(request: dict[str, Any], endpoint: str) -> dict[str, An
     return await _litellm_config(request["model"]).async_transform_request(**args) | kept
 
 
-# Endpoints that rejected the `stream_options` this transport adds: their streams go out as asked, and usage is counted.
-_ENDPOINTS_WITHOUT_STREAM_OPTIONS: set[str] = set()
+# The endpoints and models that rejected the `stream_options` this transport adds: their streams go out as asked, and
+# usage is counted. A gateway may serve some models from servers that accept the option and some from ones that don't.
+_WITHOUT_STREAM_OPTIONS: set[tuple[str, str]] = set()
 
 
 def _ask_for_usage(request: dict[str, Any], endpoint: str) -> tuple[dict[str, Any], bool]:
     """`request` asking its stream to report usage, and whether the caller asked to have usage streamed.
 
     Usage arrives only on request, in a last chunk with no choices; LiteLLM otherwise counts it with a tokenizer. The
-    request comes back unchanged (the same object) when it needs no option added or its endpoint rejected the option.
+    request comes back unchanged (the same object) when it needs no option added or its endpoint rejected the option for
+    its model.
     """
     stream_options = request.get("stream_options") or {}
     emit_usage = bool(stream_options.get("include_usage"))
-    if not request.get("stream") or emit_usage or endpoint in _ENDPOINTS_WITHOUT_STREAM_OPTIONS:
+    if not request.get("stream") or emit_usage or (endpoint, request["model"]) in _WITHOUT_STREAM_OPTIONS:
         return request, emit_usage
     return request | {"stream_options": stream_options | {"include_usage": True}}, emit_usage
 
 
-def _rejects_stream_options(exc: Exception) -> bool:
-    """Whether an endpoint refused the request over `stream_options`, which some OpenAI-compatible servers lack."""
-    return isinstance(exc, (BadRequestError, UnprocessableEntityError)) and "stream_options" in str(exc).lower()
+def _may_reject_stream_options(exc: Exception) -> bool:
+    """Whether an endpoint may have refused the request over `stream_options`, which some compatible servers lack.
+
+    Servers that validate with pydantic echo the request body in their errors, the option included, so only a request
+    that then succeeds without the option proves the endpoint rejects it.
+    """
+    if not isinstance(exc, (BadRequestError, UnprocessableEntityError)):
+        return False
+    return exc.param == "stream_options" if exc.param else "stream_options" in str(exc).lower()
 
 
 def _as_litellm_error(exc: Exception, model: str) -> Exception:
@@ -277,42 +321,60 @@ class AsyncStream(_ChunkShaper):
         await self._stream.close()
 
 
-def create(client: OpenAI, request: dict[str, Any]) -> ChatCompletion | Stream:
+def create(client: OpenAI, request: dict[str, Any]) -> ChatCompletion | Stream | None:
     """Send `request` (from `build_request`) and return the response, or the stream of a streamed request.
 
-    A stream whose endpoint rejects the usage option added to it is sent again as asked, once per endpoint.
+    Returns None, for the caller to send the request through LiteLLM, when LiteLLM's body transform fails with anything
+    but a transport error. A stream whose endpoint rejects the usage option added to it is sent again as asked, and so
+    are the endpoint's later streams of that model.
     """
     endpoint = str(client.base_url)
-    request = _litellm_body(request, endpoint)
+    try:
+        request = _litellm_body(request, endpoint)
+    except _TRANSPORT_ERRORS as e:  # fetching a file a message part links to
+        raise _as_litellm_error(e, request["model"]) from e
+    except Exception:
+        logger.warning(
+            "OpenAI SDK transport: failed to build the request body; sending it through LiteLLM.", exc_info=True
+        )
+        return None
     sent, emit_usage = _ask_for_usage(request, endpoint)
     try:
         response = client.chat.completions.create(**sent)
     except _TRANSPORT_ERRORS as e:
-        if sent is request or not _rejects_stream_options(e):
+        if sent is request or not _may_reject_stream_options(e):
             raise _as_litellm_error(e, request["model"]) from e
-        _ENDPOINTS_WITHOUT_STREAM_OPTIONS.add(endpoint)
         try:
             response = client.chat.completions.create(**request)
         except _TRANSPORT_ERRORS as retry_error:
             raise _as_litellm_error(retry_error, request["model"]) from retry_error
+        _WITHOUT_STREAM_OPTIONS.add((endpoint, request["model"]))
     return Stream(response, request["model"], emit_usage) if request.get("stream") else response
 
 
-async def acreate(client: AsyncOpenAI, request: dict[str, Any]) -> ChatCompletion | AsyncStream:
+async def acreate(client: AsyncOpenAI, request: dict[str, Any]) -> ChatCompletion | AsyncStream | None:
     """Async `create`."""
     endpoint = str(client.base_url)
-    request = await _alitellm_body(request, endpoint)
+    try:
+        request = await _alitellm_body(request, endpoint)
+    except _TRANSPORT_ERRORS as e:  # fetching a file a message part links to
+        raise _as_litellm_error(e, request["model"]) from e
+    except Exception:
+        logger.warning(
+            "OpenAI SDK transport: failed to build the request body; sending it through LiteLLM.", exc_info=True
+        )
+        return None
     sent, emit_usage = _ask_for_usage(request, endpoint)
     try:
         response = await client.chat.completions.create(**sent)
     except _TRANSPORT_ERRORS as e:
-        if sent is request or not _rejects_stream_options(e):
+        if sent is request or not _may_reject_stream_options(e):
             raise _as_litellm_error(e, request["model"]) from e
-        _ENDPOINTS_WITHOUT_STREAM_OPTIONS.add(endpoint)
         try:
             response = await client.chat.completions.create(**request)
         except _TRANSPORT_ERRORS as retry_error:
             raise _as_litellm_error(retry_error, request["model"]) from retry_error
+        _WITHOUT_STREAM_OPTIONS.add((endpoint, request["model"]))
     return AsyncStream(response, request["model"], emit_usage) if request.get("stream") else response
 
 

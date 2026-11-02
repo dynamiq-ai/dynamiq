@@ -208,7 +208,8 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
 
         if not isinstance(self.client, _openai_sdk.OpenAI):
             return super()._call_completion(params)
-        return _openai_sdk.create(self.client, request)
+        response = _openai_sdk.create(self.client, request)
+        return super()._call_completion(params) if response is None else response
 
     async def _acall_completion(self, params: dict[str, Any]) -> Any:
         request = self._native_request(params)
@@ -216,7 +217,8 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
             return await super()._acall_completion(params)
         from dynamiq.nodes.llms import _openai_sdk  # deferred: importing the node must not load the OpenAI SDK
 
-        return await _openai_sdk.acreate(await self.get_async_client(), request)
+        response = await _openai_sdk.acreate(await self.get_async_client(), request)
+        return await super()._acall_completion(params) if response is None else response
 
     def _build_streamed_response(self, chunks: list, messages: list[dict]) -> Any:
         if self._native_sdk_on():
