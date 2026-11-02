@@ -101,7 +101,7 @@ def expected_answer():
 
 @pytest.fixture
 def run_config():
-    return RunnableConfig(request_timeout=120)
+    return RunnableConfig()
 
 
 def check_for_emoji(text):

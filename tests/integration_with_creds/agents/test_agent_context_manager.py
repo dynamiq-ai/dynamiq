@@ -51,8 +51,7 @@ def run(input_data):
 
 @pytest.fixture(scope="module")
 def run_config():
-    """Create a runnable config with extended timeout."""
-    return RunnableConfig(request_timeout=180)
+    return RunnableConfig()
 
 
 @pytest.mark.flaky(reruns=3)

@@ -187,7 +187,7 @@ if __name__ == "__main__":
     try:
         result = workflow.run(
             input_data={"documents": DOCS},
-            config=RunnableConfig(request_timeout=120),
+            config=RunnableConfig(),
         )
 
         if result.status != RunnableStatus.SUCCESS:

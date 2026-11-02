@@ -32,7 +32,7 @@ def openai_llm(openai_connection):
 
 @pytest.fixture(scope="module")
 def run_config():
-    return RunnableConfig(request_timeout=120)
+    return RunnableConfig()
 
 
 @pytest.mark.integration

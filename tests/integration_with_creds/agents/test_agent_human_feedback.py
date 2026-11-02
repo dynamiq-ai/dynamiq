@@ -95,7 +95,7 @@ def test_human_feedback_tool_receives_nonempty_input(llm_instance, agent_role, i
                 "answer recommending one book in that genre."
             )
         },
-        config=RunnableConfig(request_timeout=120),
+        config=RunnableConfig(),
     )
 
     assert (
