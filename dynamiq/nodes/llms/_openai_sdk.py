@@ -1,11 +1,11 @@
-"""OpenAI SDK transport for the OpenAI LLM node, used in place of LiteLLM when `OpenAI.use_native_sdk` is on.
+"""OpenAI SDK transport for the OpenAI LLM node, used in place of LiteLLM when `OpenAI.use_native_sdk` turns it on.
 
 LiteLLM re-wraps every streamed chunk in its own objects and rebuilds the whole response at the end of a stream for its
 own logging. That costs about 0.4 ms of event-loop CPU per chunk, several times what the SDK spends on it, and caps how
 many concurrent streams one process can serve. This module sends the request LiteLLM would send through the OpenAI SDK
-and keeps everything around it the same: SDK errors are re-raised as the LiteLLM exceptions the retry and fallback
-logic classify, streamed chunks get the shape LiteLLM gives them, and the assembled response has the attributes the
-node reads.
+and keeps everything around it the same: the body goes through LiteLLM's own transform for the model, SDK errors are
+re-raised as the LiteLLM exceptions the retry and fallback logic classify, streamed chunks get the shape LiteLLM gives
+them, and the assembled response has the attributes the node reads.
 
 `build_request` returns None for a request using anything it does not translate, and the node then sends that request
 through LiteLLM.
@@ -77,6 +77,10 @@ _LITELLM_PARAMS = frozenset({"api_base", "api_key", "client", "drop_params", "al
 # What travels with the request rather than in the model's params, so LiteLLM's param mapping never sees it.
 _REQUEST_ENVELOPE = frozenset({"model", "messages", "extra_headers", "extra_query", "extra_body", "timeout"})
 
+# What LiteLLM's OpenAI handler keeps out of its body transform: the request options, and the stream settings it adds
+# back afterwards.
+_KEPT_FROM_TRANSFORM = frozenset({"extra_headers", "extra_query", "extra_body", "timeout", "stream", "stream_options"})
+
 # What the SDK can raise from a request or mid-stream; anything else is not a transport failure.
 _TRANSPORT_ERRORS = (OpenAIError, httpx.HTTPError)
 
@@ -85,19 +89,6 @@ _TRANSPORT_ERRORS = (OpenAIError, httpx.HTTPError)
 def _sdk_create_params() -> frozenset[str]:
     """The keyword arguments the installed SDK's `chat.completions.create` accepts."""
     return frozenset(inspect.signature(Completions.create).parameters) - {"self"}
-
-
-def _has_cache_control(messages: Any) -> bool:
-    """Whether any message carries a `cache_control` breakpoint, which LiteLLM strips for OpenAI and the API rejects."""
-    for message in messages:
-        if not isinstance(message, dict):
-            return True
-        if "cache_control" in message:
-            return True
-        content = message.get("content")
-        if isinstance(content, list) and any(isinstance(part, dict) and "cache_control" in part for part in content):
-            return True
-    return False
 
 
 def _litellm_model_params(model: str, params: dict[str, Any], allowed_openai_params: list[str] | None) -> dict:
@@ -132,8 +123,8 @@ def build_request(params: dict[str, Any], model_prefix: str | None) -> dict[str,
             return None
         request[key] = value.value if isinstance(value, Enum) else value
 
-    # A pydantic class as response_format is LiteLLM's conversion to make, and cache breakpoints its to strip.
-    if not isinstance(request.get("response_format", {}), dict) or _has_cache_control(request.get("messages", ())):
+    # A pydantic class as response_format is LiteLLM's conversion to make.
+    if not isinstance(request.get("response_format", {}), dict):
         return None
     if model_prefix:
         request["model"] = request["model"].removeprefix(model_prefix)
@@ -152,6 +143,47 @@ def build_request(params: dict[str, Any], model_prefix: str | None) -> dict[str,
     if unknown:
         request["extra_body"] = unknown | request.get("extra_body", {})
     return request
+
+
+def _litellm_config(model: str) -> Any:
+    """The LiteLLM config that builds the request body for `model`, picked as LiteLLM's OpenAI handler picks it."""
+    from litellm.llms.openai.openai import OpenAIConfig
+    from litellm.types.utils import LlmProviders
+    from litellm.utils import ProviderConfigManager
+
+    return ProviderConfigManager.get_provider_chat_config(model=model, provider=LlmProviders.OPENAI) or OpenAIConfig()
+
+
+def _transform_args(request: dict[str, Any], endpoint: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """What stays out of LiteLLM's body transform, and the transform's arguments for the rest of `request`."""
+    kept = {key: value for key, value in request.items() if key in _KEPT_FROM_TRANSFORM}
+    optional_params = {
+        key: value for key, value in request.items() if key not in _KEPT_FROM_TRANSFORM | {"model", "messages"}
+    }
+    return kept, {
+        "model": request["model"],
+        "messages": request["messages"],
+        "optional_params": optional_params,
+        "litellm_params": {"custom_llm_provider": "openai", "api_base": endpoint},
+        "headers": {},
+    }
+
+
+def _litellm_body(request: dict[str, Any], endpoint: str) -> dict[str, Any]:
+    """`request` with the body LiteLLM sends to `endpoint`.
+
+    LiteLLM rewrites messages and tools for the model before sending them: it names a file part that has data and no
+    name, wraps a string image URL, drops its own keys from content parts, strips cache breakpoints for an OpenAI host,
+    sanitizes tool schemas, and drops `tool_choice` without tools. The API rejects some requests without these.
+    """
+    kept, args = _transform_args(request, endpoint)
+    return _litellm_config(request["model"]).transform_request(**args) | kept
+
+
+async def _alitellm_body(request: dict[str, Any], endpoint: str) -> dict[str, Any]:
+    """Async `_litellm_body`, which fetches a PDF a file part links to without blocking the event loop."""
+    kept, args = _transform_args(request, endpoint)
+    return await _litellm_config(request["model"]).async_transform_request(**args) | kept
 
 
 # Endpoints that rejected the `stream_options` this transport adds: their streams go out as asked, and usage is counted.
@@ -251,6 +283,7 @@ def create(client: OpenAI, request: dict[str, Any]) -> ChatCompletion | Stream:
     A stream whose endpoint rejects the usage option added to it is sent again as asked, once per endpoint.
     """
     endpoint = str(client.base_url)
+    request = _litellm_body(request, endpoint)
     sent, emit_usage = _ask_for_usage(request, endpoint)
     try:
         response = client.chat.completions.create(**sent)
@@ -268,6 +301,7 @@ def create(client: OpenAI, request: dict[str, Any]) -> ChatCompletion | Stream:
 async def acreate(client: AsyncOpenAI, request: dict[str, Any]) -> ChatCompletion | AsyncStream:
     """Async `create`."""
     endpoint = str(client.base_url)
+    request = await _alitellm_body(request, endpoint)
     sent, emit_usage = _ask_for_usage(request, endpoint)
     try:
         response = await client.chat.completions.create(**sent)

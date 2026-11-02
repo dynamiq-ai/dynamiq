@@ -1,3 +1,4 @@
+import copy
 import json
 from enum import Enum
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -99,16 +100,16 @@ class FakeOpenAI:
         sse = b"".join(b"data: " + json.dumps(c).encode() + b"\n\n" for c in chunks) + b"data: [DONE]\n\n"
         return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=sse)
 
-    def client(self) -> OpenAIClient:
+    def client(self, base_url: str = BASE_URL) -> OpenAIClient:
         transport = httpx.MockTransport(self.handler)
         return OpenAIClient(
-            api_key="k", base_url=BASE_URL, max_retries=0, http_client=httpx.Client(transport=transport)
+            api_key="k", base_url=base_url, max_retries=0, http_client=httpx.Client(transport=transport)
         )
 
-    def async_client(self) -> AsyncOpenAI:
+    def async_client(self, base_url: str = BASE_URL) -> AsyncOpenAI:
         transport = httpx.MockTransport(self.handler)
         return AsyncOpenAI(
-            api_key="k", base_url=BASE_URL, max_retries=0, http_client=httpx.AsyncClient(transport=transport)
+            api_key="k", base_url=base_url, max_retries=0, http_client=httpx.AsyncClient(transport=transport)
         )
 
 
@@ -206,7 +207,6 @@ class TestBuildRequest:
             {"thinking": {"type": "enabled", "budget_tokens": 1024}},
             {"num_retries": 3},
             {"response_format": MagicMock()},
-            {"messages": [{"role": "user", "content": [{"type": "text", "text": "x", "cache_control": {}}]}]},
         ],
     )
     def test_leaves_what_it_does_not_translate_to_litellm(self, extra):
@@ -622,3 +622,72 @@ def test_sends_the_params_litellm_sends(model):
         bodies[native] = fake.requests[0]
 
     assert bodies[True] == bodies[False]
+
+
+class TestLiteLLMBodyTransforms:
+    """The SDK transport sends messages and tools as LiteLLM rewrites them for the model and endpoint."""
+
+    MESSAGES = [
+        {"role": "system", "content": "Be brief."},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Read these.", "cache_control": {"type": "ephemeral"}},
+                {"type": "image_url", "image_url": "https://example.test/a.png"},
+                {"type": "image_url", "image_url": {"url": "https://example.test/b.png", "format": "image/png"}},
+                {"type": "file", "file": {"file_data": "data:application/pdf;base64,JVBERi0="}},
+            ],
+        },
+    ]
+    TOOLS = [
+        {
+            "type": "function",
+            "function": {"name": "search", "parameters": {"type": "object", "properties": {"q": {"type": "string"}}}},
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
+    def params(self, model: str, endpoint: str) -> dict:
+        return {
+            "model": f"openai/{model}",
+            "messages": copy.deepcopy(self.MESSAGES),
+            "tools": copy.deepcopy(self.TOOLS),
+            "api_base": endpoint,
+            "api_key": "k",
+            "drop_params": True,
+        }
+
+    def check(self, bodies: dict, endpoint: str) -> None:
+        assert bodies[True] == bodies[False]
+        parts = bodies[True]["messages"][1]["content"]
+        assert parts[1]["image_url"] == {"url": "https://example.test/a.png"}
+        assert "format" not in parts[2]["image_url"]
+        assert parts[3]["file"]["filename"]
+        # LiteLLM strips cache breakpoints for OpenAI's own host and keeps them for compatible endpoints.
+        assert ("cache_control" in json.dumps(bodies[True])) is (endpoint == BASE_URL)
+
+    @pytest.mark.parametrize("model", ["gpt-4o-mini", "o3-mini"])
+    @pytest.mark.parametrize("endpoint", ["https://api.openai.com/v1", BASE_URL])
+    def test_sync(self, model, endpoint):
+        bodies = {}
+        fake = FakeOpenAI()
+        litellm.completion(**self.params(model, endpoint), client=fake.client(endpoint))
+        bodies[False] = fake.requests[-1]
+        _openai_sdk.create(fake.client(endpoint), _openai_sdk.build_request(self.params(model, endpoint), "openai/"))
+        bodies[True] = fake.requests[-1]
+
+        self.check(bodies, endpoint)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model", ["gpt-4o-mini", "o3-mini"])
+    @pytest.mark.parametrize("endpoint", ["https://api.openai.com/v1", BASE_URL])
+    async def test_async(self, model, endpoint):
+        bodies = {}
+        fake = FakeOpenAI()
+        await litellm.acompletion(**self.params(model, endpoint), client=fake.async_client(endpoint))
+        bodies[False] = fake.requests[-1]
+        request = _openai_sdk.build_request(self.params(model, endpoint), "openai/")
+        await _openai_sdk.acreate(fake.async_client(endpoint), request)
+        bodies[True] = fake.requests[-1]
+
+        self.check(bodies, endpoint)
