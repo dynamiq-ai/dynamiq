@@ -18,46 +18,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Create .env file on push or internal PR
-        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
-        uses: SpicyPizza/create-envfile@v2
-        with:
-          envkey_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          envkey_UNSTRUCTURED_API_KEY: ${{ secrets.UNSTRUCTURED_API_KEY }}
-          envkey_PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
-          envkey_PINECONE_CLOUD: ${{ secrets.PINECONE_CLOUD }}
-          envkey_PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
-          envkey_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          envkey_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          envkey_QDRANT_URL: ${{ secrets.QDRANT_URL }}
-          envkey_QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-
-      - name: Create .env file on fork PR
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-        uses: SpicyPizza/create-envfile@v2
-
-      - name: Build
-        uses: docker/bake-action@v7
-        with:
-          source: .
-          set: |
-            *.cache-from=type=gha
-            *.cache-to=type=gha,mode=max
-          targets: dynamiq-app
-
-  # The job above builds the image on the Dockerfile's default Python (3.13). This builds it on 3.14 too, so the
-  # PYTHON_VERSION build argument is exercised there. Its own cache scope keeps it from evicting the 3.13 layers.
-  build-python-3-14:
-    name: build (Python 3.14)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
       # docker-compose.yaml names .env as an env_file, so bake needs the file to exist; building needs no secrets.
       - name: Create an empty .env file
         run: touch .env
@@ -67,9 +27,8 @@ jobs:
         with:
           source: .
           set: |
-            *.args.PYTHON_VERSION=3.14.8
-            *.cache-from=type=gha,scope=python-3.14
-            *.cache-to=type=gha,mode=max,scope=python-3.14
+            *.cache-from=type=gha
+            *.cache-to=type=gha,mode=max
           targets: dynamiq-app
 
   lint:
