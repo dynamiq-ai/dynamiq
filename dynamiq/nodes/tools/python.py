@@ -45,7 +45,6 @@ DEFAULT_ALLOWED_MODULES = frozenset(
     {
         "base64",
         "collections",
-        "copy",
         "cmath",
         "csv",
         "datetime",
@@ -228,7 +227,9 @@ _FORBIDDEN_BUILTINS = frozenset(
 # reference can never be obtained. copy.dispatch_table is the copyreg table that copy.deepcopy and pickle
 # consult for every type, so an entry added here would run attacker code in every later deepcopy or
 # pickle of that type, across runs and tenants. It is a dict (unhashable), so it is kept apart from
-# _FORBIDDEN_BUILTINS and matched by identity.
+# _FORBIDDEN_BUILTINS and matched by identity. copy is no longer in the default allow-list (its
+# copy/deepcopy reconstruct objects through __reduce_ex__ and setattr in library code, past the write
+# guard), so this stays as defense in depth should copy ever be opted back in.
 _FORBIDDEN_OBJECTS = tuple(obj for obj in (getattr(copy, "dispatch_table", None),) if obj is not None)
 
 

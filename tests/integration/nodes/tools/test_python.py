@@ -1044,25 +1044,48 @@ def test_python_node_refuses_writes_through_typing_alias():
         collections.Counter.most_common = original_most_common
 
 
-def test_python_node_refuses_copy_dispatch_table_write():
-    """copy.dispatch_table backs deepcopy and pickle for the whole process, so it is refused by identity
-    and a run cannot install code that every later deepcopy of a type would call."""
-    code = (
-        "import copy, datetime\n"
-        "def evil(obj):\n"
-        "    return (str, ('hijacked',))\n"
-        "def run(input_data):\n"
-        "    copy.dispatch_table[datetime.date] = evil\n"
-        "    return 1\n"
-    )
-    try:
-        result = Python(code=code).run({}, None)
+@pytest.mark.parametrize(
+    ("attack_name", "attack_code"),
+    [
+        # copy.dispatch_table backs deepcopy and pickle for the whole process; a write to it would install
+        # code that every later deepcopy or pickle of a type runs, across runs and tenants.
+        (
+            "copy_dispatch_table_write",
+            "import copy, datetime\n"
+            "def evil(obj):\n"
+            "    return (str, ('hijacked',))\n"
+            "def run(input_data):\n"
+            "    copy.dispatch_table[datetime.date] = evil\n"
+            "    return 1\n",
+        ),
+        # copy.copy/deepcopy invoke __reduce_ex__ and copy._reconstruct does setattr on the reduce target in
+        # library code, past the write guard. A class built via the 3-arg type builtin can point that at a
+        # shared class (json.JSONEncoder) and rebind a method for every run and tenant. The class body
+        # refuses a def __reduce_ex__, but the 3-arg type builtin accepts it, and raw type is reachable via
+        # __class__.__class__, so wrapping type does not close it -- copy leaves the safe default instead.
+        (
+            "copy_reduce_shared_class_hijack",
+            "import copy, json\n"
+            "def evil(self, o):\n"
+            "    return 'HIJACKED'\n"
+            "def run(input_data):\n"
+            "    evil_cls = type('Evil', (), {'__reduce_ex__': "
+            "lambda s, p: (lambda: json.JSONEncoder, (), (None, {'encode': evil}))})\n"
+            "    copy.copy(evil_cls())\n"
+            "    return 1\n",
+        ),
+    ],
+)
+def test_python_node_copy_not_in_default_allow_list(attack_name, attack_code):
+    """copy is excluded from the default: copy.copy/deepcopy reconstruct through __reduce_ex__ and setattr in
+    library code, which can rewrite a shared class or table for the whole process."""
+    result = Python(code=attack_code).run({}, None)
 
-        assert result.status == RunnableStatus.FAILURE
-        assert datetime.date not in copy.dispatch_table
-        assert copy.deepcopy(datetime.date(2020, 1, 1)) == datetime.date(2020, 1, 1)
-    finally:
-        copy.dispatch_table.pop(datetime.date, None)
+    assert result.status == RunnableStatus.FAILURE
+    assert "import of 'copy' is not allowed" in str(result.error).lower()
+    # The process is untouched: import is refused before any reconstruction runs.
+    assert datetime.date not in copy.dispatch_table
+    assert json.JSONEncoder().encode({"ok": 1}) == '{"ok": 1}'
 
 
 @pytest.mark.parametrize(
