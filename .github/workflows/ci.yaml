@@ -112,7 +112,7 @@ jobs:
           xml-skip-covered: true
           remove-links-to-lines: true
 
-  # The test job runs the suite on the repository's Python (3.13) and reports coverage. This runs the same tests, minus
+  # The test job runs the suite on the repository's Python (3.14) and reports coverage. This runs the same tests, minus
   # the ones needing credentials, on every other supported Python.
   test-python-versions:
     name: test (Python ${{ matrix.python-version }})
@@ -121,9 +121,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.14"]
+        python-version: ["3.11", "3.12", "3.13"]
     env:
-      # Wins over the repository's .python-version (3.13) for every uv command below.
+      # Wins over the repository's .python-version (3.14) for every uv command below.
       UV_PYTHON: ${{ matrix.python-version }}
     steps:
       - name: Checkout code
