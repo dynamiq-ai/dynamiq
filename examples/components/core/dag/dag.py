@@ -62,7 +62,7 @@ OPENAI_2_NODE = OpenAI(
 )
 ANTHROPIC_NODE = Anthropic(
     name="Anthropic",
-    model="claude-3-opus-20240229",
+    model="claude-sonnet-5-5",
     connection=ANTHROPIC_CONNECTION,
     prompt=prompts.Prompt(
         messages=[
@@ -106,7 +106,7 @@ CHOICE_NODE = Choice(
 
 ANTHROPIC_2_NODE = Anthropic(
     name="Anthropic2",
-    model="claude-3-opus-20240229",
+    model="claude-sonnet-5-5",
     connection=ANTHROPIC_CONNECTION,
     input_transformer=InputTransformer(
         selector={

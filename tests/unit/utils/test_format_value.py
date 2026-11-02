@@ -1,3 +1,5 @@
+import enum
+
 from dynamiq.nodes.agents.base import ToolParams
 from dynamiq.nodes.tools.mcp import MCPTool
 from dynamiq.runnables import RunnableResult, RunnableStatus
@@ -57,3 +59,35 @@ def test_format_value_for_log_redacts_mcp_http_headers():
 
     nested = format_value_for_log({"tool_params": {"github-mcp": {"mcp_http_headers": {"Authorization": "Bearer t"}}}})
     assert nested["tool_params"]["github-mcp"]["mcp_http_headers"] == TRACING_REDACTED_PLACEHOLDER
+
+
+def test_format_value_returns_json_scalars_as_they_are():
+    for value in ("text", 7, 2.5, True, None):
+        assert format_value(value) is value
+        assert format_value(value, for_tracing=True) is value
+        assert format_value(value, force_format_types={str, int, float, bool}) is value
+
+
+def test_format_value_keeps_a_stream_chunk_as_it_is():
+    chunk = {
+        "id": "chatcmpl-1",
+        "created": 1,
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"content": "Hel", "role": None, "tool_calls": [{"index": 0, "function": {"arguments": "{"}}]},
+                "finish_reason": None,
+            }
+        ],
+        "usage": None,
+    }
+
+    assert format_value(chunk) == chunk
+
+
+def test_format_value_still_formats_scalar_subclasses():
+    class Level(str, enum.Enum):
+        LOW = "low"
+
+    assert format_value(Level.LOW) == Level.LOW
+    assert format_value({"level": Level.LOW, "raw": b"hi"}) == {"level": Level.LOW, "raw": "hi"}

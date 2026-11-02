@@ -75,7 +75,7 @@ def expected_camera_keywords():
 
 @pytest.fixture(scope="module")
 def run_config():
-    return RunnableConfig(request_timeout=120)
+    return RunnableConfig()
 
 
 @pytest.fixture(scope="module")

@@ -70,3 +70,15 @@ def test_search_with_custom_params(mock_requests):
     content = result.output["content"]
     assert "## Sources with URLs" in content
     assert "## Search results for" in content
+
+
+def test_node_search_type_applies_when_input_does_not_set_one(mock_requests):
+    """The node's search_type is the default; the input only overrides it when it names one."""
+    search_tool = ScaleSerpTool(connection=ScaleSerp(api_key="test_key"), search_type=SearchType.NEWS)
+
+    search_tool.run({"query": "test query"})
+    assert mock_requests.call_args[1]["params"]["search_type"] == "news"
+
+    search_tool.run({"query": "test query", "search_type": SearchType.WEB})
+    # Web is the API's default, so it is left out of the request.
+    assert "search_type" not in mock_requests.call_args[1]["params"]

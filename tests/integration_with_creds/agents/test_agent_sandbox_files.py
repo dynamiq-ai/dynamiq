@@ -62,7 +62,7 @@ def e2b_connection():
 
 @pytest.fixture(scope="module")
 def run_config():
-    return RunnableConfig(request_timeout=120)
+    return RunnableConfig()
 
 
 def _run_and_assert_sandbox_agent(

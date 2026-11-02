@@ -32,11 +32,17 @@ test-integration:
 	uv run pytest tests/integration
 
 # These tests spend nearly all their wall time blocked on provider APIs, so they parallelize well past
-# the core count. `loadfile` rather than `worksteal` because several files own shared external state for
-# their whole duration (the Neo4j graph wipes, the `test_user_facts` pgvector table, the `default`
-# Pinecone index written by one test and read by the next) and must not be split across workers.
+# the core count: CI raises `-n auto` above it with PYTEST_XDIST_AUTO_NUM_WORKERS, and `--durations`
+# shows which files bound the run. `loadfile` rather than `worksteal` because several files own shared
+# external state for their whole duration (the Neo4j graph wipes, the `test_user_facts` pgvector table,
+# the `default` Pinecone index written by one test and read by the next) and must not be split across
+# workers.
+# A provider call that never returns would otherwise hold the run until the CI job times out. After 300s,
+# faulthandler prints every thread's stack to stderr and ends the worker, and xdist names the test. (In an
+# xdist worker, pytest-timeout's dump goes to stdout, which is discarded.) xdist requeues a crashed worker's
+# file, hung test included, so --max-worker-restart=1 stops the run if the test hangs a second time.
 test-integration-with-creds:
-	uv run pytest tests/integration_with_creds -m "not smoke" -n auto --dist loadfile
+	uv run pytest tests/integration_with_creds -m "not smoke" -n auto --dist loadfile --durations=25 -o faulthandler_timeout=300 -o faulthandler_exit_on_timeout=true --max-worker-restart=1
 
 # Smoke tests: slow, paid end-to-end production scenarios. Excluded from every default target and
 # run ONLY here (gated behind the `run-smoke-tests` PR label in CI). -n auto parallelizes the
@@ -55,22 +61,20 @@ test:
 
 # `pytest --cov` rather than `coverage run -m pytest`: xdist runs the tests in worker subprocesses that
 # `coverage run` does not trace, which silently reports ~31% instead of ~84%. pytest-cov starts coverage
-# inside each worker and combines the data. `--cov-report=` suppresses its own reporting so the three
-# commands below still produce exactly the reports the coverage job consumes.
+# inside each worker and combines the data. `--cov-report=` suppresses its own reporting; the commands below
+# print a summary to the log and write the XML that the coverage job reads.
 # This target includes tests/integration_with_creds, so it distributes by file for the reason given on
 # test-integration-with-creds above; the exclude variant below has no such files and can split per test.
 test-cov:
 	mkdir -p ./reports
 	uv run pytest --junitxml=./reports/test-results.xml -m "not smoke" tests -n auto --dist loadfile --cov --cov-report=
 	uv run coverage report --skip-empty --skip-covered
-	uv run coverage html -d ./reports/htmlcov --omit="*/test_*,*/tests.py"
 	uv run coverage xml -o ./reports/coverage.xml --omit="*/test_*,*/tests.py"
 
 test-cov-exclude-integration-with-creds:
 	mkdir -p ./reports
 	uv run pytest --junitxml=./reports/test-results.xml -m "not smoke" tests --ignore=tests/integration_with_creds -n auto --dist worksteal --cov --cov-report=
 	uv run coverage report --skip-empty --skip-covered
-	uv run coverage html -d ./reports/htmlcov --omit="*/test_*,*/tests.py"
 	uv run coverage xml -o ./reports/coverage.xml --omit="*/test_*,*/tests.py"
 
 build-mkdocs:

@@ -84,7 +84,7 @@ def run_agent_workflow(input_prompt: str = INPUT_PROMPT) -> tuple[str, bool]:
     try:
         print(f"Running agent with input: {input_prompt}")
 
-        config = RunnableConfig(request_timeout=120)
+        config = RunnableConfig()
 
         result = workflow.run(
             input_data={"input": input_prompt},

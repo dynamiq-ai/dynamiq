@@ -514,8 +514,13 @@ def _find_content_span(source: str, content: str, start: int = 0, end: int | Non
     if "\n" not in content:
         return -1, -1
 
-    blank_lines = r"\n(?:[^\S\n]*\n)*"
-    pattern = blank_lines.join(re.escape(line) for line in content.split("\n"))
+    # Whitespace-only lines are left to the possessive gap, so each line can match only one way. A gap that could
+    # also give way to a whitespace-only line of the content backtracks exponentially on a run of such lines.
+    lines = [line for line in content.split("\n") if line.strip()]
+    if not lines:
+        return -1, -1
+    blank_lines = r"\n(?:[^\S\n]*\n)*+"
+    pattern = blank_lines.join(re.escape(line) for line in lines)
     match = re.search(pattern, source[start:search_end])
     if match is None:
         return -1, -1

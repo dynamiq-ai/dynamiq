@@ -51,7 +51,9 @@ def _create_agent() -> Agent:
     file_store_config = FileStoreConfig(enabled=True, backend=file_store_backend, agent_file_write_enabled=True)
 
     exa_tool = ExaTool(connection=ExaConnection(), name="exa-search")
-    code_tool = PythonCodeExecutor(name="code-executor")
+    code_tool = PythonCodeExecutor(
+        name="code-executor", extra_allowed_modules=["pandas", "openpyxl", "matplotlib", "seaborn"]
+    )
 
     return Agent(
         name="Cloud Sustainability Researcher",

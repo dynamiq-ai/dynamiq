@@ -1,11 +1,33 @@
 import re
 from typing import Any
 
+import pydantic_monty
 from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.evaluations import BaseEvaluator
-from dynamiq.nodes.tools.python import compile_and_execute, get_restricted_globals
 from dynamiq.utils.logger import logger
+from dynamiq.utils.monty import MONTY_OS_POLICY, MontyUnavailableError, get_monty_pool
+
+DEFAULT_TIME_LIMIT_SECONDS = 5.0
+DEFAULT_MAX_MEMORY_BYTES = 64 * 1024 * 1024
+
+# Monty returns the value of a snippet's trailing expression, so evaluate() is called from a trailer that
+# unpacks this global.
+_INPUTS_VAR = "dynamiq_evaluator_inputs_"
+_SCRIPT_NAME = "python_metric.py"
+# Reports whether the code defines an evaluate() function, without a NameError when it does not. Monty has no
+# callable() builtin, so the check compares types with a function of its own.
+_DEFINES_EVALUATE_CHECK = """
+def dynamiq_function_probe_():
+    pass
+
+dynamiq_evaluate_defined_ = True
+try:
+    evaluate
+except NameError:
+    dynamiq_evaluate_defined_ = False
+dynamiq_evaluate_defined_ and type(evaluate) == type(dynamiq_function_probe_)
+"""
 
 
 class PythonEvaluatorSingleInput(BaseModel):
@@ -65,12 +87,17 @@ class PythonEvaluatorOutput(BaseModel):
 
 class PythonEvaluator(BaseEvaluator):
     """
-    Evaluator that executes custom user-defined code inside a safe sandbox.
+    Evaluator that runs custom user-defined code in the Monty interpreter.
 
     The user code must define a function named "evaluate" with any parameters.
     This evaluator uses regex to extract the function parameters and then calls it
     with input values passed as keyword arguments. It validates that the provided
     input contains all required keys, and does not include unexpected keys.
+
+    Each call runs in a fresh Monty worker subprocess, which has no access to the host's environment
+    variables, files or network, and is stopped once it exceeds timeout_seconds or max_memory_bytes.
+    Monty supports a subset of Python and part of the standard library (json, re, math, datetime,
+    collections, itertools, functools and others), but no third-party packages.
 
     Example user code:
         def evaluate(answer: int, expected: int = 42) -> float:
@@ -79,9 +106,13 @@ class PythonEvaluator(BaseEvaluator):
     Attributes:
         name (str): Evaluator name; defaults to "python_metric".
         code (str): The user-defined Python code as a string.
+        timeout_seconds (float): Longest a single run of the code may take.
+        max_memory_bytes (int): Most heap memory a single run of the code may use.
     """
     name: str = "python_metric"
     code: str = Field(..., description="User-defined Python code as a string.")
+    timeout_seconds: float = Field(default=DEFAULT_TIME_LIMIT_SECONDS, gt=0)
+    max_memory_bytes: int = Field(default=DEFAULT_MAX_MEMORY_BYTES, gt=0)
 
     def __init__(self, **data: Any):
         super().__init__(**data)
@@ -89,17 +120,18 @@ class PythonEvaluator(BaseEvaluator):
 
     def _compile_user_code(self) -> None:
         """
-        Compile the user code using restricted execution. Save the compiled
-        globals and parse the "evaluate" function's parameter names.
+        Run the user code once in Monty to check that it compiles and defines a
+        callable "evaluate", then parse the function's parameter names.
         """
-        self._compiled_globals: dict = get_restricted_globals()
         try:
-            compile_and_execute(self.code, self._compiled_globals)
+            defines_evaluate = self._run_in_monty(f"{self.code}\n{_DEFINES_EVALUATE_CHECK}")
+        except MontyUnavailableError:
+            raise
         except Exception as compile_error:
             logger.error(f"User code compilation error: {compile_error}")
             raise ValueError(f"User code compilation error: {compile_error}") from compile_error
 
-        if "evaluate" not in self._compiled_globals or not callable(self._compiled_globals["evaluate"]):
+        if defines_evaluate is not True:
             raise ValueError("User code must define a callable function 'evaluate'.")
 
         (required_params, all_params) = self._extract_function_parameters(self.code)
@@ -107,6 +139,15 @@ class PythonEvaluator(BaseEvaluator):
         self._all_params: set[str] = set(all_params)
         logger.debug(f"Extracted required parameters: {self._required_params}")
         logger.debug(f"Extracted all parameters: {self._all_params}")
+
+    def _run_in_monty(self, code: str, inputs: dict[str, Any] | None = None) -> Any:
+        """Run code in a fresh Monty worker under this evaluator's limits and return its trailing expression."""
+        limits = pydantic_monty.ResourceLimits(
+            max_feed_duration_secs=self.timeout_seconds, max_memory=self.max_memory_bytes
+        )
+        with get_monty_pool().checkout(script_name=_SCRIPT_NAME, limits=limits, os_policy=MONTY_OS_POLICY) as session:
+            # print() output is dropped rather than written to the host's stdout.
+            return session.feed_run(code, inputs=inputs, print_callback=pydantic_monty.CollectString())
 
     @staticmethod
     def _extract_function_parameters(code_str: str) -> tuple[list[str], list[str]]:
@@ -184,7 +225,11 @@ class PythonEvaluator(BaseEvaluator):
         self._validate_input_keys(provided_keys)
 
         try:
-            result = self._compiled_globals["evaluate"](**input_model.data)
+            result = self._run_in_monty(
+                f"{self.code}\n\nevaluate(**{_INPUTS_VAR})\n", inputs={_INPUTS_VAR: input_model.data}
+            )
+        except MontyUnavailableError:
+            raise
         except Exception as func_error:
             logger.error(f"Error during evaluation: {func_error}")
             raise ValueError(f"Error during evaluation: {func_error}") from func_error
@@ -219,6 +264,8 @@ class PythonEvaluator(BaseEvaluator):
                 score = self.run_single(data_dict)
                 scores.append(score)
                 logger.info(f"Processed input {idx} with score = {score}")
+            except MontyUnavailableError:
+                raise
             except Exception as error:
                 logger.error(f"Failed processing input {idx}: {error}")
                 raise ValueError(f"Failed processing input {idx}: {error}") from error

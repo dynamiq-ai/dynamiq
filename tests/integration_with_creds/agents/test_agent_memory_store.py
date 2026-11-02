@@ -160,7 +160,7 @@ def openai_llm():
 
 @pytest.fixture(scope="module")
 def run_config():
-    return RunnableConfig(request_timeout=180)
+    return RunnableConfig()
 
 
 def _store(store_id: str, description: str) -> DynamiqMemoryStore:

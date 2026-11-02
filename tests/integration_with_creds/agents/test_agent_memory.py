@@ -66,7 +66,7 @@ def general_question_input():
 
 @pytest.fixture
 def run_config():
-    return RunnableConfig(request_timeout=120)
+    return RunnableConfig()
 
 
 @pytest.fixture

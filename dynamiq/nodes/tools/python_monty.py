@@ -1,6 +1,11 @@
 import ast
 import asyncio
+import datetime
+import pathlib
+import zoneinfo
 from typing import Any, ClassVar, Literal
+
+import pydantic_monty
 
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -10,9 +15,163 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
+from dynamiq.utils.monty import MONTY_OS_POLICY, MontyUnavailableError, get_monty_pool
 
 _INPUTS_VAR = "dynamiq_monty_inputs_"
 _TYPE_CHECK_STUBS = f"{_INPUTS_VAR}: dict = {{}}\n"
+_SCRIPT_NAME = "python_monty.py"
+# Applies when error_handling.timeout_seconds is unset, so code that never returns cannot hold a worker forever.
+DEFAULT_TIME_LIMIT_SECONDS = 60.0
+DEFAULT_MAX_MEMORY_BYTES = 256 * 1024 * 1024
+# The most characters a run() result may take when formatted or serialized. A result can repeat references to the
+# same object, so a few dozen objects can stand for gigabytes of text.
+DEFAULT_MAX_OUTPUT_CHARS = 10 * 1024 * 1024
+
+# The bounds below cover repr() and str(), which format a result for an agent, and the JSON tracing writes: ASCII
+# escapes for non-ASCII text, and str() of types JSON lacks, escaped again.
+
+# Upper bounds for values whose size is fixed. A datetime or time with a tzinfo prints that tzinfo too, so it is
+# sized as a container of it instead.
+_FIXED_SIZES: dict[type, int] = {
+    type(None): 4,
+    bool: 5,
+    float: 24,
+    complex: 56,
+    type(Ellipsis): 10,
+    datetime.date: 40,
+    datetime.datetime: 64,
+    datetime.time: 48,
+    datetime.timedelta: 80,
+}
+# What follows each item in a container: ", ", plus the quotes JSON puts around a dict key that is not a string.
+_SEPARATOR_SIZE = 3
+# What a container prints besides its items and their separators. JSON has no set, class instance, datetime or
+# time, so a JSON encoder that falls back to str() also quotes them.
+_CONTAINER_OVERHEADS: dict[type, int] = {
+    list: 2,
+    tuple: 3,
+    set: 7,
+    frozenset: 15,
+    dict: 2,
+    pydantic_monty.MontyClassProxy: 38,
+    # A timezone-aware value prints its naive form, then ", tzinfo=" and its tzinfo.
+    datetime.datetime: 78,
+    datetime.time: 62,
+}
+# The longest repr() of a datetime.timezone besides its name, and of a zoneinfo.ZoneInfo besides its key.
+_TIMEZONE_SIZE = 112
+_ZONE_INFO_SIZE = 32
+# Containers a result can hold a subclass of: Monty returns a namedtuple, and sys.version_info, as a tuple subclass.
+_SUBCLASSABLE_CONTAINERS = (tuple, list, dict, set, frozenset)
+# A reference back to an enclosing container prints as "[...]".
+_CYCLE_SIZE = 5
+
+
+def _output_size(value: Any, limit: int) -> int:
+    """Return an upper bound of the characters repr() or JSON would produce for value.
+
+    Every repeated reference counts in full, as formatting expands it, but each distinct object is visited once,
+    so the walk stays as small as the object graph Monty returned. The walk is the host's own code, so neither
+    names nor __repr__ methods the snippet defines change the result.
+
+    Raises:
+        ValueError: If the bound exceeds limit, or value holds a type a Monty result does not convert to.
+    """
+    sizes: dict[int, int] = {}
+    # Containers whose children are being sized, with those children. Sized objects stay referenced in visited,
+    # so no id() is reused by another object during the walk.
+    pending: dict[int, list[Any]] = {}
+    visited: list[Any] = []
+    stack: list[tuple[Any, bool]] = [(value, False)]
+    while stack:
+        item, children_sized = stack.pop()
+        key = id(item)
+        if key in sizes:
+            continue
+        if children_sized:
+            children = pending.pop(key)
+            size = _container_overhead(item) + sum(
+                sizes.get(id(child), _CYCLE_SIZE) + _SEPARATOR_SIZE for child in children
+            )
+        elif (size := _leaf_size(item)) is None:
+            if key in pending:  # a reference back to an enclosing container
+                continue
+            children = _children(item)
+            pending[key] = children
+            stack.append((item, True))
+            stack.extend((child, False) for child in children if id(child) not in sizes)
+            # Each pending reference prints at least one character, which bounds the walk by the limit.
+            if len(sizes) + len(stack) > limit:
+                raise ValueError(f"run() returned more than {limit} characters of output")
+            continue
+        if size > limit:
+            raise ValueError(f"run() returned more than {limit} characters of output")
+        sizes[key] = size
+        visited.append(item)
+    return sizes[id(value)]
+
+
+def _leaf_size(value: Any) -> int | None:
+    """Return the size bound of a value that holds no other values, or None for a container."""
+    kind = type(value)
+    if kind is str:
+        if value.isascii() and value.isprintable():
+            # A backslash or double quote can be escaped twice: by repr(), then by JSON of that repr.
+            return len(value) + 3 * (value.count("\\") + value.count('"')) + 2 * value.count("'") + 2
+        # JSON escapes each non-ASCII UTF-16 unit as \uXXXX, so an astral character takes 12.
+        return 12 * len(value) + 2
+    if kind is bytes or kind is bytearray:
+        # bytearray(b'...') quoted by JSON, with each escape's backslash escaped again.
+        return 6 * len(value) + 18
+    if kind is int:
+        return value.bit_length() * 30103 // 100000 + 3
+    if kind in (datetime.datetime, datetime.time) and value.tzinfo is not None:
+        return None
+    if kind in _FIXED_SIZES:
+        return _FIXED_SIZES[kind]
+    # A timezone's name, and a zone's key, can be any length.
+    if kind is datetime.timezone:
+        return _TIMEZONE_SIZE + _leaf_size(value.tzname(None))
+    if kind is zoneinfo.ZoneInfo:
+        return _ZONE_INFO_SIZE + _leaf_size(str(value.key))
+    if isinstance(value, pathlib.PurePath):
+        return 32 + _leaf_size(value.as_posix())
+    if kind is type:
+        # Monty returns only builtin types as type objects, and a class it defines as a string.
+        return _leaf_size(repr(value)) + 2
+    if kind in _CONTAINER_OVERHEADS or isinstance(value, _SUBCLASSABLE_CONTAINERS):
+        return None
+    raise ValueError(f"run() returned a {kind.__name__}, which PythonMonty cannot pass on")
+
+
+def _container_overhead(value: Any) -> int:
+    """Return what a container prints besides its items and their separators.
+
+    A subclass, such as a namedtuple, prints its base container's text plus its type name and, for a namedtuple,
+    each field name, which the snippet chooses and can make any length.
+    """
+    kind = type(value)
+    if kind in _CONTAINER_OVERHEADS:
+        return _CONTAINER_OVERHEADS[kind]
+    base = next(base for base in _SUBCLASSABLE_CONTAINERS if isinstance(value, base))
+    names = (kind.__qualname__, *getattr(kind, "_fields", ()))
+    return _CONTAINER_OVERHEADS[base] + sum(_leaf_size(name) for name in names)
+
+
+def _children(value: Any) -> list[Any]:
+    """Return the values a container prints besides its own syntax.
+
+    These are its items and dict keys, a class instance's name and attributes, or a timezone-aware datetime's or
+    time's tzinfo.
+    """
+    kind = type(value)
+    if isinstance(value, dict):
+        return [part for pair in value.items() for part in pair]
+    if kind is pydantic_monty.MontyClassProxy:
+        return [value.name, value.attributes]
+    if kind is datetime.datetime or kind is datetime.time:
+        return [value.tzinfo]
+    return list(value)
 
 
 def _run_contains_async_def(code: str) -> bool:
@@ -41,6 +200,11 @@ def _wrap_user_code(code: str, use_multiple_params: bool) -> str:
 class PythonMonty(Node):
     """
     Node for executing Python code using the Monty interpreter (a Rust-based minimal Python interpreter).
+
+    Each run gets a fresh Monty worker subprocess, which has no access to the host's environment variables,
+    files or network. The run is stopped after error_handling.timeout_seconds, or DEFAULT_TIME_LIMIT_SECONDS
+    when that is unset, and once it uses more than DEFAULT_MAX_MEMORY_BYTES of heap. It fails when run() returns
+    a value that would format to more than DEFAULT_MAX_OUTPUT_CHARS characters.
 
     Attributes:
         code (str): The Python code to execute. Must define a `run` function as the entry point.
@@ -80,9 +244,12 @@ class PythonMonty(Node):
             Any: A dictionary with a ``content`` key holding the ``run`` return value.
 
         Raises:
-            ToolExecutionException: If ``pydantic_monty`` is unavailable or the user code fails.
+            ToolExecutionException: If the user code fails or exceeds its limits.
         """
-        return asyncio.run(self.execute_async(input_data, config, **kwargs))
+        config = ensure_config(config)
+        check_cancellation(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+        return self._format_result(self._run_in_monty(dict(input_data)))
 
     async def execute_async(self, input_data: PythonInputSchema, config: RunnableConfig = None, **kwargs) -> Any:
         """
@@ -97,38 +264,41 @@ class PythonMonty(Node):
             Any: A dictionary with a ``content`` key holding the ``run`` return value.
 
         Raises:
-            ToolExecutionException: If ``pydantic_monty`` is unavailable or the user code fails.
+            ToolExecutionException: If the user code fails or exceeds its limits.
         """
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
+        # The pool blocks until the worker answers, so the call runs off the event loop.
+        result = await asyncio.to_thread(self._run_in_monty, dict(input_data))
+        return self._format_result(result)
 
+    def _run_in_monty(self, inputs: dict[str, Any]) -> Any:
+        """Run the user code with inputs in a fresh Monty worker and return the value of its run()."""
+        limits = pydantic_monty.ResourceLimits(
+            max_feed_duration_secs=self.error_handling.timeout_seconds or DEFAULT_TIME_LIMIT_SECONDS,
+            max_memory=DEFAULT_MAX_MEMORY_BYTES,
+        )
         try:
-            import pydantic_monty
-        except ImportError as e:
-            raise ToolExecutionException(
-                "PythonMonty requires the 'pydantic-monty' package. " 'Install it with: pip install "dynamiq[monty]"',
-                recoverable=False,
-            ) from e
-
-        inputs_dict = dict(input_data)
-        wrapped_code = _wrap_user_code(self.code, self.use_multiple_params)
-
-        try:
-            monty = pydantic_monty.Monty(
-                wrapped_code,
-                inputs=[_INPUTS_VAR],
-                script_name="python_monty.py",
+            with get_monty_pool().checkout(
+                script_name=_SCRIPT_NAME,
+                limits=limits,
+                os_policy=MONTY_OS_POLICY,
                 type_check=self.type_check,
                 type_check_stubs=_TYPE_CHECK_STUBS if self.type_check else None,
-            )
-            result = await monty.run_async(inputs={_INPUTS_VAR: inputs_dict})
+            ) as session:
+                result = session.feed_run(
+                    _wrap_user_code(self.code, self.use_multiple_params), inputs={_INPUTS_VAR: inputs}
+                )
+            # Checked before anything formats or serializes the result, which would expand repeated references.
+            _output_size(result, DEFAULT_MAX_OUTPUT_CHARS)
+            return result
+        except MontyUnavailableError:
+            raise
         except Exception as e:
             error_msg = f"Code execution error: {str(e)}"
             logger.error(error_msg)
             raise ToolExecutionException(error_msg, recoverable=True) from e
-
-        return self._format_result(result)
 
     def _format_result(self, result: Any) -> Any:
         if isinstance(result, dict) and "content" in result:

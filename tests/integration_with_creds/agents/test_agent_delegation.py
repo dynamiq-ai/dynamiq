@@ -31,7 +31,7 @@ def agent_role():
 @pytest.fixture(scope="module")
 def run_config():
     """Standard runnable configuration."""
-    return RunnableConfig(request_timeout=120)
+    return RunnableConfig()
 
 
 @pytest.mark.flaky(reruns=3)

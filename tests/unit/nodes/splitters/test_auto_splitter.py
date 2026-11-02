@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from dynamiq import Workflow
 from dynamiq.components.splitters.auto import (
     AutoSplitterRule,
@@ -170,6 +172,34 @@ def test_auto_splitter_maps_multi_paragraph_markdown_chunks_to_source_offsets():
     assert len(chunks) > 2
     assert {chunk.metadata.get("h1") for chunk in chunks} == {"First", "Second"}
     assert all(chunk.metadata["start_index"] == source_text.index(chunk.content) for chunk in chunks)
+
+
+@pytest.mark.timeout(10)
+def test_auto_splitter_splits_markdown_with_long_runs_of_whitespace_only_lines():
+    source_text = "# Title\n\nIntro\n" + " \n" * 70 + "End"
+    splitter = AutoSplitter(markdown_strip_headers=False)
+    splitter.init_components()
+
+    chunks = splitter.execute(
+        splitter.input_schema(documents=[Document(content=source_text, metadata={"file_path": "page.md"})])
+    )["documents"]
+
+    assert [chunk.content for chunk in chunks] == [source_text.replace("\n\n", "\n")]
+
+
+@pytest.mark.timeout(10)
+def test_auto_splitter_maps_oversized_sections_with_whitespace_only_lines_to_source_offsets():
+    paragraphs = [f"paragraph-{index} " + " ".join(["filler"] * 4) for index in range(6)]
+    source_text = "# Title\n\n" + ("\n\n" + " \n" * 40).join(paragraphs)
+    splitter = AutoSplitter(chunk_size=45, chunk_overlap=0)
+    splitter.init_components()
+
+    chunks = splitter.execute(
+        splitter.input_schema(documents=[Document(content=source_text, metadata={"file_type": "markdown"})])
+    )["documents"]
+
+    assert [chunk.content for chunk in chunks] == paragraphs
+    assert [chunk.metadata["start_index"] for chunk in chunks] == [source_text.index(p) for p in paragraphs]
 
 
 def test_auto_splitter_routes_json_by_extension():
