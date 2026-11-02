@@ -205,6 +205,4 @@ markers = [
 ]
 
 [tool.coverage.run]
-# sys.monitoring (Python 3.12 and later) costs a fraction of the default tracer. On Python 3.11 coverage warns and
-# falls back to the default tracer.
 core = "sysmon"
