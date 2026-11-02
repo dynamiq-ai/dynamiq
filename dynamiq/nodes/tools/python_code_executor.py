@@ -1,4 +1,5 @@
 import builtins
+import decimal
 import errno
 import importlib
 import importlib.util
@@ -486,7 +487,10 @@ class PythonCodeExecutor(Node):
             args, kwargs = self._prepare_callable_arguments(run_callable, context_args)
 
             try:
-                result = run_callable(*args, **kwargs)
+                # The decimal context is thread-local and worker threads are reused across runs, so isolate
+                # any change the run function makes to it (see compile_and_execute in python.py).
+                with decimal.localcontext():
+                    result = run_callable(*args, **kwargs)
             except Exception as e:  # pragma: no cover - sanitized error forwarded to the agent
                 friendly_file_error = self._format_file_access_error(e)
                 if friendly_file_error:

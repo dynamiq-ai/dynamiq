@@ -32,6 +32,7 @@ def create_indexing_flow(index_name="default"):
 
     python_node = Python(
         code=python_code,
+        extra_allowed_modules=["dynamiq"],
         depends=[
             NodeDependency(web_scraper_tool),
         ],

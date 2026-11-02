@@ -103,6 +103,7 @@ def run(input_data):
     convert_to_documents_node = Python(
         name="Python: Convert to Documents",
         id="convert_to_documents_node",
+        extra_allowed_modules=["dynamiq"],
         code="""
 def run(input_data):
     from dynamiq.types import Document

@@ -1088,6 +1088,30 @@ def test_python_node_copy_not_in_default_allow_list(attack_name, attack_code):
     assert json.JSONEncoder().encode({"ok": 1}) == '{"ok": 1}'
 
 
+def test_python_node_decimal_context_does_not_leak_between_runs():
+    """The decimal context is thread-local and worker threads are reused, so a run that changes precision
+    must not change the result of the next run on the same thread."""
+    set_precision = Python(
+        code=(
+            "def run(input_data):\n"
+            "    import decimal\n"
+            "    decimal.getcontext().prec = 2\n"
+            "    return decimal.getcontext().prec\n"
+        )
+    )
+    divide = Python(
+        code=("def run(input_data):\n" "    from decimal import Decimal\n" "    return str(Decimal(1) / Decimal(3))\n")
+    )
+
+    first = set_precision.run({}, None)
+    second = divide.run({}, None)
+
+    assert first.status == RunnableStatus.SUCCESS
+    assert first.output["content"] == 2
+    assert second.status == RunnableStatus.SUCCESS
+    assert second.output["content"] == "0.3333333333333333333333333333"
+
+
 @pytest.mark.parametrize(
     ("attack_name", "attack_code"),
     [

@@ -1,6 +1,7 @@
 import ast
 import builtins
 import copy
+import decimal
 import io
 import string
 import sys
@@ -785,7 +786,11 @@ def compile_and_execute(code: str, restricted_globals: dict) -> dict:
     """
     try:
         byte_code = compile_restricted(code, "<inline>", "exec", policy=DynamiqRestrictingNodeTransformer)
-        exec(byte_code, restricted_globals)  # nosec
+        # The decimal context (precision, rounding, traps) is thread-local, and the executor reuses worker
+        # threads across runs and tenants, so a run that changes it would leak the change into the next run
+        # on the same thread. localcontext restores the previous context when the block exits.
+        with decimal.localcontext():
+            exec(byte_code, restricted_globals)  # nosec
         return restricted_globals
     except Exception as e:
         logger.error(f"Error during restricted execution: {e}")
@@ -866,11 +871,14 @@ class Python(Node):
             restricted_globals = compile_and_execute(self.code, restricted_globals)
             if "run" not in restricted_globals:
                 raise ValueError("The 'run' function is not defined in the provided code.")
-            result = (
-                restricted_globals["run"](**dict(input_data))
-                if self.use_multiple_params
-                else restricted_globals["run"](dict(input_data))
-            )
+            # The run function may change the thread-local decimal context; the executor reuses worker
+            # threads, so isolate it per run (see compile_and_execute).
+            with decimal.localcontext():
+                result = (
+                    restricted_globals["run"](**dict(input_data))
+                    if self.use_multiple_params
+                    else restricted_globals["run"](dict(input_data))
+                )
         except Exception as e:
             error_msg = f"Code execution error: {str(e)}"
             logger.error(error_msg)
