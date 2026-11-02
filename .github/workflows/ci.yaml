@@ -18,46 +18,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Create .env file on push or internal PR
-        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
-        uses: SpicyPizza/create-envfile@v2
-        with:
-          envkey_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          envkey_UNSTRUCTURED_API_KEY: ${{ secrets.UNSTRUCTURED_API_KEY }}
-          envkey_PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
-          envkey_PINECONE_CLOUD: ${{ secrets.PINECONE_CLOUD }}
-          envkey_PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
-          envkey_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          envkey_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          envkey_QDRANT_URL: ${{ secrets.QDRANT_URL }}
-          envkey_QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-
-      - name: Create .env file on fork PR
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-        uses: SpicyPizza/create-envfile@v2
-
-      - name: Build
-        uses: docker/bake-action@v7
-        with:
-          source: .
-          set: |
-            *.cache-from=type=gha
-            *.cache-to=type=gha,mode=max
-          targets: dynamiq-app
-
-  # The jobs above build the image on the Dockerfile's default Python (3.13). This builds it on 3.14 too, so the
-  # PYTHON_VERSION build argument is exercised there. Its own cache scope keeps it from evicting the 3.13 layers.
-  build-python-3-14:
-    name: build (Python 3.14)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
       # docker-compose.yaml names .env as an env_file, so bake needs the file to exist; building needs no secrets.
       - name: Create an empty .env file
         run: touch .env
@@ -67,9 +27,8 @@ jobs:
         with:
           source: .
           set: |
-            *.args.PYTHON_VERSION=3.14.8
-            *.cache-from=type=gha,scope=python-3.14
-            *.cache-to=type=gha,mode=max,scope=python-3.14
+            *.cache-from=type=gha
+            *.cache-to=type=gha,mode=max
           targets: dynamiq-app
 
   lint:
@@ -92,57 +51,37 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      # Loading the test image back into the daemon costs ~50s of tarball export/import against the
-      # legacy overlay2 store. The containerd store takes the layers directly. Must precede buildx,
-      # since restarting the daemon would kill the builder container.
-      - name: Enable the containerd image store
-        run: |
-          echo '{"features":{"containerd-snapshotter":true}}' | sudo tee /etc/docker/daemon.json
-          sudo systemctl restart docker
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Create .env file on push or internal PR
-        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
-        uses: SpicyPizza/create-envfile@v2
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.0
         with:
-          envkey_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          envkey_UNSTRUCTURED_API_KEY: ${{ secrets.UNSTRUCTURED_API_KEY }}
-          envkey_PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
-          envkey_PINECONE_CLOUD: ${{ secrets.PINECONE_CLOUD }}
-          envkey_PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
-          envkey_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          envkey_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          envkey_QDRANT_URL: ${{ secrets.QDRANT_URL }}
-          envkey_QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-          envkey_E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+          version: "0.11.24"
 
-      - name: Create .env file on fork PR
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-        uses: SpicyPizza/create-envfile@v2
-
-      - name: Load Image
-        uses: docker/bake-action@v7
-        with:
-          source: .
-          load: true
-          set: |
-            *.cache-from=type=gha
-            *.cache-to=type=gha,mode=max
-          targets: dynamiq-app-test
+      - name: Install dependencies
+        run: uv sync --frozen --extra all
 
       - name: Run tests on push to main
         if: ${{ github.event_name == 'push' }}
-        run: docker compose up dynamiq-app-test-cov --exit-code-from dynamiq-app-test-cov
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          UNSTRUCTURED_API_KEY: ${{ secrets.UNSTRUCTURED_API_KEY }}
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_CLOUD: ${{ secrets.PINECONE_CLOUD }}
+          PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+        run: make test-cov
 
       - name: Run tests on PR
         if: ${{ github.event_name == 'pull_request' }}
-        run: docker compose up dynamiq-app-test-cov-exclude-integration-with-creds --exit-code-from dynamiq-app-test-cov-exclude-integration-with-creds
+        run: make test-cov-exclude-integration-with-creds
 
       - uses: actions/upload-artifact@v7
         with:
@@ -173,8 +112,8 @@ jobs:
           xml-skip-covered: true
           remove-links-to-lines: true
 
-  # The test job runs the suite in the Docker image, on the image's Python (3.13), and reports coverage. This runs the
-  # same tests, minus the ones needing credentials, on every other supported Python.
+  # The test job runs the suite on the repository's Python (3.13) and reports coverage. This runs the same tests, minus
+  # the ones needing credentials, on every other supported Python.
   test-python-versions:
     name: test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

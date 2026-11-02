@@ -203,3 +203,6 @@ markers = [
     "integration: tests that exercise real integrations (may require credentials)",
     "unit: fast, isolated unit tests",
 ]
+
+[tool.coverage.run]
+core = "sysmon"

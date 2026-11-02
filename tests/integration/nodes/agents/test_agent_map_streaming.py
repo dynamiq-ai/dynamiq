@@ -91,7 +91,7 @@ def run(input_data):
         parallel_tool_calls_enabled=True,
         tools=[python_tool, exa_tool, firecrawl_tool],
         streaming=StreamingConfig(enabled=True, event="react_map_stream", mode=StreamingMode.ALL),
-        max_loops=20,
+        max_loops=3,
         behaviour_on_max_loops=Behavior.RETURN,
     )
 
@@ -165,7 +165,7 @@ def run(input_data):
         parallel_tool_calls_enabled=True,
         tools=[python_tool, exa_tool, firecrawl_tool],
         streaming=StreamingConfig(enabled=True, event="react_map_stream_final", mode=StreamingMode.FINAL),
-        max_loops=20,
+        max_loops=3,
         behaviour_on_max_loops=Behavior.RETURN,
     )
 
