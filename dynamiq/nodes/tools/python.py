@@ -303,8 +303,9 @@ def _collect_urllib_guards() -> tuple[Any, Any, Any, Any]:
         try:
             handler = urllib.request.ProxyHandler({}) if handler_name == "ProxyHandler" else handler_cls()
         except Exception:
-            continue
-        opener.add_handler(handler)
+            handler = None
+        if handler is not None:
+            opener.add_handler(handler)
     urlopen = getattr(urllib.request, "urlopen", None)
     request_cls = getattr(urllib.request, "Request", None)
     return urlopen, request_cls, urllib.request, opener
