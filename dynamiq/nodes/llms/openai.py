@@ -12,8 +12,8 @@ from dynamiq.nodes.llms.base import BaseLLM
 NATIVE_SDK_ENV_VAR = "DYNAMIQ_OPENAI_NATIVE_SDK"
 
 
-def _native_sdk_default() -> bool:
-    """`use_native_sdk` default: on when the environment variable is set to a true value."""
+def _native_sdk_from_env() -> bool:
+    """Whether the environment variable turns the SDK transport on."""
     return os.getenv(NATIVE_SDK_ENV_VAR, "").strip().lower() in ("1", "true", "yes", "on")
 
 
@@ -93,19 +93,20 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
             optionals re-encoded as nullable types, ``additionalProperties: false``
             on every object) and attaches ``strict: true``; a list of tool (function)
             names converts only those tools and ships the rest untouched.
-        use_native_sdk (bool): Send requests through the OpenAI SDK rather than LiteLLM. Streams cost several
+        use_native_sdk (bool | None): Send requests through the OpenAI SDK rather than LiteLLM. Streams cost several
             times less CPU per chunk, so one process serves several times more concurrent streams. Requests using
-            params the SDK transport does not translate still go through LiteLLM. Defaults to the
-            ``DYNAMIQ_OPENAI_NATIVE_SDK`` environment variable, off when unset.
+            params the SDK transport does not translate still go through LiteLLM. Unset (None), the default, it
+            follows the ``DYNAMIQ_OPENAI_NATIVE_SDK`` environment variable when each request is sent, off when that
+            is unset, so a saved workflow follows the deployment it runs in.
     """
     connection: OpenAIConnection | None = None
     reasoning_effort: ReasoningEffort | None = ReasoningEffort.AUTO
     verbosity: Verbosity | None = Verbosity.MEDIUM
-    use_native_sdk: bool = Field(
-        default_factory=_native_sdk_default,
+    use_native_sdk: bool | None = Field(
+        default=None,
         description=(
             "Send requests through the OpenAI SDK rather than LiteLLM, which costs several times less CPU per "
-            f"streamed chunk. Defaults to the {NATIVE_SDK_ENV_VAR} environment variable."
+            f"streamed chunk. Unset, it follows the {NATIVE_SDK_ENV_VAR} environment variable."
         ),
     )
     O_SERIES_MODEL_PREFIXES: ClassVar[tuple[str, ...]] = ("o1", "o3", "o4")
@@ -181,13 +182,17 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
 
         return new_params
 
+    def _native_sdk_on(self) -> bool:
+        """Whether requests go through the OpenAI SDK: `use_native_sdk`, or the environment variable when unset."""
+        return self.use_native_sdk if self.use_native_sdk is not None else _native_sdk_from_env()
+
     def _native_request(self, params: dict[str, Any]) -> dict[str, Any] | None:
         """The OpenAI SDK request for `params`, or None to send them through LiteLLM.
 
         The SDK clients are the connection's, so a call whose endpoint or key differs from it (an `api_base` or
         `api_key` set on the node) goes through LiteLLM, which sends it where it asks.
         """
-        if not self.use_native_sdk or self.connection is None:
+        if not self._native_sdk_on() or self.connection is None:
             return None
         if (params.get("api_base"), params.get("api_key")) != (self.connection.url, self.connection.api_key):
             return None
@@ -214,7 +219,7 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
         return await _openai_sdk.acreate(await self.get_async_client(), request)
 
     def _build_streamed_response(self, chunks: list, messages: list[dict]) -> Any:
-        if self.use_native_sdk:
+        if self._native_sdk_on():
             from dynamiq.nodes.llms import _openai_sdk  # deferred: importing the node must not load the OpenAI SDK
 
             if _openai_sdk.is_sdk_stream(chunks):

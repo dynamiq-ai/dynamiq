@@ -376,13 +376,23 @@ class TestNativeErrors:
 
 
 class TestTransportChoice:
-    def test_is_off_by_default_and_follows_the_env_var(self, monkeypatch):
-        connection = OpenAIConnection(api_key="k")
-        monkeypatch.delenv(NATIVE_SDK_ENV_VAR, raising=False)
-        assert OpenAI(model="gpt-4o-mini", connection=connection).use_native_sdk is False
+    @pytest.mark.parametrize("env, native", [(None, False), ("true", True)])
+    def test_an_unset_flag_follows_the_env_var_when_the_request_is_sent(self, monkeypatch, env, native):
+        monkeypatch.setenv(NATIVE_SDK_ENV_VAR, "false" if native else "true")
+        node = make_node(FakeOpenAI(), native=None)
+        dumped = node.to_dict()
+        if env is None:
+            monkeypatch.delenv(NATIVE_SDK_ENV_VAR)
+        else:
+            monkeypatch.setenv(NATIVE_SDK_ENV_VAR, env)
 
-        monkeypatch.setenv(NATIVE_SDK_ENV_VAR, "true")
-        assert OpenAI(model="gpt-4o-mini", connection=connection).use_native_sdk is True
+        with patch.object(_openai_sdk, "create", wraps=_openai_sdk.create) as create:
+            result = node.run_sync(input_data={}, config=RunnableConfig(callbacks=[]))
+
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        assert create.called is native
+        # A dumped workflow keeps following the environment it is loaded in.
+        assert dumped["use_native_sdk"] is None
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("native, extra", [(False, {}), (True, {"thinking_enabled": True})])
