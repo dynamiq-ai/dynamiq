@@ -13,6 +13,7 @@ jobs:
       (github.event.label.name == 'run-integration-tests-with-creds' &&
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v7

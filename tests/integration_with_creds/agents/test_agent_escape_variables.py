@@ -40,7 +40,7 @@ def agent_input(test_input_string):
 
 @pytest.fixture
 def run_config():
-    return RunnableConfig(request_timeout=120)
+    return RunnableConfig()
 
 
 @pytest.fixture

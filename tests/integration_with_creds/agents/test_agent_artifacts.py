@@ -400,7 +400,7 @@ def openai_llm():
 
 @pytest.fixture(scope="module")
 def run_config():
-    return RunnableConfig(request_timeout=240)
+    return RunnableConfig()
 
 
 @pytest.fixture

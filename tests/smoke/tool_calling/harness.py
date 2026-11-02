@@ -188,7 +188,6 @@ def run_route_agent(
     *,
     strict_tools: bool,
     inference_mode: InferenceMode = InferenceMode.FUNCTION_CALLING,
-    request_timeout: int = 120,
     stream: bool = True,
 ) -> dict[str, Any]:
     """Run a single agent over the route_request scenario and return everything to assert on.
@@ -214,7 +213,7 @@ def run_route_agent(
     workflow = Workflow(flow=Flow(nodes=[agent]))
     result = workflow.run(
         input_data={"input": PROMPT_TEXT},
-        config=RunnableConfig(callbacks=[streaming], request_timeout=request_timeout),
+        config=RunnableConfig(callbacks=[streaming]),
     )
 
     ordered_events = collect_streaming_events(streaming, agent.id)

@@ -37,7 +37,7 @@ def test_react_agent_without_tools_or_memory():
         "session_id": None,
     }
 
-    config = RunnableConfig(request_timeout=30)
+    config = RunnableConfig()
     result = agent.run(input_data=input_data, config=config)
 
     assert result.status == RunnableStatus.SUCCESS
@@ -98,7 +98,7 @@ def agent_input_data():
 @pytest.fixture
 def run_config():
     """Provides a standard RunnableConfig."""
-    return RunnableConfig(request_timeout=30)
+    return RunnableConfig()
 
 
 @pytest.mark.unit
@@ -147,7 +147,7 @@ def test_react_agent_role_with_special_characters(test_llm, test_id, agent_name,
         "input": "What is 2 + 2? Provide result in JSON format.",
         "extra_instructions": "In the very end of the response, always say 'have a nice day!'.",
     }
-    config = RunnableConfig(request_timeout=30)
+    config = RunnableConfig()
     result = agent.run(input_data=input_data, config=config)
 
     assert result.status == RunnableStatus.SUCCESS
