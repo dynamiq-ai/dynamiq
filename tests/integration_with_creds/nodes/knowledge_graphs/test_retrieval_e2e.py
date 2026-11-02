@@ -10,7 +10,7 @@ embedded (writer's ``entity_embedder`` + retriever's ``text_embedder``):
     keep only the branch relevant to the query and cut the rest.
 
 Requires ``OPENAI_API_KEY`` and ``NEO4J_URI`` /``NEO4J_USERNAME`` /``NEO4J_PASSWORD``; skipped otherwise. In
-CI a local ``neo4j:5-community`` container supplies Neo4j (docker-compose ``neo4j`` service) — no Aura creds.
+CI the creds workflow runs a local Neo4j 5 Community server, so no Aura credentials are needed.
 Fixtures wipe the graph before ingesting and are ordered so each section's wipe follows the previous
 section's assertions; run serially against a dedicated test instance.
 """

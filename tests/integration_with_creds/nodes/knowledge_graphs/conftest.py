@@ -1,7 +1,7 @@
 """Shared Neo4j fixture for the knowledge-graph E2E tests.
 
 ``test_acl_e2e.py``, ``test_retrieval_e2e.py`` and ``test_writer_e2e.py`` isolate themselves by wiping the
-WHOLE graph, and CI points all three at a single shared ``neo4j:5-community`` container. Under ``pytest -n``
+WHOLE graph, and CI points all three at a single shared Neo4j server. Under ``pytest -n``
 they land on different workers, so ``graph_connection`` holds an exclusive lock for the lifetime of the
 module: one graph file touches Neo4j at a time, whatever the ``--dist`` mode. ``test_extraction_e2e.py``
 needs no Neo4j and deliberately does not take this fixture.

@@ -12,7 +12,7 @@ across principals. It covers:
     top and can only further NARROW, never widen past the ACL.
 
 Requires ``OPENAI_API_KEY`` and ``NEO4J_URI`` /``NEO4J_USERNAME`` /``NEO4J_PASSWORD``; skipped otherwise. In
-CI a local ``neo4j:5-community`` container supplies Neo4j (docker-compose ``neo4j`` service) — no Aura creds.
+CI the creds workflow runs a local Neo4j 5 Community server, so no Aura credentials are needed.
 Fixtures wipe the graph and are ordered so each section's wipe follows the previous section's assertions
 (entity names are NOT randomly suffixed — the extraction LLM normalizes suffixes off, making them useless
 for isolation; a per-run wipe is the isolation mechanism). Run serially against a dedicated test instance.

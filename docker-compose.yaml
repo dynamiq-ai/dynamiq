@@ -58,7 +58,7 @@ services:
     volumes:
       - ./:/app
 
-  # Local Neo4j for the knowledge-graph integration tests. Ephemeral (no volume) so every CI run starts
+  # Local Neo4j for the knowledge-graph integration tests. Ephemeral (no volume) so every run starts
   # from an empty database; plain Cypher only (no APOC/GDS plugins required by the writer/retriever).
   neo4j:
     image: neo4j:5-community

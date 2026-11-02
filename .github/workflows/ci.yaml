@@ -9,28 +9,6 @@ on:
       - '*'
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      # docker-compose.yaml names .env as an env_file, so bake needs the file to exist; building needs no secrets.
-      - name: Create an empty .env file
-        run: touch .env
-
-      - name: Build
-        uses: docker/bake-action@v7
-        with:
-          source: .
-          set: |
-            *.cache-from=type=gha
-            *.cache-to=type=gha,mode=max
-          targets: dynamiq-app
-
   lint:
     runs-on: ubuntu-latest
     steps:

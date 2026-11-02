@@ -10,7 +10,7 @@ that separates it from ``test_retrieval_e2e.py`` and ``test_acl_e2e.py``. It cov
     the Neo4j vector index (the substrate the retriever's semantic seeding relies on).
 
 Requires ``OPENAI_API_KEY`` and ``NEO4J_URI`` /``NEO4J_USERNAME`` /``NEO4J_PASSWORD``; skipped otherwise. In
-CI a local ``neo4j:5-community`` container supplies Neo4j (docker-compose ``neo4j`` service) — no Aura creds.
+CI the creds workflow runs a local Neo4j 5 Community server, so no Aura credentials are needed.
 Fixtures wipe the graph before writing and are ordered so each section's wipe follows the previous section's
 assertions; run serially against a dedicated test instance.
 """

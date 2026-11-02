@@ -15,14 +15,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # Started first so that Neo4j pulls and boots while the dependencies install.
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # Started first so that Neo4j downloads and boots while the dependencies install.
       - name: Start Neo4j
-        run: >-
-          docker run --detach --name neo4j --publish 7687:7687
-          --env NEO4J_AUTH=neo4j/testpassword
-          --health-cmd "cypher-shell -u neo4j -p testpassword 'RETURN 1' || exit 1"
-          --health-interval 3s --health-timeout 5s --health-retries 40 --health-start-period 5s
-          neo4j:5-community
+        env:
+          NEO4J_VERSION: 5.26.32
+          NEO4J_SHA256: d279ae6a9b38034280681a558b0cd222dce89f87cc3d9867f1f7bd28ef5ebc30
+        run: |
+          archive="$RUNNER_TEMP/neo4j.tar.gz"
+          curl -fsSL -o "$archive" "https://dist.neo4j.org/neo4j-community-$NEO4J_VERSION-unix.tar.gz"
+          echo "$NEO4J_SHA256  $archive" | sha256sum --check --quiet
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          neo4j_home="$RUNNER_TEMP/neo4j-community-$NEO4J_VERSION"
+          "$neo4j_home/bin/neo4j-admin" dbms set-initial-password testpassword
+          "$neo4j_home/bin/neo4j" start
+          echo "NEO4J_HOME=$neo4j_home" >> "$GITHUB_ENV"
 
       - name: Checkout code
         uses: actions/checkout@v7
@@ -37,7 +49,7 @@ jobs:
 
       - name: Wait for Neo4j
         timeout-minutes: 2
-        run: until [ "$(docker inspect --format '{{.State.Health.Status}}' neo4j)" = healthy ]; do sleep 2; done
+        run: until "$NEO4J_HOME/bin/cypher-shell" -u neo4j -p testpassword 'RETURN 1' > /dev/null 2>&1; do sleep 2; done
 
       - name: Run integration tests with creds
         env:
