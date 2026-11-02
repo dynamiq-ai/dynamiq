@@ -63,12 +63,15 @@ PACKAGES = sorted(init.parent.name for init in Path(dynamiq.__file__).parent.glo
 
 def run_python(code: str, **env: str) -> list[str]:
     """Run code in a fresh interpreter and return the lines it prints."""
+    # pytest-cov starts coverage in every subprocess that inherits its COV_CORE_* variables. These interpreters only
+    # import modules, so measuring them adds about half to this file's run time and little coverage.
+    inherited = {name: value for name, value in os.environ.items() if not name.startswith("COV_CORE_")}
     result = subprocess.run(  # nosec B603
         [sys.executable, "-c", textwrap.dedent(code)],
         capture_output=True,
         text=True,
         timeout=300,
-        env={**os.environ, "DYNAMIQ_EAGER_IMPORTS": "", **env},
+        env={**inherited, "DYNAMIQ_EAGER_IMPORTS": "", **env},
     )
     assert result.returncode == 0, result.stderr
     return result.stdout.splitlines()
