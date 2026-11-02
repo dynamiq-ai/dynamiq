@@ -18,6 +18,12 @@ def autouse_fixture(
 ): ...
 
 
+@pytest.fixture(autouse=True)
+def no_native_openai_sdk_env(monkeypatch):
+    """Keep a DYNAMIQ_OPENAI_NATIVE_SDK set in the shell out of the tests; a test that needs it sets it itself."""
+    monkeypatch.delenv("DYNAMIQ_OPENAI_NATIVE_SDK", raising=False)
+
+
 @pytest.fixture
 def mock_llm_response_text():
     return "mocked_response"
