@@ -14,7 +14,7 @@ from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.llms._fc_sanitization import sanitize_fc_messages
 from dynamiq.nodes.llms.registry import model_registry
 from dynamiq.nodes.llms.utils import litellm_video_input_flag
-from dynamiq.nodes.node import ConnectionNode, NodeDependency, ensure_config
+from dynamiq.nodes.node import ConnectionNode, NodeDependency, ensure_config, stream_serialization_scope
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
@@ -748,20 +748,21 @@ class BaseLLM(ConnectionNode):
         # A stream forced by a streaming-only model is transport: its chunks are not for clients.
         emit_chunks = self.streaming.enabled
         try:
-            for chunk in response:
-                check_cancellation(config)
-                chunks.append(chunk)
+            with stream_serialization_scope():
+                for chunk in response:
+                    check_cancellation(config)
+                    chunks.append(chunk)
 
-                if emit_chunks:
-                    self.run_on_node_execute_stream(
-                        config.callbacks,
-                        chunk.model_dump(),
-                        **kwargs,
-                    )
+                    if emit_chunks:
+                        self.run_on_node_execute_stream(
+                            config.callbacks,
+                            chunk.model_dump(),
+                            **kwargs,
+                        )
         finally:
             self._close_stream(response)
 
-        full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
+        full_response = self._build_streamed_response(chunks=chunks, messages=messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
 
     async def _handle_streaming_completion_response_async(
@@ -786,20 +787,33 @@ class BaseLLM(ConnectionNode):
         # A stream forced by a streaming-only model is transport: its chunks are not for clients.
         emit_chunks = self.streaming.enabled
         try:
-            async for chunk in response:
-                check_cancellation(config)
-                chunks.append(chunk)
-                if emit_chunks:
-                    self.run_on_node_execute_stream(
-                        config.callbacks,
-                        chunk.model_dump(),
-                        **kwargs,
-                    )
+            with stream_serialization_scope():
+                async for chunk in response:
+                    check_cancellation(config)
+                    chunks.append(chunk)
+                    if emit_chunks:
+                        self.run_on_node_execute_stream(
+                            config.callbacks,
+                            chunk.model_dump(),
+                            **kwargs,
+                        )
         finally:
             await self._aclose_stream(response)
 
-        full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
+        full_response = self._build_streamed_response(chunks=chunks, messages=messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
+
+    def _call_completion(self, params: dict[str, Any]) -> Union["ModelResponse", "CustomStreamWrapper"]:
+        """Send one completion request. A provider with its own transport overrides this and its async twin."""
+        return self._completion(**params)
+
+    async def _acall_completion(self, params: dict[str, Any]) -> Union["ModelResponse", "CustomStreamWrapper"]:
+        """Send one completion request asynchronously."""
+        return await self._acompletion(**params)
+
+    def _build_streamed_response(self, chunks: list, messages: list[dict]) -> "ModelResponse":
+        """Assemble a streamed response's chunks into one complete response."""
+        return self._stream_chunk_builder(chunks=chunks, messages=messages)
 
     def _get_response_format_and_tools(
         self,
@@ -1243,7 +1257,7 @@ class BaseLLM(ConnectionNode):
 
         used_params = common_params
         try:
-            response = self._completion(**common_params)
+            response = self._call_completion(common_params)
         except Exception as e:
             attempt_params = common_params
             for _ in range(_MAX_COMPLETION_RECOVERIES):
@@ -1251,7 +1265,7 @@ class BaseLLM(ConnectionNode):
                 if recovered is None:
                     raise e
                 try:
-                    response = self._completion(**recovered)
+                    response = self._call_completion(recovered)
                 except Exception as retry_exc:
                     e, attempt_params = retry_exc, recovered
                     continue
@@ -1284,7 +1298,7 @@ class BaseLLM(ConnectionNode):
     ):
         """Execute the LLM node asynchronously using litellm.acompletion.
 
-        This method mirrors execute() but uses await self._acompletion(...)
+        This method mirrors execute() but uses await self._acall_completion(...)
         and async streaming iteration.
 
         Args:
@@ -1319,7 +1333,7 @@ class BaseLLM(ConnectionNode):
 
         used_params = common_params
         try:
-            response = await self._acompletion(**common_params)
+            response = await self._acall_completion(common_params)
         except Exception as e:
             attempt_params = common_params
             for _ in range(_MAX_COMPLETION_RECOVERIES):
@@ -1327,7 +1341,7 @@ class BaseLLM(ConnectionNode):
                 if recovered is None:
                     raise e
                 try:
-                    response = await self._acompletion(**recovered)
+                    response = await self._acall_completion(recovered)
                 except Exception as retry_exc:
                     e, attempt_params = retry_exc, recovered
                     continue
