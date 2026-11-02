@@ -405,13 +405,18 @@ def safe_setattr(obj: Any, name: str, value: Any) -> None:
 
 
 def resolve_allowed_modules(extra_allowed_modules: list[str] | None = None) -> frozenset[str]:
-    """Return the effective import allow-list: the safe default plus extras, never a forbidden module.
+    """Return the effective import allow-list: the safe default plus any opted-in EXTENDED modules.
 
-    FORBIDDEN_MODULES always wins, so a caller cannot re-enable a dangerous module by listing it.
+    extra_allowed_modules is intersected with EXTENDED_ALLOWED_MODULES, a positive list of vetted heavier
+    libraries, rather than added and then filtered against a deny-list. A deny-list would miss aliases: os
+    is forbidden but posix (its C backing module, with system, environ and getpid) is not, so listing
+    posix, pathlib or tempfile would re-enable process or filesystem access. Intersecting with the vetted
+    set refuses any name outside it, so extra_allowed_modules cannot reach an unvetted module. The
+    FORBIDDEN_MODULES subtraction is kept as a floor in case a forbidden name is ever added to a set above.
     """
     allowed = set(DEFAULT_ALLOWED_MODULES)
     if extra_allowed_modules:
-        allowed.update(extra_allowed_modules)
+        allowed.update(set(extra_allowed_modules) & EXTENDED_ALLOWED_MODULES)
     return frozenset(allowed - FORBIDDEN_MODULES)
 
 

@@ -752,6 +752,29 @@ def test_python_node_forbidden_module_cannot_be_opted_in():
 
 
 @pytest.mark.parametrize(
+    "module_name",
+    [
+        # posix is os's C backing module (system/environ/getpid); pathlib and tempfile reach the file
+        # system. None is in EXTENDED_ALLOWED_MODULES, so listing one in extra_allowed_modules must not
+        # make it importable: extra_allowed_modules is a positive list of vetted modules, not a deny-list
+        # that an alias such as posix slips past.
+        "posix",
+        "pathlib",
+        "tempfile",
+    ],
+)
+def test_python_node_unvetted_module_cannot_be_opted_in(module_name):
+    """extra_allowed_modules only enables the vetted EXTENDED set, so an os alias or file module is refused."""
+    result = Python(
+        code=f"def run(input_data):\n    import {module_name}\n    return 1\n",
+        extra_allowed_modules=[module_name],
+    ).run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+    assert f"import of '{module_name}' is not allowed" in str(result.error).lower()
+
+
+@pytest.mark.parametrize(
     ("attack_name", "attack_code"),
     [
         # vars() hands back a module's or class's raw __dict__, bypassing the attribute guard.
