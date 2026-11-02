@@ -122,6 +122,9 @@ jobs:
 
       - name: Run tests on PR
         if: ${{ github.event_name == 'pull_request' }}
+        env:
+          # tests/integration/sandboxes/test_e2b_shared_session_live.py runs against a real sandbox when this is set.
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
         run: make test-cov-exclude-integration-with-creds
 
       - uses: actions/upload-artifact@v7
