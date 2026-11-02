@@ -63,7 +63,7 @@ nodes:
   anthropic-1:  # id
     type: dynamiq.nodes.llms.Anthropic
     name: Anthropic-1
-    model: claude-3-opus-20240229
+    model: claude-sonnet-5-5
     connection: anthropic-conn
     prompt: anthropic-llm-prompt
 
