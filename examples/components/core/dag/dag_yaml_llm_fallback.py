@@ -45,7 +45,7 @@ def run_llm_fallback_programmatic():
     prompt = Prompt(messages=[Message(role="user", content="{{query}}")])
     fallback_llm = Anthropic(
         name="Anthropic-Fallback",
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-5-5",
         connection=connections.Anthropic(),
         prompt=prompt,
     )

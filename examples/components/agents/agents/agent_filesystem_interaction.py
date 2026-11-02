@@ -30,7 +30,7 @@ def setup_agent() -> Agent:
         Agent: Configured ReAct agent with filesystem and memory capabilities.
     """
 
-    llm = setup_llm(model_provider="claude", model_name="claude-3-5-sonnet-20241022", temperature=0.2)
+    llm = setup_llm(model_provider="claude", model_name="claude-sonnet-5-5")
 
     file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore(), agent_file_write_enabled=True)
 

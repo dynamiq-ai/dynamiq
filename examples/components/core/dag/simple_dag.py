@@ -59,7 +59,7 @@ with Workflow() as wf:
     # Anthropic node 1
     anthropic_node = Anthropic(
         name="anthropic",
-        model="claude-3-opus-20240229",
+        model="claude-sonnet-5-5",
         connection=anthropic_connection,
         prompt=prompts.Prompt(
             messages=[
@@ -102,7 +102,7 @@ with Workflow() as wf:
     anthropic_2_node = (
         Anthropic(
             name="anthropic-2",
-            model="claude-3-opus-20240229",
+            model="claude-sonnet-5-5",
             connection=anthropic_connection,
             prompt=prompts.Prompt(
                 messages=[

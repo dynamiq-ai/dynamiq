@@ -36,7 +36,7 @@ def run_reflection_agent_message_workflow() -> tuple[str, dict[UUID, Run]]:
         dict[UUID, Run]: Traces runs.
     """
     # Set up OpenAI connection and language model
-    llm = setup_llm(model_provider="claude", model_name="claude-3-5-sonnet-20240620")
+    llm = setup_llm(model_provider="claude", model_name="claude-sonnet-5-5")
     agent = Agent(
         name=AGENT_NAME,
         llm=llm,
