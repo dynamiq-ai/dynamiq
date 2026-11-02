@@ -52,8 +52,9 @@ class ScaleSerpInputSchema(BaseModel):
     query: str | None = Field(default=None, description="Parameter to provide a search query.")
     url: str | None = Field(default=None, description="Parameter to provide a search url.")
     limit: int | None = Field(default=None, description="Parameter to specify the number of results to return.")
-    search_type: SearchType = Field(
-        default=SearchType.WEB, description="Type of search to perform (web, news, images, videos)"
+    search_type: SearchType | None = Field(
+        default=None,
+        description="Type of search to perform (web, news, images, videos). Defaults to the node's search type.",
     )
     output: str | None = Field(
         default=None,
