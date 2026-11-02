@@ -330,14 +330,30 @@ def _safe_urlopen(url: Any, *args: Any, **kwargs: Any) -> Any:
     return _URLLIB_HTTP_OPENER.open(url, *args, **kwargs)
 
 
+def _plain_attr_name(name: Any) -> str:
+    """Return name as a genuine str, so a str subclass cannot alter the attribute checks.
+
+    A str subclass can override startswith, endswith, __eq__ and __hash__, so a dunder name would slip
+    past the name checks (its own methods answering for it) while the C getattr still resolves the real
+    characters, reaching __subclasses__ and os. str.__str__ returns the real value, ignoring any override,
+    and the genuine str is used for both the check and the lookup. A non-str name is refused, as
+    RestrictedPython's safer_getattr does.
+    """
+    if type(name) is str:
+        return name
+    if isinstance(name, str):
+        return str.__str__(name)
+    raise TypeError("attribute name must be a string")
+
+
 def _is_blocked_attr_name(name: str) -> bool:
     """Report whether an attribute name is refused, mirroring the compile-time attribute checks.
 
     The compiler rejects a private, dunder-roles or inspect name only in attribute syntax; the same name
-    passed to the getattr or hasattr builtin as a string has to be rejected here too.
+    passed to the getattr or hasattr builtin as a string has to be rejected here too. The caller passes a
+    genuine str (see _plain_attr_name), so a str subclass cannot answer the checks with its own methods.
     """
-    if not isinstance(name, str):
-        return False
+    name = _plain_attr_name(name)
     if name.endswith("__roles__") or name in INSPECT_ATTRIBUTES:
         return True
     return name.startswith("_") and name != "_"
@@ -380,6 +396,7 @@ def safe_setattr(obj: Any, name: str, value: Any) -> None:
     The compiler rejects a private name and a shared target in attribute-write syntax, but the setattr
     builtin bypasses both, so both checks are repeated here.
     """
+    name = _plain_attr_name(name)
     if _is_blocked_attr_name(name):
         raise AttributeError(f'"{name}" is not an allowed attribute name')
     if _is_shared_write_target(obj):
@@ -599,6 +616,7 @@ def _make_guarded_getattr(allowed_modules: frozenset[str]) -> Callable[..., Any]
         # on both, so evaluate()/_evaluate() cannot be reached on 3.14 (type(f).evaluate(f)).
         if obj is typing.ForwardRef or isinstance(obj, typing.ForwardRef):
             raise ImportError("Access to typing.ForwardRef is not allowed")
+        name = _plain_attr_name(name)
         value = default_guarded_getattr(obj, name, *args, **kwargs)
         if (wrapped := _wrapped_value(value)) is not None:
             return wrapped
@@ -657,8 +675,11 @@ def get_restricted_globals(allowed_modules: list[str] | frozenset[str] | None = 
         """Guarded getattr builtin: the allow-list and dunder rules apply as in compiled attribute access.
 
         A private, roles or inspect name passed as a string is refused here, since the compiler's check
-        only sees attribute syntax; this closes getattr(object, "__subclasses__") and the like.
+        only sees attribute syntax; this closes getattr(object, "__subclasses__") and the like. The name
+        is coerced to a genuine str first, so a str subclass cannot answer the checks with its own methods
+        while the real characters reach the C getattr.
         """
+        name = _plain_attr_name(name)
         if name not in ALLOWED_DUNDER_ATTRIBUTES and _is_blocked_attr_name(name):
             raise AttributeError(f'"{name}" is not an allowed attribute name')
 

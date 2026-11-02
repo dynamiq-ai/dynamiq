@@ -792,6 +792,27 @@ def test_python_node_object_and_write_escapes_blocked(attack_name, attack_code):
             "getattr_string_globals",
             "import json\ndef run(input_data):\n    return getattr(json.dumps, '__globals__')\n",
         ),
+        # A str subclass can override startswith/endswith so the name-based dunder check answers with its
+        # own methods while the C getattr resolves the real characters; the guard coerces the name first.
+        (
+            "getattr_str_subclass_name",
+            "class S(str):\n"
+            "    def startswith(self, *a):\n        return False\n"
+            "    def endswith(self, *a):\n        return False\n"
+            "def run(input_data):\n"
+            "    subs = getattr(object, S('__subclasses__'))()\n"
+            "    wrapper = [c for c in subs if getattr(c, S('__name__')) == '_wrap_close'][0]\n"
+            "    return getattr(getattr(wrapper, S('__init__')), S('__globals__'))['system']('id')\n",
+        ),
+        (
+            "setattr_str_subclass_name",
+            "import json\n"
+            "class S(str):\n"
+            "    def startswith(self, *a):\n        return False\n"
+            "def run(input_data):\n"
+            "    setattr(json.dumps, S('__kwdefaults__'), {'indent': 7})\n"
+            "    return 1\n",
+        ),
         # io.FileIO and io.open_code open files like io.open, which the identity guard also refuses.
         ("io_fileio_read", "import io\ndef run(input_data):\n    return io.FileIO('/etc/hostname').read()\n"),
         ("io_open_code_read", "import io\ndef run(input_data):\n    return io.open_code('/etc/hostname').read()\n"),
