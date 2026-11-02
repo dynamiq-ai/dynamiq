@@ -92,7 +92,9 @@ def create_agent():
     file_store_backend = InMemoryFileStore()
     file_store_config = FileStoreConfig(enabled=True, backend=file_store_backend, agent_file_write_enabled=True)
 
-    tool = PythonCodeExecutor(name="code-executor")
+    tool = PythonCodeExecutor(
+        name="code-executor", extra_allowed_modules=["pandas", "openpyxl", "matplotlib", "seaborn"]
+    )
 
     agent_software = Agent(
         name="Agent",
