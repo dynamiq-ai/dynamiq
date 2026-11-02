@@ -12,7 +12,7 @@ from dynamiq.nodes.llms.novita import Novita
 from dynamiq.nodes.llms.openai import OpenAI
 
 MODEL_NAME_GPT = "gpt-4o"
-MODEL_NAME_CLAUDE = "claude-3-5-sonnet-20240620"
+MODEL_NAME_CLAUDE = "claude-sonnet-5-5"
 MODEL_NAME_COHERE = "command-r-plus"
 MODEL_NAME_GROQ = "groq/llama3-70b-8192"
 MODEL_NAME_GEMINI = "gemini/gemini-1.5-pro-latest"

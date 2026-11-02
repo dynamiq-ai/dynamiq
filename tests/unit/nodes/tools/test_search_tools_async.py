@@ -1,12 +1,16 @@
 """Async unit tests for tavily, exa_search, linkup_search, scale_serp, serply, zenrows, fxmacrodata."""
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from dynamiq import connections
 from dynamiq.nodes.node import Node
 from dynamiq.nodes.tools.exa_search import ExaTool
+from dynamiq.nodes.tools.firecrawl import FirecrawlTool
+from dynamiq.nodes.tools.firecrawl_search import FirecrawlSearchTool
 from dynamiq.nodes.tools.fxmacrodata import FXMacroDataTool
+from dynamiq.nodes.tools.jina import JinaSearchTool
 from dynamiq.nodes.tools.linkup_search import LinkupTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.nodes.tools.serply import SerplyTool
@@ -307,3 +311,104 @@ async def test_fxmacrodata_execute_async_failed_status():
 
     assert result.status.value == "failure"
     assert "Unknown indicator" in result.error.message
+
+
+def _recording_client(requests_seen: list[httpx.Request], response: httpx.Response) -> httpx.AsyncClient:
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests_seen.append(request)
+        return response
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+@pytest.mark.asyncio
+async def test_scale_serp_execute_async_sends_search_type_value():
+    node = ScaleSerpTool(connection=connections.ScaleSerp(api_key="k"))
+    requests_seen = []
+    client = _recording_client(requests_seen, httpx.Response(200, json={"news_results": []}))
+
+    with patch.object(ScaleSerpTool, "get_async_client", AsyncMock(return_value=client)):
+        result = await node.run_async(input_data={"query": "q", "search_type": "news"})
+
+    assert result.status.value == "success"
+    assert requests_seen[0].url.params["search_type"] == "news"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("markdown_response", "response_type"), [(True, "markdown"), (False, None)])
+async def test_zenrows_requests_markdown_with_response_type(markdown_response, response_type):
+    node = ZenRowsTool(connection=connections.ZenRows(api_key="k"), markdown_response=markdown_response)
+    requests_seen = []
+    client = _recording_client(requests_seen, httpx.Response(200, text="# scraped"))
+
+    with patch.object(ZenRowsTool, "get_async_client", AsyncMock(return_value=client)):
+        result = await node.run_async(input_data={"url": "https://example.com"})
+
+    assert result.status.value == "success"
+    params = requests_seen[0].url.params
+    assert params.get("response_type") == response_type
+    assert "markdown_response" not in params
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("output", ["html", "csv"])
+async def test_scale_serp_returns_html_and_csv_output_as_text(output):
+    node = ScaleSerpTool(connection=connections.ScaleSerp(api_key="k"), output=output)
+    client = _recording_client([], httpx.Response(200, text="<html>results</html>"))
+
+    with patch.object(ScaleSerpTool, "get_async_client", AsyncMock(return_value=client)):
+        result = await node.run_async(input_data={"query": "q"})
+
+    assert result.status.value == "success"
+    assert result.output["content"]["result"] == "<html>results</html>"
+
+
+def test_scale_serp_returns_html_output_to_agents_as_text():
+    node = ScaleSerpTool(connection=connections.ScaleSerp(api_key="k"), output="html", is_optimized_for_agents=True)
+    response = _mock_response(text="<html>results</html>")
+    response.json.side_effect = ValueError("not JSON")
+
+    with patch("requests.request", return_value=response):
+        result = node.run(input_data={"query": "q"})
+
+    assert result.status.value == "success"
+    assert result.output["content"] == "<html>results</html>"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("node_factory", "input_data"),
+    [
+        (lambda: TavilyTool(connection=connections.Tavily(api_key="k")), {"query": "q"}),
+        (lambda: ExaTool(connection=connections.Exa(api_key="k")), {"query": "q"}),
+        (lambda: LinkupTool(connection=connections.Linkup(api_key="k")), {"query": "q"}),
+        (lambda: JinaSearchTool(connection=connections.Jina(api_key="k")), {"query": "q"}),
+        (lambda: FirecrawlSearchTool(connection=connections.Firecrawl(api_key="k")), {"query": "q"}),
+        (lambda: FirecrawlTool(connection=connections.Firecrawl(api_key="k")), {"url": "https://example.com"}),
+    ],
+    ids=["tavily", "exa", "linkup", "jina", "firecrawl-search", "firecrawl"],
+)
+async def test_search_tools_quote_why_the_provider_refused_the_request(node_factory, input_data):
+    node = node_factory()
+    refusal = {"error": "The company category does not support excludeDomains."}
+    client = _recording_client([], httpx.Response(400, json=refusal))
+
+    with patch.object(type(node), "get_async_client", AsyncMock(return_value=client)):
+        result = await node.run_async(input_data=input_data)
+
+    assert result.status.value == "failure"
+    assert "The company category does not support excludeDomains." in result.error.message
+
+
+@pytest.mark.asyncio
+async def test_zenrows_scrapes_the_url_set_on_the_node():
+    node = ZenRowsTool(connection=connections.ZenRows(api_key="k"), url="https://example.com/pricing")
+    requests_seen = []
+    client = _recording_client(requests_seen, httpx.Response(200, text="# Pricing"))
+
+    with patch.object(ZenRowsTool, "get_async_client", AsyncMock(return_value=client)):
+        result = await node.run_async(input_data={})
+
+    assert result.status.value == "success"
+    assert requests_seen[0].url.params["url"] == "https://example.com/pricing"
+    assert result.output["content"]["url"] == "https://example.com/pricing"

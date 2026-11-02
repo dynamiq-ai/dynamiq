@@ -56,10 +56,9 @@ class ZenRowsTool(ConnectionNode):
     input_schema: ClassVar[type[ZenRowsInputSchema]] = ZenRowsInputSchema
 
     def _build_request_kwargs(self, input_data: ZenRowsInputSchema) -> dict[str, Any]:
-        params = {
-            "url": input_data.url,
-            "markdown_response": str(self.markdown_response).lower(),
-        }
+        params = {"url": input_data.url or self.url}
+        if self.markdown_response:
+            params["response_type"] = "markdown"
         return {
             "method": self.connection.method,
             "url": self.connection.url,
@@ -76,10 +75,11 @@ class ZenRowsTool(ConnectionNode):
                 recoverable=True,
             )
         scrape_result = response.text
+        url = input_data.url or self.url
         if self.is_optimized_for_agents:
-            result = f"## Source URL\n{input_data.url}\n\n## Scraped Result\n\n{scrape_result}\n"
+            result = f"## Source URL\n{url}\n\n## Scraped Result\n\n{scrape_result}\n"
         else:
-            result = {"url": input_data.url, "content": scrape_result}
+            result = {"url": url, "content": scrape_result}
         return {"content": result}
 
     def _wrap_request_exception(self, exc: Exception) -> ToolExecutionException:

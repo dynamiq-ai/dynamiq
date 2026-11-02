@@ -25,6 +25,7 @@ from dynamiq.utils.litellm import (
     get_max_tokens,
     get_model_info,
     get_supported_openai_params,
+    on_litellm_import,
     supports_pdf_input,
 )
 from dynamiq.utils.litellm import supports_prompt_caching as litellm_supports_prompt_caching
@@ -36,6 +37,27 @@ if TYPE_CHECKING:
 
     from litellm import CustomStreamWrapper, ModelResponse
 
+
+def _build_litellm_response_models() -> None:
+    """Build litellm's response models before an LLM node runs.
+
+    pydantic builds a model whose annotations it could not resolve at class creation on the model's first use, and
+    that build is not thread-safe. LLM nodes that stream in parallel, such as the ones a Map node runs, can otherwise
+    catch a half-built ``ModelResponse`` and fail with "'MockValSer' object cannot be converted to 'SchemaSerializer'".
+    """
+    from litellm.types import utils as litellm_types  # deferred: importing litellm takes seconds
+
+    for value in vars(litellm_types).values():
+        if (
+            isinstance(value, type)
+            and issubclass(value, BaseModel)
+            and value.__module__ == litellm_types.__name__
+            and not value.__pydantic_complete__
+        ):
+            value.model_rebuild(raise_errors=False)
+
+
+on_litellm_import(_build_litellm_response_models)
 
 LLM_RATE_LIMIT_ERROR_INDICATORS = (
     "rate limit",

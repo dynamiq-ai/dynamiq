@@ -114,3 +114,32 @@ def test_tavily_parameter_override(mock_requests):
     assert "result" in output
     assert "sources_with_url" in output
     assert "raw_response" in output
+
+
+def test_tavily_sends_api_key_as_bearer_token(mock_requests):
+    tavily_tool = TavilyTool(connection=Tavily(api_key="test_key"))
+
+    result = tavily_tool.run({"query": "Latest developments in quantum computing"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    call_kwargs = mock_requests.call_args.kwargs
+    assert call_kwargs["headers"]["Authorization"] == "Bearer test_key"
+    assert "api_key" not in call_kwargs["json"]
+
+
+@pytest.mark.parametrize(
+    "images",
+    [
+        # Without image descriptions Tavily returns each image as a bare URL.
+        ["https://example.com/chip.png"],
+        [{"url": "https://example.com/chip.png", "description": "Quantum chip"}],
+    ],
+)
+def test_tavily_formats_images(mock_requests, mock_tavily_response, images):
+    mock_tavily_response["images"] = images
+    tavily_tool = TavilyTool(connection=Tavily(api_key="test_key"), include_images=True, is_optimized_for_agents=True)
+
+    result = tavily_tool.run({"query": "Latest developments in quantum computing"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "https://example.com/chip.png" in result.output["content"]

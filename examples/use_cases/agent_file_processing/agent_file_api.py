@@ -33,7 +33,7 @@ if __name__ == "__main__":
         description="Tool to upload a file to the server. Provide the parameter 'file' with the file to be uploaded. ",
     )
 
-    llm = setup_llm(model_provider="claude", model_name="claude-3-7-sonnet-20250219", temperature=0)
+    llm = setup_llm(model_provider="claude", model_name="claude-sonnet-5-5")
 
     agent = Agent(
         name="Agent",

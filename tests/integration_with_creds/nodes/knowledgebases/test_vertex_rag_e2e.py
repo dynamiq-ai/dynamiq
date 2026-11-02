@@ -13,7 +13,7 @@ failing obscurely.
                                  When unset the module bootstraps a temporary corpus, which
                                  provisions a RagManagedDb (Spanner) instance that bills per hour
                                  of existence until the corpus is deleted.
-    VERTEXAI_LLM_RANKER_MODEL    optional; defaults to gemini-2.5-flash. Model availability is
+    VERTEXAI_LLM_RANKER_MODEL    optional; defaults to gemini-3.8-flash. Model availability is
                                  regional, so a 404 here is an environment gap, not a failure.
     VERTEXAI_RANK_SERVICE_MODEL  optional; defaults to semantic-ranker-default@latest. Needs
                                  discoveryengine.rankingConfigs.rank on the *calling* identity,
@@ -566,7 +566,7 @@ def test_vector_similarity_threshold_is_accepted(fixture):
 
 def test_llm_ranker_is_applied(fixture):
     _requires_bootstrapped(fixture)
-    model = os.getenv("VERTEXAI_LLM_RANKER_MODEL", "gemini-2.5-flash")
+    model = os.getenv("VERTEXAI_LLM_RANKER_MODEL", "gemini-3.8-flash")
     result = VertexAIRagSearch(
         connection=_connection(), rag_corpus_id=fixture.corpus, llm_ranker_model=model, top_k=5
     ).run(input_data={"query": REFUND_QUERY})

@@ -8,6 +8,7 @@ from dynamiq.connections import Firecrawl
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.tools.utils import http_error_detail
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
@@ -112,7 +113,8 @@ class FirecrawlInputSchema(BaseModel):
     skip_tls_verification: bool | None = Field(
         default=None,
         alias="skipTlsVerification",
-        description="True disables TLS verification (default), set False for strict cert checks.",
+        description="True disables TLS verification. When unset, Firecrawl verifies TLS only for scrapes that send "
+        "headers or actions.",
         json_schema_extra={"is_accessible_to_agent": False},
     )
     timeout: int | None = Field(
@@ -198,7 +200,7 @@ class FirecrawlTool(ConnectionNode):
     headers: dict[str, Any] | None = Field(default=None, description="Custom HTTP headers to forward with the scrape.")
     wait_for: int = Field(default=0, alias="waitFor")
     mobile: bool = Field(default=False, description="Emulate a mobile device viewport and user-agent.")
-    skip_tls_verification: bool = Field(default=True, alias="skipTlsVerification")
+    skip_tls_verification: bool | None = Field(default=None, alias="skipTlsVerification")
     timeout: int = Field(default=30000, description="Request timeout in milliseconds for the upstream fetch.")
     parsers: list[str | dict[str, Any]] | None = Field(
         default=None, description="File parsers to apply. Defaults to ['pdf'] when None."
@@ -223,7 +225,11 @@ class FirecrawlTool(ConnectionNode):
                     return value
             return deepcopy(getattr(self, field_name, None))
 
-        formats = resolve("formats") or ["markdown"]
+        # Firecrawl v2 takes a full-page screenshot as an object; it refuses the v1 "screenshot@fullPage" string.
+        formats = [
+            {"type": "screenshot", "fullPage": True} if fmt == "screenshot@fullPage" else fmt
+            for fmt in resolve("formats") or ["markdown"]
+        ]
         only_main_content = resolve("only_main_content")
         if only_main_content is None:
             only_main_content = True
@@ -250,6 +256,18 @@ class FirecrawlTool(ConnectionNode):
             "storeInCache": resolve("store_in_cache"),
             "zeroDataRetention": resolve("zero_data_retention"),
         }
+
+        parsers = conditional_fields["parsers"]
+        if parsers:
+            # The workflow builder saves the keys of a parser object in snake_case, which Firecrawl refuses.
+            conditional_fields["parsers"] = [
+                (
+                    {("maxPages" if key == "max_pages" else key): value for key, value in parser.items()}
+                    if isinstance(parser, dict)
+                    else parser
+                )
+                for parser in parsers
+            ]
 
         actions = resolve("actions")
         if actions:
@@ -303,6 +321,10 @@ class FirecrawlTool(ConnectionNode):
             links_section = "\n".join(f"- {link}" for link in links)
             sections.append(f"## Links\n{links_section}")
 
+        extracted = data.get("json")
+        if extracted:
+            sections.append(self._json_section("JSON", extracted))
+
         actions = data.get("actions")
         if actions:
             sections.append(self._json_section("Action Results", actions))
@@ -331,9 +353,10 @@ class FirecrawlTool(ConnectionNode):
         return url, scrape_data, connection_url
 
     def _wrap_scrape_exception(self, exc: Exception) -> ToolExecutionException:
-        logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {exc}")
+        error = http_error_detail(exc)
+        logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {error}")
         return ToolExecutionException(
-            f"Tool '{self.name}' failed to execute the requested action. Error: {str(exc)}. "
+            f"Tool '{self.name}' failed to execute the requested action. Error: {error}. "
             f"Please analyze the error and take appropriate action.",
             recoverable=True,
         )

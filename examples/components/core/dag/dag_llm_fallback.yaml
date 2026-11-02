@@ -33,7 +33,7 @@ nodes:
         id: anthropic-fallback
         type: dynamiq.nodes.llms.Anthropic
         name: Anthropic-Fallback
-        model: claude-sonnet-4-20250514
+        model: claude-sonnet-5-5
         connection: anthropic-conn
         prompt: user-prompt
         error_handling:

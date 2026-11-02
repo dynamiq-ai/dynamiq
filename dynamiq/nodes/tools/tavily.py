@@ -9,6 +9,7 @@ from dynamiq.connections import Tavily
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.tools.utils import http_error_detail
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
@@ -252,10 +253,11 @@ class TavilyTool(ConnectionNode):
         return request_payload, connection_url
 
     def _wrap_search_exception(self, exc: Exception) -> ToolExecutionException:
-        logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(exc)}")
+        error = http_error_detail(exc)
+        logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {error}")
         return ToolExecutionException(
             f"Tool '{self.name}' failed to retrieve search results. "
-            f"Error: {str(exc)}. Please analyze the error and take appropriate action.",
+            f"Error: {error}. Please analyze the error and take appropriate action.",
             recoverable=True,
         )
 
@@ -284,6 +286,7 @@ class TavilyTool(ConnectionNode):
                 method=self.connection.method,
                 url=connection_url,
                 json={**self.connection.data, **request_payload},
+                headers=self.connection.headers,
             )
             response.raise_for_status()
             search_result = response.json()
@@ -309,6 +312,7 @@ class TavilyTool(ConnectionNode):
                 method=self.connection.method,
                 url=connection_url,
                 json={**self.connection.data, **request_payload},
+                headers=self.connection.headers,
             )
             response.raise_for_status()
             search_result = response.json()
@@ -335,6 +339,9 @@ class TavilyTool(ConnectionNode):
 
         images_info = []
         for image in search_result.get("images", []):
+            # Without include_image_descriptions, Tavily returns each image as a bare URL.
+            if isinstance(image, str):
+                image = {"url": image}
             url = image.get("url")
             if not url:
                 continue

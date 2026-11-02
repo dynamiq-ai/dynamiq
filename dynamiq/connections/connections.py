@@ -1193,10 +1193,10 @@ class Tavily(Http):
     method: Literal[HTTPMethod.POST] = HTTPMethod.POST
 
     @model_validator(mode="after")
-    def setup_data(self):
-        """Setup data after model validation."""
+    def setup_headers(self):
+        """Setup authorization headers after model validation."""
         if self.api_key:
-            self.data.update({"api_key": self.api_key})
+            self.headers.update({"Authorization": f"Bearer {self.api_key}"})
         return self
 
 

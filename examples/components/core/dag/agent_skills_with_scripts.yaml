@@ -13,7 +13,7 @@ nodes:
       id: skills-agent-llm
       type: dynamiq.nodes.llms.Anthropic
       connection: anthropic-conn
-      model: claude-sonnet-4-20250514
+      model: claude-sonnet-5-5
     tools: []
     role: |
       You have access to skills (SkillsTool) and a sandbox to run commands. Use SkillsTool

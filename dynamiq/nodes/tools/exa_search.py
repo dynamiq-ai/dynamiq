@@ -2,12 +2,13 @@ from enum import Enum
 from typing import Any, ClassVar, Literal
 from urllib.parse import urljoin
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from dynamiq.connections import Exa
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.tools.utils import http_error_detail
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
@@ -43,14 +44,36 @@ class QueryType(str, Enum):
 
 class CategoryType(str, Enum):
     company = "company"
-    research_paper = "research paper"
+    publication = "publication"
     news = "news"
     pdf = "pdf"
     github = "github"
-    tweet = "tweet"
     personal_site = "personal site"
-    linkedin_profile = "linkedin profile"
+    people = "people"
     financial_report = "financial report"
+    # Retired by Exa and kept so that code and stored workflows naming them still load, see RETIRED_CATEGORIES.
+    research_paper = "research paper"
+    tweet = "tweet"
+    linkedin_profile = "linkedin profile"
+
+
+# Categories Exa retired, with their replacements. Stored workflows and tool descriptions can still name them.
+RETIRED_CATEGORIES: dict[str, CategoryType | None] = {
+    "research paper": CategoryType.publication,
+    "linkedin profile": CategoryType.people,
+    "tweet": None,
+}
+
+
+def replace_retired_category(category: Any) -> Any:
+    """Map a category Exa retired to its replacement, or to no category when it has none."""
+    value = category.value if isinstance(category, CategoryType) else category
+    if value not in RETIRED_CATEGORIES:
+        return category
+    replacement = RETIRED_CATEGORIES[value]
+    if replacement is None:
+        logger.warning(f"Exa no longer supports the '{value}' category, so the search runs without one.")
+    return replacement
 
 
 class ContentsTextOptions(BaseModel):
@@ -227,9 +250,9 @@ class ExaInputSchema(BaseModel):
     )
     category: CategoryType | None = Field(
         default=None,
-        description="A data category to focus on."
-        "Options are company, research paper, news, pdf,"
-        " github, tweet, personal site, linkedin profile, financial report.",
+        description="A data category to focus on. "
+        "Options are company, publication, news, pdf, github, personal site, people, financial report. "
+        "company and people do not support published date, include_text, exclude_text or exclude_domains filters.",
     )
     limit: int | None = Field(
         default=None,
@@ -300,6 +323,8 @@ class ExaInputSchema(BaseModel):
         default="Searching the web for information.",
         description="Very brief description of the action being performed. Example: 'Search for AI research papers'.",
     )
+
+    _replace_retired_category = field_validator("category", mode="before")(replace_retired_category)
 
 
 class ExaTool(ConnectionNode):
@@ -379,6 +404,8 @@ class ExaTool(ConnectionNode):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[ExaInputSchema]] = ExaInputSchema
+
+    _replace_retired_category = field_validator("category", mode="before")(replace_retired_category)
 
     @staticmethod
     def to_camel_case(snake_str: str) -> str:
@@ -549,9 +576,10 @@ class ExaTool(ConnectionNode):
         return payload, connection_url
 
     def _wrap_search_exception(self, exc: Exception) -> ToolExecutionException:
-        logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(exc)}")
+        error = http_error_detail(exc)
+        logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {error}")
         return ToolExecutionException(
-            f"Tool '{self.name}' failed to retrieve search results. Error: {str(exc)}. "
+            f"Tool '{self.name}' failed to retrieve search results. Error: {error}. "
             f"Please analyze the error and take appropriate action.",
             recoverable=True,
         )
@@ -564,7 +592,16 @@ class ExaTool(ConnectionNode):
         urls = [r.get("url") for r in results]
 
         if self.is_optimized_for_agents:
-            result_parts = ["## Sources", "\n".join(sources_with_url)]
+            result_parts = []
+            # Notices are written for the model, e.g. that a restriction was relaxed because nothing matched it.
+            notices = [
+                notice["message"]
+                for notice in search_result.get("notices") or []
+                if isinstance(notice, dict) and notice.get("message")
+            ]
+            if notices:
+                result_parts.extend(["## Notices", "\n".join(f"- {notice}" for notice in notices)])
+            result_parts.extend(["## Sources", "\n".join(sources_with_url)])
             result_parts.extend(["## Search Results", formatted_results])
             if formatted_context:
                 result_parts.extend(["## Context", formatted_context])
