@@ -1715,7 +1715,7 @@ requires-dist = [
     { name = "pydantic-monty", marker = "extra == 'sandboxes'", specifier = ">=1.3.0,<2.0.0" },
     { name = "pymilvus", extras = ["milvus-lite"], marker = "extra == 'vectorstores'", specifier = ">=2.6.0,<3.0.0" },
     { name = "pyopenssl", marker = "extra == 'sql'", specifier = ">=26.0.0,<27.0.0" },
-    { name = "pypdf", specifier = ">=6.21.2,<7.0.0" },
+    { name = "pypdf", specifier = ">=6.21.4,<7.0.0" },
     { name = "python-dateutil", marker = "extra == 'vectorstores'", specifier = ">=2.8.2,<3.0.0" },
     { name = "python-docx", specifier = ">=1.1.2,<2.0.0" },
     { name = "python-dotenv", specifier = ">=1.2.2,<2.0.0" },
