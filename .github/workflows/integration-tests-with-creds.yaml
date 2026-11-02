@@ -33,7 +33,7 @@ jobs:
           version: "0.11.24"
 
       - name: Install dependencies
-        run: uv sync --frozen --extra all
+        run: uv sync --frozen --extra all --compile-bytecode
 
       - name: Wait for Neo4j
         timeout-minutes: 2
