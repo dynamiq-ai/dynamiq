@@ -58,7 +58,6 @@ def test_openai_embedder_async_params_omit_sync_client():
     node = OpenAITextEmbedder(connection=OpenAIConnection())
     # init_components caches a sync OpenAI client on the underlying component
     assert isinstance(node.text_embedder.client, OpenAIClient)
-    # and the sync params correctly include it
     assert node.text_embedder.embed_params.get("client") is node.text_embedder.client
 
     # but the async params must drop it and fall back to api_key/api_base only

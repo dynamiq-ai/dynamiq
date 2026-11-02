@@ -60,8 +60,6 @@ def mock_scrape_requests(mocker, mock_jina_scrape_response):
     """Mock requests library for scraping with Jina API."""
     mock_response = mocker.Mock()
     mock_response.json.return_value = mock_jina_scrape_response
-    mock_response.text = "Mock response text"  # Fallback for non-JSON responses
-    mock_response.content = b"Mock response content"  # For screenshot responses
     mock_response.raise_for_status.return_value = None
 
     # Patch at the requests level since that's what the connection uses
@@ -85,20 +83,16 @@ def test_jina_basic_search(mock_search_requests, mock_jina_search_response):
     assert input_dump["query"] == input_data["query"]
     assert input_dump["max_results"] == input_data["max_results"]
 
-    # Verify the correct API call was made
     mock_search_requests.assert_called_once()
     call_args = mock_search_requests.call_args
 
-    # Check method and URL (accessing kwargs)
     assert call_args.kwargs["method"] == "POST"
     assert call_args.kwargs["url"] == "https://s.jina.ai/"
 
-    # Check request body
     request_body = call_args.kwargs["json"]
     assert request_body["q"] == "artificial intelligence"
     assert request_body["num"] == 2
 
-    # Check headers
     headers = call_args.kwargs["headers"]
     assert "Content-Type" in headers
     assert headers["Content-Type"] == "application/json"
@@ -149,19 +143,15 @@ def test_jina_basic_scraping(mock_scrape_requests, mock_jina_scrape_response):
     assert content["links"] == mock_jina_scrape_response["data"]["links"]
     assert content["images"] == mock_jina_scrape_response["data"]["images"]
 
-    # Verify the correct API call was made
     mock_scrape_requests.assert_called_once()
     call_args = mock_scrape_requests.call_args
 
-    # Check method and URL
     assert call_args.kwargs["method"] == "POST"
     assert call_args.kwargs["url"] == "https://r.jina.ai/"
 
-    # Check request body
     request_body = call_args.kwargs["json"]
     assert request_body["url"] == "https://your-url"
 
-    # Check headers
     headers = call_args.kwargs["headers"]
     assert headers["X-Timeout"] == "60"
     assert "X-Return-Format" in headers
@@ -205,7 +195,6 @@ def test_jina_search_with_additional_parameters(mock_search_requests, mock_jina_
     assert isinstance(result, RunnableResult)
     assert result.status == RunnableStatus.SUCCESS
 
-    # Verify API call parameters
     call_args = mock_search_requests.call_args
     request_body = call_args.kwargs["json"]
     headers = call_args.kwargs["headers"]
@@ -236,7 +225,6 @@ def test_jina_scrape_with_selectors(mock_scrape_requests, mock_jina_scrape_respo
     assert isinstance(result, RunnableResult)
     assert result.status == RunnableStatus.SUCCESS
 
-    # Verify headers contain selector information
     call_args = mock_scrape_requests.call_args
     headers = call_args.kwargs["headers"]
 
@@ -247,25 +235,47 @@ def test_jina_scrape_with_selectors(mock_scrape_requests, mock_jina_scrape_respo
     assert headers["X-Engine"] == "browser"  # set via node-level operator config
 
 
-def test_jina_scrape_screenshot_format(mock_scrape_requests):
-    """Test scraping with screenshot format."""
-    jina_connection = Jina(api_key="test_key")
-    jina_tool = JinaScrapeTool(connection=jina_connection, response_format="screenshot")
+@pytest.mark.parametrize(
+    "response_format, field, value, engine",
+    [
+        ("html", "html", "<html><body>Page</body></html>", "direct"),
+        ("text", "text", "Page", "direct"),
+        ("screenshot", "screenshotUrl", "https://storage.jina.ai/screenshots/1.png", "browser"),
+        ("pageshot", "pageshotUrl", "https://storage.jina.ai/pageshots/1.png", "browser"),
+    ],
+)
+def test_jina_scrape_reads_the_field_of_the_requested_format(mocker, response_format, field, value, engine):
+    mock_response = mocker.Mock()
+    mock_response.json.return_value = {"code": 200, "status": 20000, "data": {"title": "Page", field: value}}
+    mock_requests = mocker.patch("requests.request", return_value=mock_response)
+    jina_tool = JinaScrapeTool(connection=Jina(api_key="test_key"), response_format=response_format)
 
-    input_data = {"url": "https://example.com"}
+    result = jina_tool.run({"url": "https://example.com"}, None)
 
-    result = jina_tool.run(input_data, None)
-
-    assert isinstance(result, RunnableResult)
     assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"]["content"] == value
+    headers = mock_requests.call_args.kwargs["headers"]
+    assert headers["X-Return-Format"] == response_format
+    assert headers["X-Engine"] == engine
 
-    # Should return binary content for screenshots
-    content = result.output["content"]
-    assert content["content"] == b"Mock response content"
 
-    call_args = mock_scrape_requests.call_args
-    headers = call_args.kwargs["headers"]
-    assert headers["X-Return-Format"] == "screenshot"
+def test_jina_scrape_screenshot_keeps_an_explicit_browser_engine(mock_scrape_requests):
+    jina_tool = JinaScrapeTool(
+        connection=Jina(api_key="test_key"), response_format="screenshot", engine="cf-browser-rendering"
+    )
+
+    jina_tool.run({"url": "https://example.com"}, None)
+
+    assert mock_scrape_requests.call_args.kwargs["headers"]["X-Engine"] == "cf-browser-rendering"
+
+
+def test_jina_search_caps_results_at_the_api_limit(mock_search_requests):
+    jina_tool = JinaSearchTool(connection=Jina(api_key="test_key"), max_results=50)
+
+    result = jina_tool.run({"query": "artificial intelligence"}, None)
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert mock_search_requests.call_args.kwargs["json"]["num"] == 20
 
 
 def test_jina_scrape_error_includes_response_body(mocker):

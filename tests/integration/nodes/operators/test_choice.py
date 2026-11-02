@@ -380,7 +380,6 @@ def test_workflow_with_choice_operator_with_errors_and_retries(
     ).to_dict()
     expected_output = {choice_node.id: expected_result_choice_node}
 
-    # Handle errors and retries
     max_retries = choice_node.error_handling.max_retries
     error = ValueError("Error")
     error_executions = [error for _ in range(max_retries - 1)]
@@ -675,7 +674,6 @@ def test_workflow_with_string_operator_negative(
         config=RunnableConfig(callbacks=[tracing]),
     )
 
-    # Build expected results
     expected_result.input = input_data
     expected_output_choice_node = {
         choice_option_email_starts_with_negated.id: expected_result.to_dict(),

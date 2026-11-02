@@ -23,12 +23,9 @@ class ContextPrecisionInput(BaseModel):
 
     @field_validator("contexts_list", mode="before")
     def normalize_contexts_list(cls, value):
-        # If the user provides a list[str], wrap it into [list[str]].
-        # If the user provides a list[list[str]], leave as-is.
-        # Otherwise, raise an error.
         if isinstance(value, list):
             if all(isinstance(item, str) for item in value):
-                return [value]  # e.g. ["foo", "bar"] becomes [["foo", "bar"]]
+                return [value]
             if all(isinstance(item, list) and all(isinstance(x, str) for x in item) for item in value):
                 return value
         raise ValueError("contexts_list must be either a list of strings or a list of list of strings.")
@@ -92,7 +89,6 @@ class ContextPrecisionEvaluator(BaseEvaluator):
     name: str = "ContextPrecision"
     llm: BaseLLM
 
-    # Private attribute (not a Pydantic model field)
     _context_precision_evaluator: LLMEvaluator = PrivateAttr()
 
     def __init__(self, **data):

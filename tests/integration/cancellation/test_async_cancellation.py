@@ -82,7 +82,7 @@ class TestAsyncTokenCancellation:
         assert result.output is None
         assert result.error is not None
         assert result.error.type is CanceledException
-        assert result.error.message  # has a descriptive message
+        assert result.error.message
         # LLM never called - flow stopped at first cancellation check
         assert llm_call.call_count == 0
 
@@ -100,7 +100,7 @@ class TestAsyncTokenCancellation:
         assert result.output is None
         assert result.error is not None
         assert result.error.type is CanceledException
-        assert result.error.message  # has a descriptive message
+        assert result.error.message
 
     @pytest.mark.asyncio
     async def test_async_workflow_token_cancel(self, cancellation_token, runnable_config):
@@ -137,7 +137,7 @@ class TestAsyncTaskCancel:
         assert result.output is None
         assert result.error is not None
         assert result.error.type is CanceledException
-        assert result.error.message  # has a descriptive message
+        assert result.error.message
 
     @pytest.mark.asyncio
     async def test_task_cancel_on_flow_returns_canceled(self):

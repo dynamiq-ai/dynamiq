@@ -62,12 +62,10 @@ class TestThoughtPositions:
 class TestWaitForFirstKey:
     def test_thought_late_held_then_flushed(self):
         ext = JSONInnerThoughtsExtractor(wait_for_first_key=True)
-        # Feed pre-thought field — main delta must be empty (held).
         main_a, thought_a = ext.process_fragment('{"a":"x",')
         assert main_a == "", "main should be held while thought is unresolved"
         assert thought_a == ""
 
-        # Feed thought.
         main_b, thought_b = ext.process_fragment('"thought":"hi"')
         assert thought_b == "hi"
         assert main_b == "", "main still held until next key starts"

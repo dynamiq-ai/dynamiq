@@ -18,8 +18,6 @@ def _fact(fact_id: str, user_id: str, content: str,
     )
 
 
-# --- insert / get / get_by_hash ---
-
 def test_insert_then_get(backend, fake_embedder):
     fact = _fact("f1", "u1", "hello")
     backend.insert(fact, fake_embedder.embed("hello"))
@@ -44,8 +42,6 @@ def test_get_by_hash_isolates_users(backend, fake_embedder):
 def test_get_by_hash_unknown_returns_none(backend):
     assert backend.get_by_hash(user_id="u1", content_hash="nope") is None
 
-
-# --- search ---
 
 def test_search_returns_relevance_ordered(backend, fake_embedder):
     backend.insert(_fact("f1", "u1", "alpha"), fake_embedder.embed("alpha"))
@@ -103,8 +99,6 @@ def test_search_with_zero_limit_returns_empty(backend, fake_embedder):
     assert hits == []
 
 
-# --- delete / list_by_scope / delete_scope ---
-
 def test_list_by_scope_with_zero_or_negative_limit_returns_empty(backend, fake_embedder):
     for i in range(3):
         backend.insert(_fact(f"f{i}", "u1", f"c{i}"), fake_embedder.embed(f"c{i}"))
@@ -134,9 +128,6 @@ def test_list_by_scope_respects_limit(backend, fake_embedder):
     for i in range(5):
         backend.insert(_fact(f"f{i}", "u1", f"x{i}"), fake_embedder.embed(f"x{i}"))
     assert len(backend.list_by_scope({"user_id": "u1"}, limit=2)) == 2
-
-
-# --- update ---
 
 
 def test_update_replaces_content_hash_embedding_and_timestamp(backend, fake_embedder):

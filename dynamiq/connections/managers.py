@@ -1,7 +1,6 @@
 import asyncio
 import enum
 import hashlib
-import importlib
 import threading
 import weakref
 from contextlib import asynccontextmanager, contextmanager
@@ -10,6 +9,7 @@ from typing import Any
 from dynamiq.components.serializers import JsonPickleSerializer
 from dynamiq.connections import BaseConnection
 from dynamiq.utils import is_coroutine_function
+from dynamiq.utils.lazy_imports import OptionalDependencyError, import_type, optional_dependency_error
 from dynamiq.utils.logger import logger
 
 
@@ -70,14 +70,15 @@ class ConnectionManager:
 
         Raises:
             ValueError: If the connection type is not found.
+            OptionalDependencyError: If the type needs an optional dependency that is not installed.
         """
         try:
-            entity_module, entity_name = conn_type.rsplit(".", 1)
-            imported_module = importlib.import_module(entity_module)
-            if entity := getattr(imported_module, entity_name, None):
+            if entity := import_type(conn_type):
                 return entity
-        except (ModuleNotFoundError, ImportError):
-            raise ValueError(f"Connection type {conn_type} not found")
+        except OptionalDependencyError:
+            raise
+        except (ModuleNotFoundError, ImportError, AttributeError) as e:
+            raise ValueError(f"Connection type {conn_type} not found") from e
 
     def _get_conn_lock(self, conn_id: str) -> threading.Lock:
         """Get or create a per-connection lock for the given conn_id."""
@@ -193,7 +194,12 @@ class ConnectionManager:
                     f"Connection '{connection.id}-{connection.type}' not support '{init_type.value}' initialization"
                 )
 
-            conn_client = conn_method()
+            try:
+                conn_client = conn_method()
+            except ImportError as e:
+                if optional_error := optional_dependency_error(e, connection.type):
+                    raise optional_error from e
+                raise
             self._cache_client(conn_id, conn_client)
 
             return conn_client
@@ -270,21 +276,26 @@ class ConnectionManager:
                 close_method()
 
     async def aclose(self):
-        """Close every cached connection client, awaiting async clients."""
+        """Close every cached connection client, awaiting async clients.
+
+        An async client closes through `aclose`, or through a coroutine `close` (SDK clients such as AsyncOpenAI).
+        """
         logger.debug("Async-close connection clients")
         # Closed from a snapshot: a cache hit while closing reorders the cache, which breaks iterating it.
         with self._connection_locks_guard:
             conn_clients, self.connection_clients = list(self.connection_clients.values()), {}
         for conn_client in conn_clients:
             aclose = getattr(conn_client, "aclose", None)
+            close_method = getattr(conn_client, "close", None)
+            if not callable(aclose) and is_coroutine_function(close_method):
+                aclose = close_method
             if callable(aclose):
                 try:
                     await aclose()
                 except Exception as exc:
                     logger.warning(f"Error closing async connection client: {exc}")
                 continue
-            close_method = getattr(conn_client, "close", None)
-            if callable(close_method) and not is_coroutine_function(close_method):
+            if callable(close_method):
                 close_method()
 
     @staticmethod

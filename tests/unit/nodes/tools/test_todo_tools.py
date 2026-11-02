@@ -300,3 +300,12 @@ def test_listing_shows_status_values_not_enum_reprs():
     assert "(in_progress)" in content
     assert "(pending)" in content
     assert "TodoStatus." not in content
+
+
+def test_tracing_dict_leaves_out_the_sandbox_credentials():
+    from dynamiq.connections import E2B
+    from dynamiq.sandboxes.e2b import E2BSandbox
+
+    tool = TodoWriteTool(file_store=E2BSandbox(connection=E2B(api_key="e2b-secret-key")))
+
+    assert "e2b-secret-key" not in json.dumps(tool.to_dict(for_tracing=True), default=str)

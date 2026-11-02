@@ -82,12 +82,22 @@ class CheckpointBackend(ABC, BaseModel):
         raise NotImplementedError
 
     def cleanup_by_flow(self, flow_id: str, *, keep_count: int = 10, max_ttl_minutes: int | None = None) -> int:
-        """Remove old checkpoints for a flow, returns count deleted."""
+        """Remove old checkpoints for a flow, returns count deleted.
+
+        A checkpoint that a run waits at, paused or waiting for input, is kept beyond ``keep_count`` until the run
+        continues from it. ``max_ttl_minutes`` still removes it, and ``keep_count=0`` removes every checkpoint.
+        """
         checkpoints = self.get_list_by_flow(flow_id, limit=self.max_cleanup_results)
+        continued_from = {cp.parent_checkpoint_id for cp in checkpoints}
         deleted = 0
 
         for i, cp in enumerate(checkpoints):
-            should_delete = i >= keep_count
+            waiting = (
+                keep_count > 0
+                and cp.status in (CheckpointStatus.PAUSED, CheckpointStatus.PENDING_INPUT)
+                and cp.id not in continued_from
+            )
+            should_delete = i >= keep_count and not waiting
             if max_ttl_minutes is not None and not should_delete:
                 age_minutes = (datetime.now(timezone.utc) - cp.created_at).total_seconds() / 60
                 should_delete = age_minutes > max_ttl_minutes

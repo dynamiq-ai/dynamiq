@@ -6,10 +6,6 @@ This module automatically registers all model-specific prompts.
 from dynamiq.nodes.agents.prompts.registry import register_model_prompts
 from dynamiq.utils.logger import logger
 
-# ============================================================================
-# Auto-register all model-specific prompts
-# ============================================================================
-
 # GPT Models (OpenAI)
 try:
     from dynamiq.nodes.agents.prompts.overrides.gpt import (

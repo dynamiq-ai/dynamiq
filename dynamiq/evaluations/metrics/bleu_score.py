@@ -2,6 +2,7 @@ import re
 from typing import Callable
 
 from pydantic import BaseModel, PrivateAttr, model_validator
+from sacrebleu import corpus_bleu
 
 from dynamiq.evaluations import BaseEvaluator
 
@@ -77,7 +78,6 @@ class BleuScoreEvaluator(BaseEvaluator):
     """
     name: str = "BleuScore"
 
-    # Private attribute to store the sacrebleu corpus_bleu function.
     _corpus_bleu: Callable = PrivateAttr()
 
     def __init__(self, **data):
@@ -88,14 +88,7 @@ class BleuScoreEvaluator(BaseEvaluator):
         self._initialize_bleu()
 
     def _initialize_bleu(self) -> None:
-        """
-        Initialize the corpus_bleu function from the sacrebleu library.
-
-        Raises:
-            ImportError: If sacrebleu is not installed.
-        """
-        from sacrebleu import corpus_bleu
-
+        """Initialize the corpus_bleu function from the sacrebleu library."""
         self._corpus_bleu = corpus_bleu
 
     def run_single(self, ground_truth_answer: str, answer: str) -> float:
@@ -113,18 +106,15 @@ class BleuScoreEvaluator(BaseEvaluator):
         Returns:
             float: The computed BLEU score (as a fraction, e.g., 0.75 for 75%).
         """
-        # Validate inputs using the Pydantic model.
         single_input = RunSingleInput(ground_truth_answer=ground_truth_answer, answer=answer)
 
-        # Process text into clean sentences
         ref_sentences = self._process_text_for_bleu(single_input.ground_truth_answer)
         resp_sentences = self._process_text_for_bleu(single_input.answer)
 
-        # Format the reference as a list of lists (one per sentence)
         structured_refs = [[sent] for sent in ref_sentences]
         hypothesis = resp_sentences
 
-        # Compute the BLEU score; sacrebleu returns a percentage, so we scale it by 1/100.
+        # sacrebleu returns a percentage.
         bleu_result = self._corpus_bleu(hypothesis, structured_refs).score / 100.0
         score = round(float(bleu_result), 2)
 
@@ -141,10 +131,8 @@ class BleuScoreEvaluator(BaseEvaluator):
         Returns:
             list[str]: List of cleaned sentences.
         """
-        # First split the text into sentences
         raw_sentences = self._split_text_into_sentences(text)
 
-        # Then clean each sentence by removing punctuation
         cleaned_sentences = [self._clean_sentence(sentence) for sentence in raw_sentences]
 
         # Filter out empty or very short sentences (likely fragments)
@@ -174,10 +162,8 @@ class BleuScoreEvaluator(BaseEvaluator):
         Returns:
             str: Cleaned sentence with punctuation removed.
         """
-        # Remove leading/trailing whitespace
         cleaned = sentence.strip()
 
-        # Remove all punctuation
         cleaned = re.sub(r"[^\w\s]", "", cleaned)
 
         return cleaned.strip()
@@ -193,7 +179,6 @@ class BleuScoreEvaluator(BaseEvaluator):
         Returns:
             list[float]: List of computed BLEU scores.
         """
-        # Validate batch input.
         input_data = RunInput(ground_truth_answers=ground_truth_answers, answers=answers)
         scores = []
 

@@ -60,7 +60,6 @@ def test_execute_builds_request_and_forwards_body(retriever):
     )
     result = retriever.execute(input_data, RunnableConfig(callbacks=[]))
 
-    # Request built correctly (graph-search endpoint, graph-specific params)
     _, kwargs = retriever.client.request.call_args
     assert kwargs["method"] == "POST"
     assert kwargs["url"] == "https://api.example.ai/v1/knowledgebases/kb-123/graph-search"

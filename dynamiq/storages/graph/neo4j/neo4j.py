@@ -159,9 +159,8 @@ class Neo4jGraphStore(BaseGraphStore):
     ) -> dict[str, Any]:
         """Neo4j-owned upsert path: build the (bulk ``UNWIND``) statements and run them in order.
 
-        Self-contained on the Neo4j store (rather than relying on ``BaseGraphStore.write_graph``) so the
-        whole Neo4j write path — node/edge builders, counter tally, and this orchestration — lives here.
-        The base ``write_graph`` remains the default for the other openCypher backends (Neptune, AGE).
+        The other openCypher backends (Neptune, AGE) do not write graphs: ``BaseGraphStore.write_graph``
+        raises for them.
 
         Nodes are written with ``MERGE ... ON CREATE SET`` (properties write-once, identity matched on
         ``id``); relationships with ``MERGE ... SET`` (edge props refreshed each write). Returns

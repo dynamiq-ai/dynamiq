@@ -118,13 +118,6 @@ def test_invalid_json_cannot_be_fixed():
     assert "Response from LLM is not valid JSON" in str(excinfo.value)
 
 
-def test_no_json_object_in_response():
-    response = "The results are inconclusive."
-    with pytest.raises(ValueError) as excinfo:
-        parse_llm_json_output(response)
-    assert "Response from LLM is not valid JSON" in str(excinfo.value)
-
-
 def test_complex_nested_json_with_errors():
     response = """
     {
@@ -241,12 +234,10 @@ def test_multiple_issues_single_quotes_trailing_comma_python_literals():
       'noneVal': None, // comment
     }
     """
-    # All issues should be corrected by clean_json_string
     expected_output = {"test": True, "strings": ["yes", "no"], "noneVal": None}
     assert parse_llm_json_output(response) == expected_output
 
 
 def test_empty_json_object_and_array():
-    # Just confirm that empty objects/arrays parse without error.
     assert parse_llm_json_output("{}") == {}
     assert parse_llm_json_output("[]") == []

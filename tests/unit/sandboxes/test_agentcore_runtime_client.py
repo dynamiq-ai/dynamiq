@@ -60,9 +60,6 @@ def stop(exit_code=0, status="COMPLETED"):
     return {"chunk": {"contentStop": {"exitCode": exit_code, "status": status}}}
 
 
-# --- command wrapping ----------------------------------------
-
-
 @pytest.mark.parametrize(
     "command",
     [
@@ -85,9 +82,6 @@ def test_wrap_shell_command_overhead_is_small():
     """The wrapper must not meaningfully eat into the 64 KB command budget."""
     command = "echo " + "y" * 60_000
     assert len(wrap_shell_command(command)) - len(command) < 100
-
-
-# --- session env shaping -----------------------------------------------------
 
 
 @pytest.mark.parametrize("value", ["plain", "a b", "a'b", 'a"b', "a$b", "a;b", "a\nb", "a`b`", "a\\b", ""])
@@ -176,9 +170,6 @@ def test_env_prefix_quotes_an_awkward_path():
     assert "'/mnt/work space/.dqenv'" in prefix
 
 
-# --- stream parsing ----------------------------------------
-
-
 def test_invoke_command_accumulates_interleaved_stdout_and_stderr():
     client, boto_client = make_client()
     boto_client.invoke_agent_runtime_command.return_value = stream(
@@ -256,9 +247,6 @@ def test_invoke_command_translates_in_stream_throttling_to_retryable():
         client.invoke_command(ARN, SESSION_ID, "echo hi")
 
 
-# --- request shaping ---------------------------------------------------------
-
-
 def test_invoke_command_threads_qualifier_and_wraps_command():
     client, boto_client = make_client()
     boto_client.invoke_agent_runtime_command.return_value = stream(stop())
@@ -334,9 +322,6 @@ def test_invoke_command_allows_a_command_just_under_the_limit():
     boto_client.invoke_agent_runtime_command.assert_called_once()
 
 
-# --- stop_session ------------------------------------------------------------
-
-
 def test_stop_session_sends_a_conforming_client_token():
     """clientToken has a 33-character minimum, same as runtimeSessionId."""
     client, boto_client = make_client()
@@ -368,9 +353,6 @@ def test_stop_session_translates_conflict_to_retryable():
 
     with pytest.raises(AgentCoreRuntimeConflictError):
         client.stop_session(ARN, SESSION_ID)
-
-
-# --- error translation -------------------------------------------------------
 
 
 def test_translate_error_none_response_does_not_crash():
@@ -419,9 +401,6 @@ def test_client_disables_botocore_retries():
     assert config.retries["total_max_attempts"] == 1
 
 
-# --- session identity --------------------------------------
-
-
 def test_derive_session_id_meets_the_minimum_length():
     assert len(derive_session_id("c1")) >= MIN_SESSION_ID_LENGTH
 
@@ -448,9 +427,6 @@ def test_derive_session_id_sanitises_unsafe_seeds(seed):
     assert len(derived) >= MIN_SESSION_ID_LENGTH
 
 
-# --- path handling -----------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
@@ -464,9 +440,6 @@ def test_derive_session_id_sanitises_unsafe_seeds(seed):
 )
 def test_normalize_sandbox_path(raw, expected):
     assert normalize_sandbox_path(raw) == expected
-
-
-# --- result helpers ----------------------------------------------------------
 
 
 def test_command_result_error_text_prefers_stderr():

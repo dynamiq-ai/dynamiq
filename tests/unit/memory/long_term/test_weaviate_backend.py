@@ -14,8 +14,6 @@ from dynamiq.connections import Weaviate as WeaviateConnection
 from dynamiq.memory.long_term.backends.weaviate import WeaviateLongTermMemoryBackend, _to_weaviate_uuid
 from dynamiq.memory.long_term.schemas import Fact
 
-# --- Fake Weaviate client / collection -------------------------------------
-
 
 def _cosine_distance(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b))
@@ -137,9 +135,6 @@ def _fake_id_in_filter(uuids):
     return _PredicateFilter(lambda item: item["uuid"] in uuid_set)
 
 
-# --- Fixtures ---------------------------------------------------------------
-
-
 @pytest.fixture
 def fake_weaviate_client(monkeypatch):
     client = _FakeClient()
@@ -173,9 +168,6 @@ def _fact(fact_id: str, user_id: str, content: str, content_hash: str | None = N
         created_at=now,
         updated_at=now,
     )
-
-
-# --- insert / get / get_by_hash --------------------------------------------
 
 
 def test_weaviate_insert_then_get(backend, fake_embedder):
@@ -260,9 +252,6 @@ def test_weaviate_fact_id_maps_to_deterministic_uuid():
     assert _to_weaviate_uuid("fact-1") != _to_weaviate_uuid("fact-2")
 
 
-# --- delete / list_by_scope / delete_scope ---------------------------------
-
-
 def test_weaviate_delete(backend, fake_embedder):
     backend.insert(_fact("f1", "u1", "x"), fake_embedder.embed("x"))
     backend.delete("f1")
@@ -322,9 +311,6 @@ def test_weaviate_delete_scope_rejects_empty_scope(backend, fake_embedder):
     assert len(backend.list_by_scope({"user_id": "u1"})) == 1
 
 
-# --- search ----------------------------------------------------------------
-
-
 def test_weaviate_search_relevance_ordered(backend, fake_embedder):
     backend.insert(_fact("f1", "u1", "alpha"), fake_embedder.embed("alpha"))
     backend.insert(_fact("f2", "u1", "alpha-2"), fake_embedder.embed("alpha-2"))
@@ -359,18 +345,12 @@ def test_weaviate_search_empty_returns_empty(backend, fake_embedder):
     assert hits == []
 
 
-# --- high-level operations via Template Method ------------------------------
-
-
 def test_weaviate_remember_and_recall_through_backend(backend):
     backend.remember(content="User likes pizza", user_id="u1")
     backend.remember(content="User likes Python", user_id="u1")
     hits = backend.recall(query="pizza preferences", user_id="u1", limit=5)
     contents = {fact.content for fact, _ in hits}
     assert {"User likes pizza", "User likes Python"} <= contents
-
-
-# --- serialization ---------------------------------------------------------
 
 
 def test_weaviate_to_dict_excludes_live_clients_and_includes_connection(backend):

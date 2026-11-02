@@ -426,7 +426,6 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
         Returns:
           RunResult: The evaluation result with score and reasoning.
         """
-        # Extract candidate statements for answer and ground truth
         ans_candidates = self.extract_statements([question], [answer])[0]
         gt_candidates = self.extract_statements([question], [ground_truth_answer])[0]
         result = self._evaluate_question(question, ans_candidates, gt_candidates)

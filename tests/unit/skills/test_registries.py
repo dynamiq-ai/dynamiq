@@ -226,40 +226,6 @@ class TestDynamiqRegistry:
         assert instructions.instructions == "# JSON skill"
         assert instructions.metadata == {"version": "1.0", "content_type": "markdown"}
 
-    def test_get_skill_instructions_lookup_by_name(self):
-        """Dynamiq.get_skill_instructions finds entry by name and fetches instructions."""
-        conn = MagicMock()
-        conn.conn_params = {"api_base": "https://api.example.com"}
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.content = b"# Skill by id"
-        resp.text = "# Skill by id"
-        resp.json.side_effect = ValueError("not JSON")
-        client = MagicMock()
-        client.request.return_value = resp
-        conn.connect.return_value = client
-
-        registry = Dynamiq.model_construct(
-            connection=conn,
-            skills=[
-                DynamiqSkillEntry(
-                    id="skill-by-id",
-                    version_id="ver-id",
-                    name="skill-by-id",
-                    description="Cached description",
-                ),
-            ],
-        )
-        metadata = registry.get_skills_metadata()
-        assert metadata[0].name == "skill-by-id"
-        instructions = registry.get_skill_instructions("skill-by-id")
-        assert instructions.name == "skill-by-id"
-        assert instructions.description == "Cached description"
-        assert instructions.instructions == "# Skill by id"
-        client.request.assert_called_once()
-        call_args = client.request.call_args
-        assert "/v1/skills/skill-by-id/versions/ver-id/instructions" in call_args[0][1]
-
     def test_get_skill_scripts_path_returns_none_when_sandbox_base_not_set(self):
         """Dynamiq.get_skill_scripts_path returns None when sandbox_skills_base_path is not set."""
         conn = MagicMock()

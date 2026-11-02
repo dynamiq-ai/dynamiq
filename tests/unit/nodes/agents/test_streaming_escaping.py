@@ -86,11 +86,6 @@ def _feed_fc(cb, tool_name: str, args: str, fragments: list[str] | None = None) 
     cb.on_node_execute_end({"group": "llms"}, output_data={})
 
 
-# ---------------------------------------------------------------------------
-# Rendered text must be decoded.
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("min_chunk_chars", [0, 16, 64], ids=lambda n: f"chunk{n}")
 def test_fc_tool_call_thought_is_decoded(min_chunk_chars):
     """The reported bug. Parametrized because ``min_chunk_chars > 0`` re-enters ``_emit``
@@ -119,11 +114,6 @@ def test_structured_output_thought_and_answer_are_decoded():
 
     assert _streamed(cb, StreamingState.REASONING) == THOUGHT
     assert _streamed(cb, StreamingState.ANSWER) == ANSWER
-
-
-# ---------------------------------------------------------------------------
-# Re-parsed text must survive byte-for-byte.
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("min_chunk_chars", [0, 16, 64], ids=lambda n: f"chunk{n}")
@@ -200,11 +190,6 @@ def test_plain_text_modes_keep_real_backslashes(mode):
     _feed_text(cb, payload)
 
     assert _streamed(cb, StreamingState.ANSWER).strip() == answer
-
-
-# ---------------------------------------------------------------------------
-# Decoder state across chunk boundaries — why a streaming decoder is needed.
-# ---------------------------------------------------------------------------
 
 
 def test_escape_split_across_chunk_boundary():

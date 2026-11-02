@@ -6,7 +6,6 @@ def test_bleu_score_evaluator():
     Test the BleuScoreEvaluator to ensure it correctly computes BLEU scores between
     ground truth answers and answers.
     """
-    # Sample data
     ground_truth_answers = [
         "The cat sits on the mat.",
         "A quick brown fox jumps over the lazy dog.",
@@ -18,12 +17,10 @@ def test_bleu_score_evaluator():
         "Python is a powerful programming language used across many fields.",  # Slight variation
     ]
 
-    # Initialize evaluator
     bleu_evaluator = BleuScoreEvaluator()
 
-    # Run evaluator
     bleu_scores = bleu_evaluator.run(ground_truth_answers=ground_truth_answers, answers=answers)
 
-    expected_scores = [1.0, 0.37, 0.26]  # Replace with actual printed scores
+    expected_scores = [1.0, 0.37, 0.26]
     for computed, expected in zip(bleu_scores, expected_scores):
         assert abs(computed - expected) < 0.01, f"Expected {expected}, got {computed}"

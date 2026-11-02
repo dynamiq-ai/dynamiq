@@ -3,6 +3,7 @@ from datetime import datetime
 from io import BytesIO
 
 import pytest
+from pptx import Presentation
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms import OpenAI
@@ -115,35 +116,30 @@ def llm_model():
 
 def test_file_read_tool(file_store, sample_file_path, llm_model):
     """Test FileReadTool functionality including initialization, successful read, and error handling."""
-    # Test initialization
     tool = FileReadTool(file_store=file_store, llm=llm_model)
     assert tool.name == "file-read"
     assert tool.group == "tools"
     assert tool.file_store == file_store
 
-    # Create a test file first
     test_content = "Hello, this is test content!"
     file_store.store(sample_file_path, test_content)
 
-    # Test successful read
     input_data = {"file_path": sample_file_path, "brief": "Read test file"}
     result = tool.run(input_data)
 
     assert isinstance(result, RunnableResult)
     assert result.status == RunnableStatus.SUCCESS
-    # FileReadTool now returns text content (string) after processing
+    # FileReadTool returns text content (string) after processing
     assert result.output["content"] == test_content
 
 
 def test_file_write_tool(file_store):
     """Test FileWriteTool functionality including initialization, successful writes, and error handling."""
-    # Test initialization
     tool = FileWriteTool(file_store=file_store)
     assert tool.name == "file-write"
     assert tool.group == "tools"
     assert tool.file_store == file_store
 
-    # Test successful text write
     input_data = {
         "file_path": "test/output.txt",
         "content": "Hello, World!",
@@ -155,12 +151,10 @@ def test_file_write_tool(file_store):
     assert result.status == RunnableStatus.SUCCESS
     assert "written successfully" in result.output["content"]
 
-    # Verify file was actually written
     assert file_store.exists("test/output.txt")
     stored_content = file_store.retrieve("test/output.txt")
     assert stored_content == b"Hello, World!"
 
-    # Test custom content type
     input_data = {
         "file_path": "test/data.csv",
         "content": "name,age\nJohn,30",
@@ -172,7 +166,6 @@ def test_file_write_tool(file_store):
     result = tool.run(input_data)
     assert result.status == RunnableStatus.SUCCESS
 
-    # Verify file with custom content type
     assert file_store.exists("test/data.csv")
     stored_content = file_store.retrieve("test/data.csv")
     assert stored_content == b"name,age\nJohn,30"
@@ -180,18 +173,15 @@ def test_file_write_tool(file_store):
 
 def test_file_list_tool(file_store):
     """Test FileListTool functionality including initialization, listing files, and empty directory."""
-    # Test initialization
     tool = FileListTool(file_store=file_store)
     assert tool.name == "file-list"
     assert tool.group == "tools"
     assert tool.file_store == file_store
 
-    # Create some test files
     file_store.store("test/file1.txt", "content1")
     file_store.store("test/file2.txt", "content2")
     file_store.store("docs/readme.md", "readme content")
 
-    # Test listing files from root
     input_data = {"file_path": "", "recursive": True}
     result = tool.run(input_data)
 
@@ -201,7 +191,6 @@ def test_file_list_tool(file_store):
     assert "file2.txt" in result.output["content"]
     assert "readme.md" in result.output["content"]
 
-    # Test listing from specific directory
     input_data = {"file_path": "test/", "recursive": False}
     result = tool.run(input_data)
 
@@ -210,7 +199,6 @@ def test_file_list_tool(file_store):
     assert "file2.txt" in result.output["content"]
     assert "readme.md" not in result.output["content"]  # Should not be in test/ directory
 
-    # Test empty directory
     input_data = {"file_path": "empty/", "recursive": False}
     result = tool.run(input_data)
 
@@ -266,11 +254,9 @@ def test_file_read_tool_missing_file_returns_recoverable_error(file_store, llm_m
 
 def test_file_tools_integration(file_store, llm_model):
     """Test file tools working together."""
-    # Test tools working together
     write_tool = FileWriteTool(file_store=file_store)
     read_tool = FileReadTool(file_store=file_store, llm=llm_model)
 
-    # Write file
     write_input = {
         "file_path": "test/integration.txt",
         "content": "Integration test content",
@@ -280,13 +266,11 @@ def test_file_tools_integration(file_store, llm_model):
     write_result = write_tool.run(write_input)
     assert write_result.status == RunnableStatus.SUCCESS
 
-    # Read file
     read_input = {"file_path": "test/integration.txt", "brief": "Read integration file"}
     read_result = read_tool.run(read_input)
     assert read_result.status == RunnableStatus.SUCCESS
     assert read_result.output["content"] == "Integration test content"
 
-    # Test different storage instances
     storage2 = InMemoryFileStore()
     storage2.store("test.txt", "Content from storage 2")
 
@@ -345,6 +329,21 @@ def test_file_read_tool_limits_spreadsheet_preview(file_store, llm_model):
     assert "Spreadsheet preview" in content
     assert "Rows: 60" in content
     assert "showing up to 5 row(s)" in content
+
+
+def test_file_read_tool_extracts_text_from_pptx(file_store, llm_model):
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[1])
+    slide.shapes.title.text = "Quarterly review"
+    slide.placeholders[1].text = "Checkout conversion improved after the redesign."
+    buffer = BytesIO()
+    presentation.save(buffer)
+    file_store.store("decks/review.pptx", buffer.getvalue())
+
+    result = FileReadTool(file_store=file_store, llm=llm_model).run({"file_path": "decks/review.pptx", "brief": "Read"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "Checkout conversion improved after the redesign." in result.output["content"]
 
 
 def test_file_read_tool_with_sandbox_like_backend(llm_model):
@@ -552,11 +551,6 @@ def test_file_read_tool_unknown_extension_binary_stays_bytes(file_store, llm_mod
 
     assert result.status == RunnableStatus.SUCCESS
     assert result.output["content"] == payload
-
-
-# ---------------------------------------------------------------------------
-# FileWriteTool – edit mode tests
-# ---------------------------------------------------------------------------
 
 
 def test_edit_sequential_and_replace_all(file_store):

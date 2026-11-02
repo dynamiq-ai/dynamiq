@@ -85,13 +85,6 @@ def test_shared_session_defaults_to_all_scope():
     assert SharedSession().sharing_scope == SandboxSharingScope.ALL
 
 
-def test_shared_session_accepts_augment_scope():
-    from dynamiq.nodes.agents.shared_session import SandboxSharingScope, SharedSession
-
-    s = SharedSession(sharing_scope=SandboxSharingScope.AUGMENT)
-    assert s.sharing_scope == SandboxSharingScope.AUGMENT
-
-
 def test_sandbox_sharing_scope_is_str_enum():
     from dynamiq.nodes.agents.shared_session import SandboxSharingScope
 

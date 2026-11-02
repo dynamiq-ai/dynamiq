@@ -268,7 +268,7 @@ class TestFunctionCallingProtocolEmission:
 
         Agent._append_assistant_message(agent, llm_result, llm_generated_output="")
 
-        # 1. Assistant message + 1 stub tool message for FA = 2 messages
+        # Assistant message + 1 stub tool message for FA = 2 messages
         assert len(agent._prompt.messages) == 2
 
         assistant = agent._prompt.messages[0]

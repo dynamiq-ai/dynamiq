@@ -106,6 +106,7 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
         """
         super().__init__(dry_run_config=dry_run_config)
 
+        self._owns_client = client is None
         if client is None:
             if connection is None:
                 connection = AWSOpenSearch()
@@ -142,7 +143,6 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
         base_settings = {"index": {"knn": True}}
         settings = base_settings.copy()
 
-        # Add custom index settings if provided
         if self.index_settings:
             for key, value in self.index_settings.items():
                 if key in settings and isinstance(settings[key], dict) and isinstance(value, dict):
@@ -173,7 +173,6 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
             },
         }
 
-        # Add custom mapping settings if provided
         if self.mapping_settings:
             merged_mappings = mapping["mappings"].copy()
             for key, value in self.mapping_settings.items():
@@ -224,7 +223,6 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
         if policy == DuplicatePolicy.OVERWRITE:
             return documents
 
-        # Get unique documents
         unique_docs = {}
         for doc in documents:
             if doc.id in unique_docs:
@@ -279,7 +277,6 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
         if not isinstance(documents[0], Document):
             raise ValueError("Documents must be of type Document")
 
-        # Handle duplicates
         documents = self._handle_duplicate_documents(documents, policy)
         if not documents:
             return 0
@@ -297,7 +294,6 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
                 "_id": doc.id,
                 "_source": {content_key: doc.content, "metadata": doc.metadata},
             }
-            # Only include embedding field if present and not None
             if getattr(doc, "embedding", None) is not None:
                 action["_source"][embedding_key] = doc.embedding
 
@@ -419,7 +415,6 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
             _source_excludes=([embedding_key] if not include_embeddings else None),
         )
 
-        # Convert result to Document
         doc = Document(
             id=response["_id"],
             content=response["_source"][content_key],
@@ -517,6 +512,31 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
         deleted_count = response.get("deleted", 0)
         logger.info(f"Deleted {deleted_count} documents matching filters.")
 
+    def delete_documents_by_file_id(self, file_id: str) -> None:
+        """Delete documents whose metadata holds the file ID.
+
+        Args:
+            file_id (str): The file ID to filter by.
+        """
+        self.delete_documents_by_file_ids([file_id])
+
+    def delete_documents_by_file_ids(self, file_ids: list[str], batch_size: int = 500) -> None:
+        """Delete documents whose metadata holds one of the file IDs.
+
+        File IDs are matched exactly on ``metadata.file_id``. The shared file ID filter cannot be used: it names a
+        top-level ``file_id`` field and uses the "in" operator, which these filters do not support.
+
+        Args:
+            file_ids (list[str]): The file IDs to filter by.
+            batch_size (int): Maximum number of file IDs to delete in one request. Defaults to 500.
+        """
+        if not file_ids:
+            logger.warning("No file IDs provided. No documents will be deleted.")
+            return
+        for start in range(0, len(file_ids), batch_size):
+            batch = file_ids[start : start + batch_size]
+            self.delete_documents_by_filters({"field": "metadata.file_id", "operator": "contains_any", "value": batch})
+
     def list_documents(
         self,
         top_k: int | None = 100,
@@ -541,7 +561,6 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
         content_key = content_key or self.content_key
         embedding_key = embedding_key or self.embedding_key
 
-        # Build search query
         search_body = {
             "size": top_k,
             "query": {"match_all": {}},
@@ -552,7 +571,6 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
 
         response = self.client.search(index=self.index_name, body=search_body)
 
-        # Convert hits to Document objects
         all_documents = []
         for hit in response["hits"]["hits"]:
             score = hit.get("_score", None)
@@ -745,5 +763,6 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
             self.client.close()
 
     def __del__(self):
-        """Cleanup on deletion."""
-        self.close()
+        """Close the client if the store created it. A client passed in may be shared, so it stays open."""
+        if getattr(self, "_owns_client", False):
+            self.close()

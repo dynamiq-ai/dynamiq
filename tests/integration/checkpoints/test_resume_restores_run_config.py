@@ -6,6 +6,7 @@ remaining mocked nodes for real. The restore mirrors ``original_input``: explici
 values win, unset fields fall back to the checkpoint.
 """
 
+from queue import Queue
 from typing import Any, ClassVar, Literal
 
 import pytest
@@ -17,8 +18,10 @@ from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.runnables.base import NodeRunnableConfig
 from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.types.mocking import MockPolicy, RunMockConfig
+from dynamiq.types.streaming import StreamingConfig
 
 EXECUTED: list[str] = []
 
@@ -75,6 +78,19 @@ def snapshot_written_during(backend: InMemory, flow: flows.Flow, known_ids: set[
 
 
 class TestResumeRestoresRunConfig:
+    def test_a_run_whose_config_holds_an_input_queue_is_checkpointed_without_it(self):
+        """A human-in-the-loop node gets its input queue through ``nodes_override``, which cannot be saved."""
+        backend = InMemory()
+        flow = build_flow(backend)
+        streaming = StreamingConfig(enabled=True, input_queue=Queue())
+
+        result = flow.run_sync(
+            input_data={}, config=RunnableConfig(nodes_override={"second": NodeRunnableConfig(streaming=streaming)})
+        )
+
+        assert result.status == RunnableStatus.SUCCESS
+        assert all("nodes_override" not in cp.original_config for cp in backend.get_list_by_flow(flow.id, limit=50))
+
     def test_a_resumed_dry_run_stays_a_dry_run(self):
         backend = InMemory()
         flow = build_flow(backend)

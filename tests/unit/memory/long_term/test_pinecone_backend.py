@@ -13,7 +13,6 @@ from dynamiq.connections import Pinecone as PineconeConnection
 from dynamiq.memory.long_term.backends.pinecone import PineconeLongTermMemoryBackend
 from dynamiq.memory.long_term.schemas import Fact
 
-# --- Fake Pinecone client / index ------------------------------------------
 
 # Pinecone metadata filter is MongoDB-style. We support the subset the backend
 # emits: `{key: {"$eq": value}}` and `{"$and": [..., ...]}`.
@@ -92,9 +91,6 @@ class _FakeClient:
         return self.indexes.setdefault(name, _FakeIndex())
 
 
-# --- Fixtures ---------------------------------------------------------------
-
-
 @pytest.fixture
 def fake_pinecone_client(monkeypatch):
     client = _FakeClient()
@@ -124,9 +120,6 @@ def _fact(fact_id: str, user_id: str, content: str, content_hash: str | None = N
         created_at=now,
         updated_at=now,
     )
-
-
-# --- insert / get / get_by_hash --------------------------------------------
 
 
 def test_pinecone_insert_then_get(backend, fake_embedder):
@@ -159,9 +152,6 @@ def test_pinecone_metadata_round_trip(backend, fake_embedder):
     backend.insert(fact, fake_embedder.embed("x"))
     fetched = backend.get("f1")
     assert fetched.metadata == {"category": "preference", "score": 0.8}
-
-
-# --- delete / list_by_scope / delete_scope ---------------------------------
 
 
 def test_pinecone_delete(backend, fake_embedder):
@@ -210,9 +200,6 @@ def test_pinecone_delete_scope_paginates_beyond_single_page(backend, fake_embedd
     assert backend.list_by_scope({"user_id": "u1"}) == []
 
 
-# --- search ----------------------------------------------------------------
-
-
 def test_pinecone_search_relevance_ordered(backend, fake_embedder):
     backend.insert(_fact("f1", "u1", "alpha"), fake_embedder.embed("alpha"))
     backend.insert(_fact("f2", "u1", "alpha-2"), fake_embedder.embed("alpha-2"))
@@ -247,9 +234,6 @@ def test_pinecone_search_empty_returns_empty(backend, fake_embedder):
     assert hits == []
 
 
-# --- high-level operations via Template Method ------------------------------
-
-
 def test_pinecone_remember_and_recall_through_backend(backend, fake_embedder):
     """End-to-end remember/recall must work through the backend's high-level API,
     confirming the storage primitives are wired correctly."""
@@ -258,9 +242,6 @@ def test_pinecone_remember_and_recall_through_backend(backend, fake_embedder):
     hits = backend.recall(query="pizza preferences", user_id="u1", limit=5)
     contents = {fact.content for fact, _ in hits}
     assert {"User likes pizza", "User likes Python"} <= contents
-
-
-# --- serialization ---------------------------------------------------------
 
 
 def test_pinecone_to_dict_excludes_live_clients_and_includes_connection(backend):

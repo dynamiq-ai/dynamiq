@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from pptx import Presentation
+from pptx.util import Inches
 
 from dynamiq import Workflow
 from dynamiq.flows import Flow
@@ -204,6 +205,26 @@ def test_pptx_one_doc_per_page_adds_page_number_metadata():
     assert [document.metadata["page_number"] for document in documents] == [1, 2]
     assert all(document.metadata["file_path"] == "slides.pptx" for document in documents)
     assert all("source" not in document.metadata for document in documents)
+
+
+def test_pptx_includes_tables_and_grouped_shapes():
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    table = slide.shapes.add_table(2, 2, Inches(1), Inches(1), Inches(4), Inches(1)).table
+    for row, values in zip(table.rows, [["City", "Bags sold"], ["Lima", "4,210"]]):
+        for cell, value in zip(row.cells, values):
+            cell.text = value
+    group = slide.shapes.add_group_shape()
+    group.shapes.add_textbox(Inches(1), Inches(3), Inches(4), Inches(1)).text_frame.text = "Grouped note"
+    converter = PPTXFileConverter()
+    converter.init_components()
+
+    result = converter.run(input_data={"files": [write_presentation_to_bytesio(presentation)]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert (
+        result.output["documents"][0].content == "| City | Bags sold |\n| --- | --- |\n| Lima | 4,210 |\nGrouped note"
+    )
 
 
 @pytest.mark.parametrize(

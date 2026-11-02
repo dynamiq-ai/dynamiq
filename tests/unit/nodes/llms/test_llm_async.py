@@ -227,7 +227,6 @@ class TestBaseLLMAsyncFallback:
         )
         primary.fallback = FallbackConfig(llm=fallback_llm, enabled=True)
 
-        # Primary raises a rate limit error
         from litellm.exceptions import RateLimitError
 
         primary._acompletion = AsyncMock(
@@ -237,7 +236,6 @@ class TestBaseLLMAsyncFallback:
                 llm_provider="openai",
             )
         )
-        # Fallback succeeds
         fallback_llm._acompletion = AsyncMock(return_value=mock_fallback_response)
 
         result = await primary.run_async(

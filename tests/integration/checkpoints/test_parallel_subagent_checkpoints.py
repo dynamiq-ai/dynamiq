@@ -41,11 +41,6 @@ MULTIPLIER_TOOL_ID = "multiplier-tool"
 CALC_TOOL_ID = "calculator-tool"
 
 
-# ---------------------------------------------------------------------------
-# Factory helpers
-# ---------------------------------------------------------------------------
-
-
 def make_llm(node_id: str = AGENT_LLM_ID) -> llms.OpenAI:
     return llms.OpenAI(
         id=node_id,
@@ -425,7 +420,6 @@ class TestParallelToolCallsCheckpoint:
 
         result2 = flow2.run_sync(input_data=None, resume_from=cp.id)
         assert result2.status == RunnableStatus.SUCCESS
-        # LLM should have been called fewer times than a full run (skipped completed loops)
         assert resume_count["value"] >= 1
 
     @pytest.mark.parametrize("backend_type", ["in_memory", "file"])
@@ -529,14 +523,12 @@ class TestSubAgentToolCheckpoint:
         flow.run_sync(input_data={"input": "Delegate twice."})
         mocker.stopall()
 
-        # Verify the call_count was incremented during the run
         assert (
             sub_tool._call_count >= 1
         ), f"SubAgentTool._call_count was {sub_tool._call_count} after run, expected >= 1"
 
         cp = backend.get_latest_by_flow(flow.id)
 
-        # Verify call_count is in the checkpoint
         internal = cp.node_states[PARENT_AGENT_ID].internal_state
         tool_states = internal.get("tool_states", {})
         assert (
@@ -553,18 +545,14 @@ class TestSubAgentToolCheckpoint:
         cp.status = CheckpointStatus.ACTIVE
         backend.save(cp)
 
-        # Create fresh flow for resume
         flow2, parent2, sub_tool2 = create_subagent_flow(backend, mid_loop=True, max_calls=10, flow_id=FLOW_ID)
 
-        # Restore checkpoint onto flow2
         flow2._restore_from_checkpoint(cp)
 
-        # After restore, the SubAgentTool should have its call_count preserved
-        for tool in parent2.tools:
-            if isinstance(tool, SubAgentTool):
-                assert (
-                    tool._call_count >= 1
-                ), f"SubAgentTool._call_count was {tool._call_count} after restore, expected >= 1"
+        (restored_tool,) = (tool for tool in parent2.tools if isinstance(tool, SubAgentTool))
+        assert (
+            restored_tool._call_count >= 1
+        ), f"SubAgentTool._call_count was {restored_tool._call_count} after restore, expected >= 1"
 
     def test_subagent_max_calls_limit_after_resume(self, mocker):
         """After resume with call_count restored, max_calls limit is still enforced."""

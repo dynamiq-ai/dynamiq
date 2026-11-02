@@ -224,5 +224,4 @@ class TestSubAgentDelegateFinal:
 
         assert "delegate_final" in properties
         assert "action_input" not in properties
-        # thought is still first
         assert list(properties.keys())[0] == "thought"

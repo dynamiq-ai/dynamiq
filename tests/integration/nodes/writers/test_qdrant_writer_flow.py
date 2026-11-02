@@ -52,7 +52,6 @@ def test_write_workflow(
         vector_store=mock_qdrant_vector_store, index_name="test-collection", сontent_key="content"
     )
 
-    # Build the indexing flow
     indexing_flow = Flow(
         id="test_indexing_flow",
         nodes=[
@@ -60,7 +59,6 @@ def test_write_workflow(
         ],
     )
 
-    # Run the indexing flow
     input_data = {"documents": mock_documents}
     config = RunnableConfig(callbacks=[TracingCallbackHandler()])
     response = indexing_flow.run(

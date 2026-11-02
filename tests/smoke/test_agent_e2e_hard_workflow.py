@@ -164,8 +164,7 @@ EXPECTED_FILES = ["app.py", "index.html"]
 
 @pytest.fixture(scope="module")
 def run_config():
-    # Research + codegen + sandbox execution; matches the 150s per-case timeout cap.
-    return RunnableConfig(request_timeout=150)
+    return RunnableConfig()
 
 
 def find_recovery_events(agent: Agent) -> list[tuple[str, str]]:

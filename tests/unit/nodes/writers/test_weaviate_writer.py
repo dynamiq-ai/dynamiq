@@ -24,7 +24,6 @@ class MockWeaviateVectorStore(WeaviateVectorStore):
 @pytest.fixture
 def mock_weaviate_vector_store():
     """Create a mock WeaviateVectorStore."""
-    # Use our class that inherits from WeaviateVectorStore
     mock_store = MockWeaviateVectorStore()
     return mock_store
 
@@ -32,7 +31,6 @@ def mock_weaviate_vector_store():
 @pytest.fixture
 def weaviate_document_writer(mock_weaviate_vector_store):
     """Create a WeaviateDocumentWriter with a mocked WeaviateVectorStore."""
-    # Disable init_components to avoid automatic initialization
     with patch.object(WeaviateDocumentWriter, "init_components"):
         writer = WeaviateDocumentWriter(vector_store=mock_weaviate_vector_store)
     return writer
@@ -41,7 +39,6 @@ def weaviate_document_writer(mock_weaviate_vector_store):
 @patch("dynamiq.connections.Weaviate.connect", return_value=MagicMock())
 def test_initialization_with_defaults(mock_connect):
     """Test initialization with default parameters."""
-    # We'll patch vector_store_cls and init_components to avoid making actual API calls
     mock_store = MockWeaviateVectorStore()
 
     with patch.object(WeaviateDocumentWriter, "init_components"):
@@ -52,7 +49,6 @@ def test_initialization_with_defaults(mock_connect):
 
 def test_initialization_with_vector_store(mock_weaviate_vector_store):
     """Test initialization with a provided vector store."""
-    # Disable init_components to avoid automatic initialization
     with patch.object(WeaviateDocumentWriter, "init_components"):
         writer = WeaviateDocumentWriter(vector_store=mock_weaviate_vector_store)
         assert writer.vector_store == mock_weaviate_vector_store
@@ -73,15 +69,11 @@ def test_vector_store_params(weaviate_document_writer):
 
 def test_tenant_in_vector_store_params():
     """Test that tenant_name is included in vector_store_params when specified."""
-    # Create a mock vector store that actually inherits from WeaviateVectorStore
     mock_store = MockWeaviateVectorStore()
 
-    # Disable init_components to avoid initialization
     with patch.object(WeaviateDocumentWriter, "init_components"):
-        # Create a writer with a tenant name and the mock vector store
         writer = WeaviateDocumentWriter(tenant_name="test_tenant", vector_store=mock_store)
 
-        # Check that tenant_name is in the params
         params = writer.vector_store_params
         assert "tenant_name" in params
         assert params["tenant_name"] == "test_tenant"
@@ -131,25 +123,19 @@ def test_execute_with_missing_documents_key(weaviate_document_writer):
 
 def test_writer_with_tenant():
     """Test that a writer can be created with a tenant name."""
-    # Mock the Weaviate connection
     mock_connect = MagicMock()
 
-    # Create a mock instance that will be returned
     mock_vector_store = MockWeaviateVectorStore()
 
-    # Apply patches
     with patch("dynamiq.connections.Weaviate.connect", return_value=mock_connect):
         with patch.object(WeaviateDocumentWriter, "connect_to_vector_store", return_value=mock_vector_store):
             with patch.object(WeaviateDocumentWriter, "init_components"):
-                # Create a writer with tenant name
                 writer = WeaviateDocumentWriter(
                     index_name="test_collection", create_if_not_exist=True, tenant_name="test_tenant"
                 )
 
-                # Assert tenant_name is stored in the writer
                 assert writer.tenant_name == "test_tenant"
 
-                # Check that params are properly set
                 params = writer.vector_store_params
                 assert params["tenant_name"] == "test_tenant"
                 assert params["index_name"] == "test_collection"

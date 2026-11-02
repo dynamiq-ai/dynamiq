@@ -290,7 +290,6 @@ def test_execute_with_retry_reinitializes_on_connection_error(
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            # First call: close client and raise connection error
             connection_node_instance.client.close()
             raise ConnectionError("Connection closed unexpectedly")
         else:
@@ -336,7 +335,6 @@ def test_execute_with_retry_succeeds_after_reconnection(
         attempt_count += 1
 
         if attempt_count == 1:
-            # First attempt: simulate connection failure
             connection_node_instance.client.close()
             raise ConnectionError("Connection closed")
         elif attempt_count == 2:

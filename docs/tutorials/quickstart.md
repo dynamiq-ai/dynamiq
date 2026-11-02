@@ -17,7 +17,7 @@ Or build the Python package from the source code:
 ```sh
 git clone https://github.com/dynamiq-ai/dynamiq.git
 cd dynamiq
-uv sync
+uv sync --extra all
 ```
 
 ## Examples

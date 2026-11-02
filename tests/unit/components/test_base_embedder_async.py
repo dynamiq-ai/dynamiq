@@ -213,7 +213,6 @@ class TestHuggingFaceAsyncOverrides:
         result = await embedder.embed_text_async("hello")
 
         call_kwargs = embedder._aembedding.await_args.kwargs
-        # HF sends a single string, not a list.
         assert call_kwargs["input"] == "hello"
         assert "api_base" in call_kwargs
         assert result["embedding"] == [0.1, 0.2]
@@ -247,7 +246,6 @@ class TestHuggingFaceAsyncOverrides:
 
         # Non-batched API → one call per text.
         assert embedder._aembedding.await_count == 3
-        # Each call received a single string, not a list.
         for call in embedder._aembedding.await_args_list:
             assert isinstance(call.kwargs["input"], str)
         assert len(embeddings) == 3

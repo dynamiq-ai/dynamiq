@@ -94,10 +94,8 @@ class InMemory(MemoryBackend):
         Returns:
             List of messages sorted by timestamp (oldest first)
         """
-        # Sort messages by timestamp
         sorted_messages = sorted(self.messages, key=lambda msg: msg.metadata.get("timestamp", 0))
 
-        # Apply limit if provided
         if limit and len(sorted_messages) > limit:
             return sorted_messages[-limit:]
 
@@ -146,32 +144,25 @@ class InMemory(MemoryBackend):
         # Apply filters first to reduce search space
         filtered_messages = self._apply_filters(self.messages, filters)
 
-        # If no query provided, return filtered messages
         if not query:
             sorted_messages = sorted(filtered_messages, key=lambda msg: msg.metadata.get("timestamp", 0))
             if limit:
                 return sorted_messages[-limit:]
             return sorted_messages
 
-        # Perform BM25 search with query
         query_terms = query.lower().split()
         document_texts = [msg.content for msg in filtered_messages]
 
-        # Handle empty document list
         if not document_texts:
             return []
 
-        # Calculate BM25 scores
         bm25 = BM25DocumentRanker(documents=document_texts)
         scored_messages = [(msg, bm25.score(query_terms, msg.content)) for msg in filtered_messages]
 
-        # Filter out zero scores
         scored_messages = [(msg, score) for msg, score in scored_messages if score > 0]
 
-        # Sort by score (descending)
         scored_messages.sort(key=lambda x: x[1], reverse=True)
 
-        # Apply limit
         result = [msg for msg, _ in scored_messages]
         if limit:
             return result[:limit]

@@ -41,17 +41,17 @@ def test_neptune_validate_label_rejects_invalid_labels():
     """Test that invalid labels raise ValueError."""
     invalid_labels = [
         "User`] RETURN * //",  # Cypher injection attempt
-        "Label-With-Dash",  # Contains dash
-        "Label With Space",  # Contains space
-        "123Label",  # Starts with number
-        "Label:Type",  # Contains colon
-        "Label;DROP",  # Contains semicolon
-        "Label`",  # Contains backtick
-        "Label'",  # Contains single quote
-        'Label"',  # Contains double quote
-        "",  # Empty string
-        "Label\nNewline",  # Contains newline
-        "Label\tTab",  # Contains tab
+        "Label-With-Dash",
+        "Label With Space",
+        "123Label",
+        "Label:Type",
+        "Label;DROP",
+        "Label`",
+        "Label'",
+        'Label"',
+        "",
+        "Label\nNewline",
+        "Label\tTab",
     ]
     for label in invalid_labels:
         with pytest.raises(ValueError, match=f"Invalid Neptune label: '{re.escape(label)}'"):
@@ -63,7 +63,6 @@ def test_neptune_sample_node_properties_validates_labels(monkeypatch):
     client = MagicMock()
     store = NeptuneGraphStore(client=client, endpoint="http://localhost:8182/openCypher")
 
-    # Mock run_cypher to track calls
     run_cypher_calls = []
 
     def mock_run_cypher(query, parameters=None, **kwargs):
@@ -72,13 +71,11 @@ def test_neptune_sample_node_properties_validates_labels(monkeypatch):
 
     store.run_cypher = mock_run_cypher
 
-    # Valid labels should work
     store._sample_node_properties(["User", "Person"])
     assert len(run_cypher_calls) == 2
     assert "MATCH (a:`User`)" in run_cypher_calls[0]
     assert "MATCH (a:`Person`)" in run_cypher_calls[1]
 
-    # Invalid label should raise
     with pytest.raises(ValueError, match="Invalid Neptune label"):
         store._sample_node_properties(["User`] RETURN * //"])
 
@@ -96,13 +93,11 @@ def test_neptune_sample_edge_properties_validates_labels(monkeypatch):
 
     store.run_cypher = mock_run_cypher
 
-    # Valid labels should work
     store._sample_edge_properties(["KNOWS", "WORKS_AT"])
     assert len(run_cypher_calls) == 2
     assert "MATCH ()-[e:`KNOWS`]->()" in run_cypher_calls[0]
     assert "MATCH ()-[e:`WORKS_AT`]->()" in run_cypher_calls[1]
 
-    # Invalid label should raise
     with pytest.raises(ValueError, match="Invalid Neptune label"):
         store._sample_edge_properties(["KNOWS`] RETURN * //"])
 
@@ -120,11 +115,9 @@ def test_neptune_sample_triples_validates_labels(monkeypatch):
 
     store.run_cypher = mock_run_cypher
 
-    # Valid labels should work
     store._sample_triples(["KNOWS"])
     assert len(run_cypher_calls) == 1
     assert "MATCH (a)-[e:`KNOWS`]->(b)" in run_cypher_calls[0]
 
-    # Invalid label should raise
     with pytest.raises(ValueError, match="Invalid Neptune label"):
         store._sample_triples(["KNOWS`] RETURN * //"])

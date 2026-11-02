@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from functools import cached_property
-from importlib.metadata import distributions
+from importlib.metadata import PackageNotFoundError, distribution
 from typing import Any
 from uuid import UUID
 
@@ -155,13 +155,14 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         Returns:
             dict: Host information including installed packages.
         """
-        return {
-            "installed_pkgs": [
-                {"name": dist.metadata["Name"], "version": dist.version}
-                for dist in distributions()
-                if dist.metadata.get("Name") in self.installed_pkgs
-            ],
-        }
+        versions = {}
+        for name in self.installed_pkgs:
+            try:
+                dist = distribution(name)
+            except PackageNotFoundError:
+                continue
+            versions[dist.metadata["Name"]] = dist.version  # two spellings of one package in the list report it once
+        return {"installed_pkgs": [{"name": name, "version": version} for name, version in versions.items()]}
 
     def _get_node_base_run(self, serialized: dict[str, Any], **kwargs: Any) -> Run:
         """Get base run details for a node.

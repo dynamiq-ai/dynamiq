@@ -4,7 +4,6 @@ from dynamiq.evaluations.metrics import ContextPrecisionEvaluator
 
 
 def test_context_precision_evaluator(openai_node):
-    # Sample data
     questions = [
         "What can you tell me about Albert Einstein?",
         "Who won the 2020 ICC World Cup?",
@@ -60,7 +59,6 @@ def test_context_precision_evaluator(openai_node):
 
     evaluator = ContextPrecisionEvaluator(llm=openai_node)
 
-    # Prepare mocked results for each context evaluation (6 results total)
     mocked_run_results = [
         # First question, first context
         {
@@ -130,12 +128,10 @@ def test_context_precision_evaluator(openai_node):
         verbose=False,
     )
 
-    # Extract scores from each run result.
     results = output.results
     expected_scores = [1.0, 1.0, 0.0]
     for result, expected in zip(results, expected_scores):
         assert abs(result.score - expected) < 0.01, f"Expected {expected}, got {result.score}"
-        # Also assert that reasoning is not empty.
         assert result.reasoning.strip() != "", "Reasoning should not be empty"
 
 
@@ -146,7 +142,6 @@ def test_context_precision_evaluator_single_list_of_contexts(openai_node):
     """
     question = ["Tell me about Python programming language."]
     answer = ["Python is a high-level, interpreted programming language known for its readability."]
-    # Provide a single list of contexts (list[str])
     contexts_list = [
         "Python is an interpreted language created by Guido van Rossum, first released in 1991.",
         "It's dynamically typed and garbage-collected, and supports multiple programming paradigms.",
@@ -155,7 +150,6 @@ def test_context_precision_evaluator_single_list_of_contexts(openai_node):
 
     evaluator = ContextPrecisionEvaluator(llm=openai_node)
 
-    # Expected mocked results for each context string
     mocked_run_results = [
         {
             "results": [
@@ -185,13 +179,11 @@ def test_context_precision_evaluator_single_list_of_contexts(openai_node):
         verbose=False,
     )
 
-    # Since we have three contexts for the single question,
-    # compute expected average precision.
-    # Our mocked verdicts are [1, 1, 0]:
-    # For i=0: precision= 1/1=1, for i=1: precision=2/2=1; sum=2, total relevant=2 => avg=1.0.
+    # Average precision over the three contexts, whose mocked verdicts are [1, 1, 0]:
+    # The mocked verdicts are [1, 1, 0]: precision is 1/1 at the first context and 2/2 at the second, so the
+    # average over the two relevant contexts is 1.0.
     expected_final_score = 1.0
 
-    # There is only one result.
     result = output.results[0]
     assert abs(result.score - expected_final_score) < 0.01, f"Expected {expected_final_score}, got {result.score}"
     assert result.reasoning.strip() != "", "Reasoning should not be empty"

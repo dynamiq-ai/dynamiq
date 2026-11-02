@@ -690,8 +690,7 @@ def create_agent(streaming_enabled: bool = False):
 
     llm = AnthropicLLM(
         name="claude",
-        model="claude-3-7-sonnet-20250219",
-        temperature=0.1,
+        model="claude-sonnet-5-5",
         max_tokens=8000,
         budget_tokens=4000,
     )

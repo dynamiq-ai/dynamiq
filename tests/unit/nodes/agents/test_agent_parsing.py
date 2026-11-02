@@ -80,19 +80,6 @@ Action Input: {"params": {"nested": {"deeply": {"key": "value"}}, "list": [1, 2,
     assert action_input == {"params": {"nested": {"deeply": {"key": "value"}}, "list": [1, 2, 3]}}
 
 
-def test_parse_default_action_json_with_list():
-    """Test parsing with a list."""
-    output = """Thought: Complex data structure
-Action: API Call
-Action Input: {"params": {"nested": {"deeply": {"key": "value"}}, "list": [1, 2, 3]}}"""
-
-    thought, action, action_input = parser.parse_default_action(output)
-
-    assert thought == "Complex data structure"
-    assert action == "API Call"
-    assert action_input == {"params": {"nested": {"deeply": {"key": "value"}}, "list": [1, 2, 3]}}
-
-
 def test_parse_default_action_json_with_escaped_quotes():
     """Test parsing JSON containing escaped quotes."""
     output = """Thought: thinking
@@ -524,7 +511,6 @@ def test_agent_default_returns_string_without_response_format():
     """Regression: agents without response_format still return strings."""
     agent = _make_agent()
     assert agent.response_format is None
-    # _coerce_to_response_format is a no-op
     assert agent._coerce_to_response_format("plain string") == "plain string"
 
 
@@ -692,16 +678,13 @@ def test_agent_uses_resolved_schema_for_param_modes():
         required = set(params.get("required", [])) - {"thought"}
         return props, required
 
-    # Baseline: the agent exposes optional 'suffix' and does not require it.
     base_props, base_required = echo_action_input(build_agent(EchoTool()))
     assert "suffix" in base_props
     assert "suffix" not in base_required
 
-    # hidden: the agent no longer exposes 'suffix' to the LLM at all.
     hidden_props, _ = echo_action_input(build_agent(EchoTool(input_param_modes={"suffix": InputParamMode.HIDDEN})))
     assert "suffix" not in hidden_props
 
-    # required: the agent now obliges the LLM to provide 'suffix'.
     _, required_required = echo_action_input(
         build_agent(EchoTool(input_param_modes={"suffix": InputParamMode.REQUIRED}))
     )
@@ -746,7 +729,6 @@ def test_strip_inaccessible_fields():
     assert cleaned == {"text": "hi", "extra": 1}
     assert stripped == ["internal_id"]
 
-    # No schema: nothing to strip.
     assert strip_inaccessible_fields(None, data) == (data, [])
 
 

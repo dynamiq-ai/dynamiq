@@ -322,7 +322,6 @@ class DaytonaSandbox(Sandbox):
                 sandbox = self._ensure_sandbox()
                 preview = sandbox.get_preview_link(port)
                 public_url = preview.url
-                # Extract host from URL
                 if public_url and public_url.startswith("https://"):
                     public_host = public_url[len("https://") :]
                 elif public_url and public_url.startswith("http://"):

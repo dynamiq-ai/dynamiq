@@ -76,7 +76,7 @@ class FileMappedInput(BaseModel):
     """Structure for storing file mapped inputs."""
 
     input: Any
-    files: list[io.BytesIO]  # List of BytesIO objects or FileInfo objects
+    files: list[io.BytesIO]
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @field_serializer("files")
@@ -213,7 +213,6 @@ class XMLParser:
         extracted_contents = {}
         tags_to_process = set(XMLParser.DEFAULT_PRESERVE_TAGS)
 
-        # Add required and optional tags to the set if provided
         if required_tags:
             tags_to_process.update(required_tags)
         if optional_tags:
@@ -943,13 +942,13 @@ def is_image_file(file) -> bool:
             return False
 
         signatures = {
-            b"\xff\xd8\xff": "jpg/jpeg",  # JPEG
-            b"\x89PNG\r\n\x1a\n": "png",  # PNG
-            b"GIF87a": "gif",  # GIF87a
-            b"GIF89a": "gif",  # GIF89a
+            b"\xff\xd8\xff": "jpg/jpeg",
+            b"\x89PNG\r\n\x1a\n": "png",
+            b"GIF87a": "gif",
+            b"GIF89a": "gif",
             b"MM\x00*": "tiff",  # TIFF (big endian)
             b"II*\x00": "tiff",  # TIFF (little endian)
-            b"BM": "bmp",  # BMP
+            b"BM": "bmp",
         }
 
         for sig, fmt in signatures.items():

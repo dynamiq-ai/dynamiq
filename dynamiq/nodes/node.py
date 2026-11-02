@@ -7,6 +7,7 @@ import inspect
 import logging
 import random
 import reprlib
+import sys
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -25,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, 
 
 from dynamiq.cache.utils import cache_wf_entity, cache_wf_entity_async
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler, TracingCallbackHandler
+from dynamiq.callbacks.base import READS_STREAM_SERIALIZATION_ONLY
 from dynamiq.checkpoints.checkpoint import CheckpointNodeMixin
 from dynamiq.checkpoints.types import RunPausedException
 from dynamiq.connections import BaseConnection
@@ -108,6 +110,47 @@ def ensure_config(config: RunnableConfig = None) -> RunnableConfig:
     return config
 
 
+# Node serializations reused by `run_on_node_execute_stream` inside `stream_serialization_scope`, keyed by
+# (id(node), for_tracing). A context variable, so concurrent streams on other tasks or threads never share one.
+_stream_serializations: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "dynamiq_stream_serializations", default=None
+)
+
+
+@contextmanager
+def stream_serialization_scope() -> Iterator[None]:
+    """Serialize each node once for all the stream events emitted inside the block.
+
+    Every stream event hands its callbacks the emitting node's `to_dict()`, and a token stream emits one event per
+    token. Inside this block the first event's serialization is reused for the rest. Wrap only stretches in which no
+    emitting node changes a serialized field, such as one LLM response stream.
+    """
+    token = _stream_serializations.set({})
+    try:
+        yield
+    finally:
+        _stream_serializations.reset(token)
+
+
+def _copy_serialized(value: Any) -> Any:
+    """A copy of a `to_dict()` result sharing no mutable value with it.
+
+    `copy.deepcopy` costs more than serializing the node again, so the plain dicts, lists and tuples a serialization
+    is made of are walked here, at a fraction of that. Any other container (a subclass, a set), rare in one, goes to
+    `copy.deepcopy`; what is left (scalars, enums) is immutable.
+    """
+    value_type = type(value)
+    if value_type is dict:
+        return {key: _copy_serialized(item) for key, item in value.items()}
+    if value_type is list:
+        return [_copy_serialized(item) for item in value]
+    if value_type is tuple:
+        return tuple(_copy_serialized(item) for item in value)
+    if isinstance(value, (dict, list, tuple, set)):
+        return copy.deepcopy(value)
+    return value
+
+
 # retry waits are spread by this fraction so nodes failing together do not all wake at once
 RETRY_JITTER_RATIO = 0.1
 
@@ -120,6 +163,8 @@ def is_retryable_error(exc: BaseException) -> bool:
     """
     if getattr(exc, "retryable", True) is False:
         return False
+    if "litellm" not in sys.modules:  # the error cannot come from litellm, and importing it takes seconds
+        return True
     try:
         from litellm.exceptions import (
             AuthenticationError,
@@ -688,11 +733,9 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         """
         params = inspect.signature(func).parameters
 
-        # Check if the function accepts the at least 'inputs' and 'outputs' parameters
         if len(params) >= 2:
             return
 
-        # Check if the function accepts **kwargs
         elif params and list(params.values())[0].kind == inspect.Parameter.VAR_KEYWORD:
             return
 
@@ -756,14 +799,12 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         Returns:
             dict: Transformed input data.
         """
-        # Apply input transformer
         if (self.input_transformer.path or self.input_transformer.selector) and use_input_transformer:
             depends_result_as_dict = {k: result.to_depend_dict() for k, result in depends_result.items()}
             inputs = self.transform(input_data | depends_result_as_dict, self.input_transformer)
         else:
             inputs = input_data | {k: result.to_tracing_depend_dict() for k, result in depends_result.items()}
 
-        # Apply input bindings
         for key, value in self.input_mapping.items():
             if isinstance(value, NodeOutputReference):
                 depend_result = depends_result.get(value.node.id)
@@ -845,7 +886,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         cloned_node = self.model_copy(deep=False)
 
         def _clone_nested(value: Any) -> Any:
-            # Do not attempt to copy modules/functions/classes or other callables
             if isinstance(value, (ModuleType, FunctionType)) or isinstance(value, type) or callable(value):
                 return value
             if getattr(value, "_clone_shared", False):
@@ -1386,7 +1426,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         transformed_output = self.transform_output(output, config=config, **kwargs)
         self.run_on_node_end(config.callbacks, transformed_output, **callback_kwargs)
 
-        # Clear stored approval response after successful completion
         self._pending_approval_response = None
 
         logger.info(
@@ -1822,9 +1861,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         try:
             return future.result(timeout=timeout)
         except TimeoutError:
-            # Cancel the future to prevent further execution if possible.
-            # Note: cancel() only works if the task hasn't started yet.
-            # For running tasks, we rely on executor.shutdown(cancel_futures=True).
+            # cancel() stops only a task that has not started; a running task is left to finish in its thread.
             future.cancel()
             raise
 
@@ -1966,7 +2003,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             ValueError: If input streaming is not enabled, timeout is exceeded, or the done event is set
                 before receiving valid data.
         """
-        # Use runnable streaming configuration. If not found use node streaming configuration
         streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
         if not streaming.input_streaming_enabled:
             raise ValueError("Input streaming is not enabled.")
@@ -2249,20 +2285,45 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         """
         Run callbacks on node execute stream.
 
+        Callbacks that keep the no-op `on_node_execute_stream` of `BaseCallbackHandler` (tracing, for one) are
+        skipped, so the node is not serialized for them. Inside `stream_serialization_scope` the node is serialized
+        once for the whole scope rather than once per event, and only callbacks not marked with
+        `reads_stream_serialization_only` receive a copy of it.
+
         Args:
             callbacks (list[BaseCallbackHandler]): List of callback handlers.
             chunk (dict[str, Any]): Chunk of streaming data.
             **kwargs: Additional keyword arguments.
         """
+        serializations = _stream_serializations.get()
         for callback in callbacks + self.callbacks:
+            on_stream = getattr(type(callback), "on_node_execute_stream", None)
+            if on_stream is BaseCallbackHandler.on_node_execute_stream:
+                continue
             try:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
+                for_tracing = isinstance(callback, TracingCallbackHandler)
+                if for_tracing:
                     chunk = chunk.to_dict(for_tracing=True) if hasattr(chunk, "to_dict") else chunk
-                callback.on_node_execute_stream(self.to_dict(**dict_kwargs), chunk, **kwargs)
+                read_only = getattr(on_stream, READS_STREAM_SERIALIZATION_ONLY, False)
+                serialized = self._stream_serialization(serializations, for_tracing, read_only)
+                callback.on_node_execute_stream(serialized, chunk, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
+
+    def _stream_serialization(self, serializations: dict | None, for_tracing: bool, read_only: bool) -> dict:
+        """The node's `to_dict()` for a stream event, reused from `serializations` when a scope provides it."""
+        dict_kwargs = {"for_tracing": True} if for_tracing else {}
+        if serializations is None:
+            return self.to_dict(**dict_kwargs)
+        key = (id(self), for_tracing)
+        if (entry := serializations.get(key)) is None:
+            # The entry holds the node too, so its id cannot be reused by another node while the scope lives.
+            entry = serializations[key] = (self, self.to_dict(**dict_kwargs))
+        if read_only:
+            return entry[1]
+        # A copy per event, as fresh as a new `to_dict()`: a callback editing its dict at any depth cannot change what
+        # the next callback or event receives.
+        return _copy_serialized(entry[1])
 
     @abstractmethod
     def execute(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs) -> Any:
@@ -2575,7 +2636,6 @@ class VectorStoreNode(ConnectionNode, BaseVectorStoreParams, ABC):
         connection_manager = connection_manager or ConnectionManager()
         self._connection_manager = connection_manager
 
-        # Use vector_store client if it is already initialized
         if self.vector_store:
             self.client = self.vector_store.client
 

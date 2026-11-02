@@ -15,7 +15,7 @@ from dynamiq.storages.vector import WeaviateVectorStore
 @pytest.fixture
 def mock_weaviate_vector_store():
     mock_store = MagicMock(spec=WeaviateVectorStore)
-    mock_store.client = MagicMock()  # Add the client attribute to the mock
+    mock_store.client = MagicMock()
     return mock_store
 
 

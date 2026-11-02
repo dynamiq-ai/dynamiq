@@ -183,20 +183,16 @@ def _parse_metadata_fields_in_metadata(field: str, value: Any) -> str:
         str: The modified field with the correct type casting.
     """
 
-    # Get the field name from the metadata field
     field_name = field.split(".", 1)[-1]
 
-    # Retrieve the field using the ->> operator
     field = f"metadata->>'{field_name}'"
 
-    # Determine the type for casting
     type_value = None
     if isinstance(value, list) and value:
         type_value = PYTHON_TO_PGVECTOR_DATA_TYPE.get(type(value[0]))
     else:
         type_value = PYTHON_TO_PGVECTOR_DATA_TYPE.get(type(value))
 
-    # Cast the field to the correct type
     if type_value:
         field = f"({field})::{type_value}"
 

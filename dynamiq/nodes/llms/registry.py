@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from dynamiq.utils.litellm import on_litellm_import
 from dynamiq.utils.logger import logger
 
 REGISTRY_FILE = Path(__file__).with_name("model_registry.json")
@@ -94,6 +95,8 @@ class ModelRegistry:
     def load(self, path: Path | str) -> None:
         """Load model definitions from a JSON file.
 
+        The definitions are synced into litellm before dynamiq first uses it.
+
         Args:
             path: Path to the JSON file.
         """
@@ -111,7 +114,7 @@ class ModelRegistry:
                 continue
             self._models[key.lower()] = value
         logger.debug("ModelRegistry: loaded %d models from %s", len(self._models), path)
-        self.sync_to_litellm()
+        on_litellm_import(self.sync_to_litellm)
 
     def sync_to_litellm(self, models: dict[str, ModelMetadata | dict[str, Any]] | None = None) -> None:
         """Sync registry entries into litellm's in-memory ``model_cost``.

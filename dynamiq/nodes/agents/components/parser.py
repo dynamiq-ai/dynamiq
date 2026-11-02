@@ -68,10 +68,8 @@ def parse_default_action(output: str) -> tuple[str | None, str | None, dict | li
             action_match = all_actions[-1]
             action_name = action_match.group(1).strip()
 
-            # Extract JSON starting after "Action Input:"
             json_str_candidate = output[input_match.end() :].strip()
 
-            # Remove markdown code block markers first
             for marker in ["```json", "```JSON", "```"]:
                 json_str_candidate = json_str_candidate.replace(marker, "").strip()
 
@@ -123,7 +121,6 @@ def parse_default_action(output: str) -> tuple[str | None, str | None, dict | li
                         recoverable=True,
                     )
             else:
-                # Brace counting failed - no valid JSON structure found
                 raise ActionParsingException(
                     f"Could not parse JSON structure in Action Input for {action_name}. "
                     f"Expected JSON object starting with '{{' but found: "

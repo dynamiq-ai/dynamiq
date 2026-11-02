@@ -56,10 +56,9 @@ class ZenRowsTool(ConnectionNode):
     input_schema: ClassVar[type[ZenRowsInputSchema]] = ZenRowsInputSchema
 
     def _build_request_kwargs(self, input_data: ZenRowsInputSchema) -> dict[str, Any]:
-        params = {
-            "url": input_data.url,
-            "markdown_response": str(self.markdown_response).lower(),
-        }
+        params = {"url": input_data.url or self.url}
+        if self.markdown_response:
+            params["response_type"] = "markdown"
         return {
             "method": self.connection.method,
             "url": self.connection.url,
@@ -76,17 +75,20 @@ class ZenRowsTool(ConnectionNode):
                 recoverable=True,
             )
         scrape_result = response.text
+        url = input_data.url or self.url
         if self.is_optimized_for_agents:
-            result = f"## Source URL\n{input_data.url}\n\n## Scraped Result\n\n{scrape_result}\n"
+            result = f"## Source URL\n{url}\n\n## Scraped Result\n\n{scrape_result}\n"
         else:
-            result = {"url": input_data.url, "content": scrape_result}
+            result = {"url": url, "content": scrape_result}
         return {"content": result}
 
     def _wrap_request_exception(self, exc: Exception) -> ToolExecutionException:
-        logger.error(f"Tool {self.name} - {self.id}: unexpected error occurred. Error: {str(exc)}")
+        # A request error quotes the URL, whose query carries the API key.
+        error = str(exc).replace(self.connection.api_key, "***") if self.connection.api_key else str(exc)
+        logger.error(f"Tool {self.name} - {self.id}: unexpected error occurred. Error: {error}")
         return ToolExecutionException(
             f"Tool '{self.name}' encountered an unexpected error. "
-            f"Error: {str(exc)}. Please analyze the error and take appropriate action.",
+            f"Error: {error}. Please analyze the error and take appropriate action.",
             recoverable=True,
         )
 
@@ -112,7 +114,7 @@ class ZenRowsTool(ConnectionNode):
         except ToolExecutionException:
             raise
         except Exception as e:
-            raise self._wrap_request_exception(e)
+            raise self._wrap_request_exception(e) from None
 
     async def execute_async(
         self, input_data: ZenRowsInputSchema, config: RunnableConfig = None, **kwargs
@@ -129,4 +131,4 @@ class ZenRowsTool(ConnectionNode):
         except ToolExecutionException:
             raise
         except Exception as e:
-            raise self._wrap_request_exception(e)
+            raise self._wrap_request_exception(e) from None

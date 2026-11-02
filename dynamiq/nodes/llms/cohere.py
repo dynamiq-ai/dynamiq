@@ -69,6 +69,20 @@ class Cohere(BaseLLM):
         """
         return to_strict_subset_function(fn, attach_flag=False)
 
+    def get_messages(self, prompt, input_data) -> list[dict]:
+        """Format messages the way Cohere's Chat API V2 accepts them.
+
+        It rejects a ``name`` on tool results and text next to the tool calls of an assistant message.
+        """
+        messages = []
+        for message in super().get_messages(prompt, input_data):
+            if message.get("role") == "tool":
+                message = {key: value for key, value in message.items() if key != "name"}
+            elif message.get("tool_calls"):
+                message = {**message, "content": None}
+            messages.append(message)
+        return messages
+
     def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """Forward Cohere's request-level ``strict_tools`` flag when strict is on.
 

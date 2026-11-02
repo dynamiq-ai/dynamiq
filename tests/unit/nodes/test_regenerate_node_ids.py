@@ -498,3 +498,18 @@ def test_the_agents_a_hook_approval_is_asked_under_wait_for_a_reply():
     # An inherited hook asks in every agent beneath the one that has it.
     inheriting = build_agent([asking(inherit=True)], id="parent", tools=[sub_agent(build_agent([], id="helper"))])
     assert waiting(inheriting) == {"parent", "helper"}
+
+
+def test_a_clone_keeps_its_connection_id_and_so_the_cached_client():
+    from dynamiq.connections import Http, HTTPMethod
+    from dynamiq.connections.managers import ConnectionManager
+    from dynamiq.nodes.tools.http_api_call import HttpApiCall
+
+    connection = Http(id="conn", url="https://example.invalid", method=HTTPMethod.GET)
+    node = HttpApiCall(connection=connection, is_postponed_component_init=True)
+
+    clone = regenerate_node_ids(node.clone(), {})
+
+    assert clone.id != node.id and clone.connection.id == "conn"
+    manager = ConnectionManager()
+    assert manager.get_connection_id(clone.connection) == manager.get_connection_id(node.connection)

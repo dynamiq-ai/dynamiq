@@ -49,9 +49,6 @@ def _fact(fact_id, user_id, content, content_hash=None):
     )
 
 
-# --- insert / get / get_by_hash ---
-
-
 def test_pgvector_insert_then_get(backend, fake_embedder):
     fact = _fact("f1", "u1", "hello")
     backend.insert(fact, fake_embedder.embed("hello"))
@@ -84,9 +81,6 @@ def test_pgvector_metadata_round_trip(backend, fake_embedder):
     assert fetched.metadata == {"category": "preference", "score": 0.8}
 
 
-# --- delete / list_by_scope / delete_scope ---
-
-
 def test_pgvector_delete(backend, fake_embedder):
     backend.insert(_fact("f1", "u1", "x"), fake_embedder.embed("x"))
     backend.delete("f1")
@@ -113,9 +107,6 @@ def test_pgvector_delete_scope(backend, fake_embedder):
     assert deleted == 2
     assert backend.list_by_scope({"user_id": "u1"}) == []
     assert len(backend.list_by_scope({"user_id": "u2"})) == 1
-
-
-# --- search ---
 
 
 def test_pgvector_search_relevance_ordered(backend, fake_embedder):

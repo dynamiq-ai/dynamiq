@@ -68,29 +68,24 @@ def test_agent_initialization_with_model_specific_prompts(test_llm, inference_mo
         delegation_allowed=True,
     )
 
-    # Verify prompt manager is initialized
     assert agent.system_prompt_manager is not None
     assert isinstance(agent.system_prompt_manager, AgentPromptManager)
 
-    # Verify model name is set (gpt-5.1 from test_llm fixture)
+    # gpt-5.1 from test_llm fixture
     assert agent.system_prompt_manager.model_name == "openai/gpt-5.1"
 
-    # Verify role block exists and contains the role text
     assert "role" in agent.system_prompt_manager._prompt_blocks
     assert "helpful assistant" in agent.system_prompt_manager._prompt_blocks["role"].lower()
 
-    # Generate prompt and verify it's not empty
     prompt = agent.system_prompt_manager.generate_prompt()
     assert prompt is not None
 
-    # Verify delegation instructions are in the prompt for all modes
     if expected_delegation_text:
         assert expected_delegation_text in prompt, (
             f"Expected delegation instructions not found in {inference_mode} mode for GPT model. "
             f"Looking for: {expected_delegation_text[:100]}..."
         )
 
-    # Verify GPT-specific override is being used for applicable inference modes
     if inference_mode == InferenceMode.XML:
         assert GPT_REACT_BLOCK_XML_INSTRUCTIONS_SINGLE == get_prompt_constant(
             "gpt-5.1", "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE", None
@@ -104,14 +99,12 @@ def test_agent_initialization_with_model_specific_prompts(test_llm, inference_mo
 def test_graph_manager_prompt_blocks_setup(test_llm):
     """Test that GraphManager properly sets up orchestrator-specific prompt blocks."""
 
-    # Create GraphManager
     graph_manager = GraphAgentManager(
         name="TestGraphManager",
         id="test_graph_manager",
         llm=test_llm,
     )
 
-    # Verify prompt manager is initialized
     assert graph_manager.system_prompt_manager is not None
     assert isinstance(graph_manager.system_prompt_manager, AgentPromptManager)
 
@@ -143,13 +136,11 @@ def test_file_tools_persist_across_resets(test_llm):
         tools=[],
     )
 
-    # Verify initially no file tools
     initial_tool_count = len(agent.tools)
     initial_tool_description = agent.tool_description
     assert "file-read" not in initial_tool_description
     assert "file-search" not in initial_tool_description
 
-    # Create a dummy file
     dummy_file = BytesIO(b"test content")
     dummy_file.name = "test.txt"
     dummy_file.seek(0)
@@ -161,24 +152,20 @@ def test_file_tools_persist_across_resets(test_llm):
     }
 
     try:
-        # This will add file tools
         agent.run(input_data=input_data_with_files, config=RunnableConfig())
     except Exception:
         # Execution may fail due to API calls, but tool addition happens before that
         pass
 
-    # Verify file tools were added
     assert len(agent.tools) > initial_tool_count
     updated_tool_description = agent.tool_description
     assert "file-read" in updated_tool_description or "file" in updated_tool_description.lower()
 
-    # Verify _initial_variables was updated (the fix)
     assert agent.system_prompt_manager._initial_variables["tool_description"] == updated_tool_description
 
-    # Call reset (simulates end of run)
+    # Simulates end of run
     agent.reset_run_state()
 
-    # Verify tool_description still includes file tools after reset
     after_reset_tool_description = agent.system_prompt_manager._prompt_variables["tool_description"]
     assert after_reset_tool_description == updated_tool_description
     assert "FileReadTool" in after_reset_tool_description or "file" in after_reset_tool_description.lower()
@@ -193,7 +180,6 @@ def test_file_tools_persist_across_resets(test_llm):
     except Exception:
         pass
 
-    # Verify tool description is still correct (includes file tools)
     final_tool_description = agent.system_prompt_manager._prompt_variables["tool_description"]
     assert final_tool_description == updated_tool_description
     assert "FileReadTool" in final_tool_description or "file" in final_tool_description.lower()
@@ -214,17 +200,13 @@ def test_agent_serialization_excludes_system_prompt_manager(test_llm):
         tools=[],
     )
 
-    # Verify system_prompt_manager exists
     assert agent.system_prompt_manager is not None
     assert isinstance(agent.system_prompt_manager, AgentPromptManager)
 
-    # Serialize agent to dict
     agent_dict = agent.to_dict()
 
-    # Verify system_prompt_manager is NOT in serialized output
     assert "system_prompt_manager" not in agent_dict
 
-    # Verify it's in the exclude list
     assert "system_prompt_manager" in agent.to_dict_exclude_params
 
 
@@ -239,16 +221,13 @@ def test_instructions_field(test_llm):
         delegation_allowed=True,
     )
 
-    # Instructions appear in operational_instructions block alongside delegation
     ops_block = agent.system_prompt_manager._prompt_blocks.get("operational_instructions", "")
     assert "Custom user instruction." in ops_block
     assert "delegate_final" in ops_block
 
-    # Instructions render in the final prompt
     prompt = agent.system_prompt_manager.generate_prompt()
     assert "Custom user instruction." in prompt
 
-    # Jinja syntax in instructions doesn't crash rendering
     agent2 = Agent(name="TestAgent2", llm=test_llm, instructions="Use {{ user_name }}.", tools=[])
     prompt2 = agent2.system_prompt_manager.generate_prompt()
     assert "{{ user_name }}" in prompt2

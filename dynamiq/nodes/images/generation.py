@@ -19,6 +19,7 @@ from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.utils.litellm import get_litellm
 from dynamiq.utils.logger import logger
 
 
@@ -204,10 +205,7 @@ Examples:
         if kwargs.get("client") is None and kwargs.get("connection") is None:
             kwargs["connection"] = OpenAIConnection()
         super().__init__(**kwargs)
-
-        from litellm import image_generation
-
-        self._image_generation = image_generation
+        self._image_generation = get_litellm().image_generation
 
     @property
     def generation_params(self) -> dict:

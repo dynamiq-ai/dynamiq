@@ -42,8 +42,9 @@ def get_ai21_workflow(
 @pytest.mark.parametrize(
     ("model", "expected_model"),
     [
-        ("ai21/jamba-1.5-mini", "ai21/jamba-1.5-mini"),
-        ("jamba-1.5-mini", "ai21/jamba-1.5-mini"),
+        ("ai21/jamba-1.5-mini", "ai21_chat/jamba-1.5-mini"),
+        ("jamba-1.5-mini", "ai21_chat/jamba-1.5-mini"),
+        ("ai21_chat/jamba-1.5-mini", "ai21_chat/jamba-1.5-mini"),
     ],
 )
 def test_workflow_with_ai21_llm(mock_llm_response_text, mock_llm_executor, model, expected_model):

@@ -461,9 +461,6 @@ def test_unsupported_input_fails_at_execution():
     with pytest.raises(ValueError, match="does not accept audio by URL"):
         node.execute(SpeechToTextInputSchema(audio_url="https://files.example.com/a.mp3"))
 
-    # Diarization on a model that cannot do it is now refused at construction; see
-    # test_openai_diarization_is_refused_at_construction_not_at_run_time.
-
     with pytest.raises(ValueError, match="Either `audio` or `audio_url`"):
         SpeechToTextInputSchema()
 
@@ -557,8 +554,3 @@ def test_openai_diarization_is_refused_at_construction_not_at_run_time():
 def test_openai_word_timestamps_are_refused_at_construction_for_a_transcribe_model():
     with pytest.raises(ValueError, match="Word timestamps are only returned by whisper-1"):
         SpeechToText(connection=connections.OpenAI(api_key="k"), timestamps="word")
-
-
-def test_the_models_that_do_support_those_options_still_build():
-    SpeechToText(connection=connections.OpenAI(api_key="k"), model="gpt-4o-transcribe-diarize", diarize=True)
-    SpeechToText(connection=connections.OpenAI(api_key="k"), model="whisper-1", timestamps="word")

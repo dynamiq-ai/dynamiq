@@ -57,9 +57,6 @@ def _points(mock_completion):
     return mock_completion.call_args.kwargs.get("cache_control_injection_points")
 
 
-# -- default_cache_control: which nodes get a config, and when the caller wins --------------
-
-
 def test_unset_anthropic_gets_a_rolling_breakpoint_at_minus_one():
     control = default_cache_control(_anthropic())
     assert isinstance(control, AnthropicCacheControl)
@@ -115,9 +112,6 @@ def test_models_with_caching_support_are_enabled(model):
     assert default_cache_control(_bedrock(model)) is not None
 
 
-# -- the request the agent actually sends ---------------------------------------------------
-
-
 def test_agent_run_sends_both_breakpoints(mock_llm_executor):
     _run(_anthropic())
 
@@ -168,9 +162,6 @@ def test_openai_agent_sends_no_breakpoints(mock_llm_executor):
     _run(_openai())
 
     assert _points(mock_llm_executor) is None
-
-
-# -- isolation: the config must not outlive the call ----------------------------------------
 
 
 def test_the_config_is_written_once_and_never_restored(mocker):
@@ -226,9 +217,6 @@ def test_parallel_subagents_sharing_one_llm(mocker):
     assert llm.cache_control is not None
 
 
-# -- what construction writes onto the node -------------------------------------------------
-
-
 def test_construction_writes_the_config_onto_the_node():
     llm = _anthropic()
     _agent(llm)
@@ -259,9 +247,6 @@ def test_a_second_agent_does_not_rewrite_the_config():
     _agent(llm)
 
     assert llm.cache_control is written
-
-
-# -- the fallback chain ---------------------------------------------------------------------
 
 
 def test_fallback_llm_also_gets_the_default():
@@ -295,9 +280,6 @@ def test_a_cyclic_fallback_chain_terminates():
     assert llm.cache_control is not None
 
 
-# -- accepted: callers sharing the node inherit it ------------------------------------------
-
-
 def test_the_summarizer_shares_the_cached_llm(mock_llm_executor):
     """The ContextManagerTool is built with `llm=self.llm`, so summarization now sends
     breakpoints too. Cost-only (a one-shot prompt writes a cache nothing reads back), and
@@ -318,9 +300,6 @@ def test_bare_node_outside_an_agent_still_sends_nothing():
 
 def test_opted_out_node_outside_an_agent_still_sends_nothing():
     assert "cache_control_injection_points" not in _anthropic(cache_control=False).update_completion_params({})
-
-
-# -- the decision has to survive serialization ----------------------------------------------
 
 
 def _roundtrip(llm) -> Agent:

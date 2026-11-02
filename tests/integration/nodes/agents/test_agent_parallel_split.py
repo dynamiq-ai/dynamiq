@@ -310,7 +310,6 @@ class TestBatchStreamEvents:
         assert completion_event.tool.action_type == "parallel_execution"
         assert completion_event.status == RunnableStatus.SUCCESS
 
-        # result is a list of per-tool summaries
         assert isinstance(completion_event.result, list)
         assert len(completion_event.result) == 2
         tool_names = {entry["name"] for entry in completion_event.result}

@@ -119,6 +119,39 @@ def test_events_sent_from_a_worker_thread_reach_the_async_consumer():
     assert asyncio.run(consume()) == ["first", "second"]
 
 
+def test_an_event_sent_on_the_loop_thread_is_queued_at_once():
+    async def send():
+        handler = AsyncStreamingIteratorCallbackHandler()
+        handler.send_to_queue("event")
+        return handler.queue.qsize()
+
+    assert asyncio.run(send()) == 1
+
+
+def test_events_sent_from_another_thread_arrive_in_order():
+    events = list(range(200))
+
+    async def consume():
+        handler = AsyncStreamingIteratorCallbackHandler()
+        worker = threading.Thread(target=lambda: [handler.send_to_queue(e) for e in events])
+        worker.start()
+        received = [await handler.queue.get() for _ in events]
+        worker.join()
+        return received
+
+    assert asyncio.run(consume()) == events
+
+
+def test_a_bounded_queue_waits_for_room_instead_of_dropping_events():
+    async def consume():
+        handler = AsyncStreamingIteratorCallbackHandler(queue=asyncio.Queue(maxsize=1))
+        for event in ("first", "second", "third"):
+            handler.send_to_queue(event)
+        return [await handler.queue.get() for _ in range(3)]
+
+    assert asyncio.run(consume()) == ["first", "second", "third"]
+
+
 def test_held_events_wait_for_room_in_a_bounded_queue_and_keep_their_order():
     asyncio.run(asyncio.sleep(0))  # Leaves no current loop, so the handler holds what it is sent.
     handler = AsyncStreamingIteratorCallbackHandler(queue=asyncio.Queue(maxsize=1))
@@ -252,3 +285,31 @@ def test_held_events_replay_in_order_under_the_eager_task_factory():
     )
 
     assert done.returncode == 0, done.stderr
+
+
+def test_an_event_from_a_finished_worker_thread_is_not_overtaken_by_a_later_one_from_the_loop():
+    async def consume():
+        handler = AsyncStreamingIteratorCallbackHandler()
+        worker = threading.Thread(target=handler.send_to_queue, args=("first",))
+        worker.start()
+        worker.join()  # its put is scheduled on the loop and has not run yet
+        handler.send_to_queue("second")
+        return [await handler.queue.get() for _ in range(2)]
+
+    assert asyncio.run(consume()) == ["first", "second"]
+
+
+def test_loop_and_thread_events_keep_send_order_and_the_direct_put_comes_back():
+    async def consume():
+        handler = AsyncStreamingIteratorCallbackHandler()
+        worker = threading.Thread(target=handler.send_to_queue, args=("a",))
+        worker.start()
+        worker.join()
+        handler.send_to_queue("b")
+        handler.send_to_queue("c")
+        received = [await handler.queue.get() for _ in range(3)]
+        # Nothing scheduled is left, so a put from the loop goes in at once again.
+        handler.send_to_queue("d")
+        return received, handler.queue.qsize()
+
+    assert asyncio.run(consume()) == (["a", "b", "c"], 1)

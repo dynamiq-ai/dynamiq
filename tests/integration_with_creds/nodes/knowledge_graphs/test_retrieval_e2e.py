@@ -46,7 +46,6 @@ def _text_embedder():
     return OpenAITextEmbedder(connection=OpenAIConnection(), model=EMBED_MODEL)
 
 
-# --- 1. Multi-hop edge ranking -----------------------------------------------------------------------
 # A hub (DataPlatform) depends on three databases in three regions (analytics / billing / search). The
 # query asks only about analytics; with beam_width=1 the retriever returns the analytics branch and cuts
 # the billing and search branches (reachable but lower-ranked against the query embedding).
@@ -148,7 +147,6 @@ def test_single_hop_cannot_reach_the_region_two_hops_away(multihop_facts_single_
     assert RELEVANT_REGION.lower() not in multihop_facts_single_hop, multihop_facts_single_hop
 
 
-# --- 2. Semantic seeding -----------------------------------------------------------------------------
 # The writer embeds entity NAMES; a paraphrased seed term is matched to the stored name by vector
 # similarity. With unrelated distractor entities present and vector_top_k=1, the seed must pick the RIGHT
 # entity out of several — a discrimination the full-text/CONTAINS name path cannot make.

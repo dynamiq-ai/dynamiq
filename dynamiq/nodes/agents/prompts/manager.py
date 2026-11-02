@@ -128,14 +128,10 @@ class AgentPromptManager:
         """
         self.model_name = model_name
 
-        # Runtime prompts (used during agent execution)
         self.max_loops_prompt: str = REACT_MAX_LOOPS_PROMPT
 
-        # Template
         self.agent_template: str = AGENT_PROMPT_TEMPLATE
 
-        # Prompt blocks and variables
-        # Store initial blocks for reset
         self._prompt_blocks: dict[str, str] = {
             "date": "{{ date }}",
             "tools": "{{ tool_description }}",
@@ -256,7 +252,6 @@ class AgentPromptManager:
             logger.warning(f"Block '{block_name}' not found in prompt blocks")
             return ""
 
-        # Merge existing variables with provided kwargs
         variables = self._prompt_variables.copy()
         variables.update(kwargs)
 
@@ -282,7 +277,6 @@ class AgentPromptManager:
         if not self.model_name:
             return
 
-        # Get model-specific template
         self.agent_template = get_prompt_constant(self.model_name, "AGENT_PROMPT_TEMPLATE", AGENT_PROMPT_TEMPLATE)
 
         if self.agent_template != AGENT_PROMPT_TEMPLATE:
@@ -298,12 +292,10 @@ class AgentPromptManager:
         """
         model = self.model_name
 
-        # 1. Model-specific template
         agent_template = get_prompt_constant(model, "AGENT_PROMPT_TEMPLATE", AGENT_PROMPT_TEMPLATE)
         if agent_template:
             self.agent_template = agent_template
 
-        # 2. Instruction and tool blocks based on inference mode
         instructions_default = get_prompt_constant(
             model, "REACT_BLOCK_INSTRUCTIONS_SINGLE", REACT_BLOCK_INSTRUCTIONS_SINGLE
         )
@@ -348,7 +340,7 @@ class AgentPromptManager:
                 )
                 prompt_blocks["instructions"] = xml_no_tools if not config.has_tools else xml_with_tools
 
-        # 3. Operational instructions from feature flags
+        # Operational instructions from feature flags
         ops_parts: list[str] = []
         if config.parallel_tool_calls_enabled:
             ops_parts.append(REACT_BLOCK_MULTI_TOOL_PLANNING)
@@ -375,9 +367,9 @@ class AgentPromptManager:
         if config.has_sub_agent_tools:
             ops_parts.append(SUB_AGENT_INSTRUCTIONS)
 
-        # Append user-provided instructions (with raw wrapping)
         if config.instructions:
             user_instructions = config.instructions
+            # Rendered through Jinja, so caller text goes in raw tags to keep its braces literal, unless it has its own.
             if ("{% raw %}" not in user_instructions) and ("{% endraw %}" not in user_instructions):
                 user_instructions = f"{{% raw %}}{user_instructions}{{% endraw %}}"
             ops_parts.append(user_instructions)
@@ -385,7 +377,6 @@ class AgentPromptManager:
         if ops_parts:
             prompt_blocks["operational_instructions"] = "\n\n".join(ops_parts)
 
-        # 4. Environment block
         if config.sandbox_base_path:
             prompt_blocks["environment"] = SANDBOX_INSTRUCTIONS_TEMPLATE.format(
                 base_path=config.sandbox_base_path,
@@ -395,13 +386,11 @@ class AgentPromptManager:
                     SANDBOX_OUTPUT_FILES_RULE, SANDBOX_OUTPUT_FILES_RULE_WITH_ARTIFACTS
                 )
 
-        # 5. Role block (with raw wrapping)
         if config.role:
             if ("{% raw %}" in config.role) or ("{% endraw %}" in config.role):
                 prompt_blocks["role"] = config.role
             else:
                 prompt_blocks["role"] = f"{{% raw %}}{config.role}{{% endraw %}}"
 
-        # 6. Apply all blocks and runtime prompts
         self._prompt_blocks.update(prompt_blocks)
         self.max_loops_prompt = get_prompt_constant(model, "REACT_MAX_LOOPS_PROMPT", REACT_MAX_LOOPS_PROMPT)

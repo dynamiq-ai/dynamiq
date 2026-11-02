@@ -1,6 +1,5 @@
-import importlib
-
 from dynamiq.nodes import Node
+from dynamiq.utils.lazy_imports import OptionalDependencyError, import_type
 
 
 class NodeManager:
@@ -19,6 +18,7 @@ class NodeManager:
 
         Raises:
             ValueError: If the node type is not found.
+            OptionalDependencyError: If the node type needs an optional dependency that is not installed.
 
         Example:
             >>> node_class = NodeManager.get_node_by_type("LLM_OPENAI")
@@ -26,9 +26,9 @@ class NodeManager:
             True
         """
         try:
-            entity_module, entity_name = node_type.rsplit(".", 1)
-            imported_module = importlib.import_module(entity_module)
-            if entity := getattr(imported_module, entity_name, None):
+            if entity := import_type(node_type):
                 return entity
-        except (ModuleNotFoundError, ImportError):
-            raise ValueError(f"Node type {node_type} not found")
+        except OptionalDependencyError:
+            raise
+        except (ModuleNotFoundError, ImportError, AttributeError) as e:
+            raise ValueError(f"Node type {node_type} not found") from e

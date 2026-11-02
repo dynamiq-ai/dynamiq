@@ -428,7 +428,6 @@ class E2BDesktopTool(ConnectionNode):
                 recoverable=True,
             )
 
-        # Map actions to E2B Sandbox API
         logger.info(f"E2BDesktopTool executing action={action_enum.value}")
         logger.debug(f"E2BDesktopTool executing action={action_enum.value} params={params}")
         files: list[io.BytesIO] | None = None
@@ -441,7 +440,6 @@ class E2BDesktopTool(ConnectionNode):
             if coordinates:
                 x, y = coordinates
                 self._desktop.move_mouse(x, y)
-            # Click behavior from parameters only
             button = params.get("button", "left")
             clicks = params.get("num_clicks") or 1
             for _ in range(clicks):
@@ -506,7 +504,6 @@ class E2BDesktopTool(ConnectionNode):
                 recoverable=True,
             )
 
-        # Include upload summary in result if available
         if self._uploads_report:
             summary = "; ".join(
                 [

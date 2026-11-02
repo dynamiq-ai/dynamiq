@@ -61,7 +61,7 @@ class FakeMCPServer:
 
         with (
             patch.object(MCPStreamableHTTP, "connect", new=connect),
-            patch("dynamiq.nodes.tools.mcp.ClientSession", new=Session),
+            patch("mcp.ClientSession", new=Session),
         ):
             yield self
 

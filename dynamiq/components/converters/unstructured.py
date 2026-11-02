@@ -396,7 +396,6 @@ class UnstructuredFileConverter(BaseConverter):
         if "text_as_html" in element.get("metadata", {}):
             text = element.get("metadata", {}).get("text_as_html", "")
         elif "image_base64" in element.get("metadata", {}):
-            # Find corresponding image entry
             image_entry = next((i for i in images if i["index"] == element_index), None)
             if image_entry:
                 image_id = image_entry["id"]
@@ -476,7 +475,6 @@ class UnstructuredFileConverter(BaseConverter):
                 meta_per_page[page_number].update(doc_metadata)
 
                 if self.extract_image_block_types_enabled:
-                    # Find images/tables for this element
                     element_images = [img for img in images if img["index"] == idx]
                     element_tables = [tbl for tbl in tables if tbl["index"] == idx]
                     images_per_page[page_number].extend(element_images)
@@ -508,7 +506,6 @@ class UnstructuredFileConverter(BaseConverter):
                 element_metadata = el.get("metadata", {})
                 element_metadata = dict(element_metadata)
 
-                # Add images/tables for this specific element
                 if self.extract_image_block_types_enabled:
                     element_images = [img for img in images if img["index"] == index]
                     element_tables = [tbl for tbl in tables if tbl["index"] == index]

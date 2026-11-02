@@ -407,8 +407,6 @@ class Judgement(Node):
     def _sample_count(self) -> int:
         return self.samples if self.confidence_mode == ConfidenceMode.SAMPLING else 1
 
-    # -- System One -------------------------------------------------------------------------------------------
-
     def _system_one_output(
         self, data: dict[str, Any], questions: list[JudgementQuestion], config: RunnableConfig, **kwargs
     ) -> dict[str, Any]:
@@ -473,8 +471,6 @@ class Judgement(Node):
             confidence=confidence,
             score=float(score) if isinstance(score, (int, float)) else None,
         )
-
-    # -- LLM and agent judges ---------------------------------------------------------------------------------
 
     def _verbalized(self) -> bool:
         return self.confidence_mode == ConfidenceMode.VERBALIZED
@@ -680,8 +676,6 @@ class Judgement(Node):
     def _judge_model(self) -> str:
         llm = self.judge if isinstance(self.judge, BaseLLM) else getattr(self.judge, "llm", None)
         return str(getattr(llm, "model", None) or self.judge.name or self.judge.type)
-
-    # -- Output -----------------------------------------------------------------------------------------------
 
     def _output(
         self,

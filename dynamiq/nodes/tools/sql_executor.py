@@ -1,3 +1,5 @@
+import threading
+import weakref
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -10,6 +12,17 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
+
+# Runs share a cached connection, and DB-API connections such as MySQL's crash or corrupt results when several threads
+# use one at once, so queries on a connection run one at a time.
+_connection_locks: "weakref.WeakKeyDictionary[Any, threading.Lock]" = weakref.WeakKeyDictionary()
+_connection_locks_guard = threading.Lock()
+
+
+def _connection_lock(client: Any) -> threading.Lock:
+    with _connection_locks_guard:
+        return _connection_locks.setdefault(client, threading.Lock())
+
 
 DESCRIPTION_SQL = """Executes SQL queries on multiple database systems including PostgreSQL,
 MySQL, Snowflake, and AWS Redshift.
@@ -102,21 +115,22 @@ class SQLExecutor(ConnectionNode):
         try:
             if not query:
                 raise ValueError("Query cannot be empty")
-            cursor = self.client.cursor(
-                **(
-                    self.connection.cursor_params
-                    if not isinstance(self.connection, (PostgreSQL, AWSRedshift, DatabricksSQL))
-                    else {}
+            with _connection_lock(self.client):
+                cursor = self.client.cursor(
+                    **(
+                        self.connection.cursor_params
+                        if not isinstance(self.connection, (PostgreSQL, AWSRedshift, DatabricksSQL))
+                        else {}
+                    )
                 )
-            )
-            if params is not None:
-                cursor.execute(query, params)
-            else:
-                cursor.execute(query)
-            output = cursor.fetchall() if cursor.description is not None else []
+                if params is not None:
+                    cursor.execute(query, params)
+                else:
+                    cursor.execute(query)
+                output = cursor.fetchall() if cursor.description is not None else []
+                cursor.close()
             if isinstance(self.connection, DatabricksSQL):
                 output = [row.asDict(True) for row in output]
-            cursor.close()
             if self.is_optimized_for_agents:
                 output = self.format_results(output, query)
             return {"content": output}

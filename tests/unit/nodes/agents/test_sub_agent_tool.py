@@ -205,9 +205,6 @@ class TestSubAgentToolCreation:
             SubAgentTool(agent=child_agent, name="name")
 
 
-# --- Parallel execution flag ---
-
-
 class TestParallelExecutionFlag:
     def test_initialized_mode_not_parallel(self, child_agent):
         tool = SubAgentTool(agent=child_agent, name="Researcher", description="research")
@@ -798,7 +795,6 @@ class TestYamlRoundtrip:
         assert len(a_py_tools) >= 1 and len(b_py_tools) >= 1
         assert a_py_tools[0] is not b_py_tools[0], "Each factory agent must get its own tool instances"
 
-        # Second roundtrip
         rt_path = tmp_path / "dict_factory_rt.yaml"
         loaded.to_yaml_file(rt_path)
 
@@ -1002,9 +998,6 @@ class TestYamlRoundtrip:
         loaded_nodes = {n.id: n for n in loaded.flow.nodes}
         assert loaded_nodes["dict-agent"].response_format == schema_dict
         assert loaded_nodes["model-agent"].response_format == model_schema_dict
-
-
-# --- ToolParams resolution through SubAgentTool wrapper ---
 
 
 def _make_successful_run_result():

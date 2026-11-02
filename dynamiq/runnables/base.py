@@ -65,7 +65,9 @@ class RunnableConfig(BaseModel):
 
     def to_checkpoint_dict(self) -> dict:
         """Serialize config for checkpoint storage, excluding non-serializable runtime fields."""
-        return self.model_dump(mode="json", exclude={"callbacks", "checkpoint", "cancellation", "trusted_context"})
+        return self.model_dump(
+            mode="json", exclude={"callbacks", "checkpoint", "cancellation", "trusted_context", "nodes_override"}
+        )
 
 
 class RunnableStatus(str, Enum):

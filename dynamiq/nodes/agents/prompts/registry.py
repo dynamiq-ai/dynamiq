@@ -41,13 +41,11 @@ class ModelPromptsRegistry:
         if not model_name:
             return default
 
-        # Try exact match first
         if model_name in self._registry:
             if prompt_name in self._registry[model_name]:
                 logger.debug(f"Using model-specific prompt '{prompt_name}' for model '{model_name}'")
                 return self._registry[model_name][prompt_name]
 
-        # Try normalized variations
         normalized_names = self._normalize_model_name(model_name)
         for name in normalized_names:
             if name in self._registry:
@@ -71,12 +69,10 @@ class ModelPromptsRegistry:
         """
         variations = [model_name]
 
-        # Add lowercase version
         lower = model_name.lower()
         if lower != model_name:
             variations.append(lower)
 
-        # Add version with underscores instead of hyphens
         with_underscores = lower.replace("-", "_")
         if with_underscores != lower:
             variations.append(with_underscores)
@@ -91,7 +87,6 @@ class ModelPromptsRegistry:
         return variations
 
 
-# Global registry instance
 _prompts_registry = ModelPromptsRegistry()
 
 

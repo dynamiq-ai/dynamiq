@@ -679,7 +679,6 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                     self._results.update(results)
                     self._ts.done(*results.keys())
 
-                    # If any node was canceled, propagate cancellation to the flow
                     for node_id, result in results.items():
                         if result.status == RunnableStatus.CANCELED:
                             raise CanceledException()
@@ -741,7 +740,6 @@ class Flow(CheckpointFlowMixin, BaseFlow):
 
             self.run_on_flow_canceled(config, **merged_kwargs)
             logger.info(f"Flow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
-            # Find which node was canceled to propagate its message
             canceled_error = None
             for node_id, result in self._results.items():
                 if result.status == RunnableStatus.CANCELED and result.error:
@@ -917,7 +915,6 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                         self._results.update(results)
                         self._ts.done(*results.keys())
 
-                        # If any node was canceled, propagate cancellation to the flow
                         for node_id, result in results.items():
                             if result.status == RunnableStatus.CANCELED:
                                 raise CanceledException()
@@ -1091,18 +1088,15 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         if nodes is None:
             raise ValueError("No node provided. Nodes cannot be None.")
 
-        # Convert a single Node to a list for consistent handling
         if isinstance(nodes, Node):
             nodes = [nodes]
 
-        # Check if it's a valid list of nodes
         if not isinstance(nodes, list) or not all(isinstance(n, Node) for n in nodes):
             raise TypeError("Nodes must be a Node instance or a list of Node instances.")
 
         if not nodes:
             raise ValueError("Cannot add an empty list of nodes to the flow.")
 
-        # Add nodes to the flow, checking for duplicates in the flow
         for node in nodes:
             if node.id in self._node_by_id:
                 raise ValueError(f"Node with id {node.id} already exists in the flow.")

@@ -6,9 +6,7 @@ from dynamiq.storages.graph.neptune import NeptuneGraphStore
 
 
 def test_neptune_write_graph_not_implemented():
-    # write_graph now lives only on the Neo4j store; BaseGraphStore provides no default, so the Neptune
-    # openCypher backend (which previously inherited the shared path) raises NotImplementedError until it
-    # gains its own implementation. Only Neo4j (and the relational Postgres store) implement write_graph.
+    # Only the Neo4j store implements write_graph; Neptune raises until it has its own.
     client = MagicMock()
     store = NeptuneGraphStore(client=client, endpoint="https://localhost:8182/openCypher", verify_ssl=False)
 

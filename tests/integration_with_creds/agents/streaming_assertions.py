@@ -39,11 +39,6 @@ def collect_streaming_events(streaming_iterator, agent_id):
     return ordered_events
 
 
-# ---------------------------------------------------------------------------
-# FSM states and event classification
-# ---------------------------------------------------------------------------
-
-
 class State(Enum):
     INIT = auto()
     REASONING = auto()
@@ -72,10 +67,6 @@ def _classify_event(step, content):
         return "answer"
     return None
 
-
-# ---------------------------------------------------------------------------
-# Transition tables
-# ---------------------------------------------------------------------------
 
 _TRANSITIONS_WITH_TOOL_INPUT = {
     State.INIT: {
@@ -154,11 +145,6 @@ _TRANSITIONS_FINAL = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Structural validators (called inline during FSM walk)
-# ---------------------------------------------------------------------------
-
-
 def _validate_post_parse_reasoning(content, idx):
     assert isinstance(content, dict), f"Event {idx}: post-parse reasoning should be dict, got {type(content)}"
     for key in ("thought", "action", "tool", "action_input", "loop_num"):
@@ -191,11 +177,6 @@ _VALIDATORS = {
     "tool_input_start": _validate_tool_input_start,
     "tool_input": _validate_tool_input,
 }
-
-
-# ---------------------------------------------------------------------------
-# Shared FSM helpers (reusable across all modes)
-# ---------------------------------------------------------------------------
 
 
 def _fsm_step_transition(event_name, state, transitions, idx, step, content):
@@ -505,11 +486,6 @@ def _log_event(idx, step, event_name, state, content):
     )
 
 
-# ---------------------------------------------------------------------------
-# Per-mode FSM runners
-# ---------------------------------------------------------------------------
-
-
 def _run_fsm_fc(ordered_events, streaming_mode):
     """FSM for FUNCTION_CALLING mode.
 
@@ -581,7 +557,6 @@ def _run_fsm_fc(ordered_events, streaming_mode):
                         entry_thought = entry.get("thought", "")
                         tool_label = entry.get("action", "?")
 
-                        # Validate action_input match
                         if entry_tid and entry_tid in tool_blocks:
                             block = tool_blocks[entry_tid]
                             accumulated = "".join(block["action_input_chunks"])
@@ -594,7 +569,6 @@ def _run_fsm_fc(ordered_events, streaming_mode):
                                     f"Expected:    {entry_input!r}"
                                 )
 
-                        # Validate thought against reasoning_blocks[i].
                         # Streaming may emit raw JSON escapes (e.g. \n as two chars),
                         # so also compare against the JSON-encoded form.
                         accumulated_thought = reasoning_blocks[i]
@@ -678,7 +652,6 @@ def _run_fsm_blob(ordered_events, streaming_mode):
                     f"Expected exactly 1 run-parallel event per parallel batch, " f"got {run_parallel_count}"
                 )
 
-                # Validate thought matches accumulated reasoning
                 expected_thought = content.get("thought", "")
                 if reasoning_blocks and expected_thought:
                     accumulated_thought = reasoning_blocks[0]
@@ -738,11 +711,6 @@ def _run_fsm_default(ordered_events, streaming_mode):
     _assert_fsm_end(tool_blocks, reasoning_blocks, run_parallel_count)
     _assert_answer_clean(answer_chunks)
     return state, visited, reasoning_blocks
-
-
-# ---------------------------------------------------------------------------
-# High-level assertion
-# ---------------------------------------------------------------------------
 
 
 def _normalize_chunked_events(ordered_events: list) -> list[tuple]:

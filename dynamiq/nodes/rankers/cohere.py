@@ -6,6 +6,7 @@ from dynamiq.connections import Cohere
 from dynamiq.nodes.node import Node, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types import Document
+from dynamiq.utils.litellm import get_litellm
 from dynamiq.utils.logger import logger
 
 
@@ -41,10 +42,7 @@ class CohereReranker(Node):
     def __init__(self, **kwargs):
         """Initialize the CohereReranker instance."""
         super().__init__(**kwargs)
-
-        from litellm import rerank
-
-        self._rerank = rerank
+        self._rerank = get_litellm().rerank
 
     def execute(self, input_data: CohereRerankerInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """

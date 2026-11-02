@@ -85,18 +85,15 @@ def test_execute_builds_request_and_parses_documents(retriever):
     input_data = DynamiqKnowledgebaseVectorSearchInputSchema(query="hello", filters={"k": "v"}, limit=3)
     result = retriever.execute(input_data, RunnableConfig(callbacks=[]))
 
-    # Request built correctly
     _, kwargs = retriever.client.request.call_args
     assert kwargs["method"] == "POST"
     assert kwargs["url"] == "https://api.example.ai/v1/knowledgebases/kb-123/vector-search"
     assert kwargs["headers"] == {"Authorization": "Bearer secret-token", "User-Agent": USER_AGENT}
     assert kwargs["json"] == {"query": "hello", "limit": 3, "filters": {"k": "v"}, "alpha": 0.5}
 
-    # Response forwarded as retriever-shaped output
     assert all(isinstance(doc, Document) for doc in result["documents"])
     assert [doc.content for doc in result["documents"]] == ["Doc one", "Doc two"]
     assert result["documents"][0].score == 0.9
-    # Content is formatted into numbered, source-labelled blocks
     assert result["content"] == (
         "--- Retrieved Source 1 ---\n"
         "Metadata:\nScore: 0.9\ntitle: A\n\n"

@@ -197,7 +197,6 @@ class MultiFileTypeConverter(Node):
         self.extension_converter_mapping = {}
 
         if not self.converters:
-            # Create default converter instances
             self.converter_mapping = {
                 file_type: converter_class()
                 for file_type, converter_class in DEFAULT_FILE_TYPE_TO_CONVERTER_CLASS_MAP.items()
@@ -213,7 +212,6 @@ class MultiFileTypeConverter(Node):
 
         self.converter_mapping = {}
 
-        # Map each converter instance to its supported file types
         for converter_instance in converter_instances:
             supported_file_types = self._get_supported_file_types(converter_instance)
 
@@ -221,10 +219,8 @@ class MultiFileTypeConverter(Node):
                 if file_type not in self.converter_mapping:
                     self.converter_mapping[file_type] = converter_instance
 
-        # Add default converters for missing file types
         self._add_missing_default_converters()
 
-        # Add fallback converter for remaining unmapped file types
         self._add_fallback_mapping()
 
     @staticmethod
@@ -245,17 +241,14 @@ class MultiFileTypeConverter(Node):
     def _add_missing_default_converters(self):
         """Instantiate default converters for standard file types that don't have converters yet."""
 
-        # Check which file types are missing converters
         for file_type, converter_class in DEFAULT_FILE_TYPE_TO_CONVERTER_CLASS_MAP.items():
             if file_type not in self.converter_mapping:
-                # Create the default converter for the file type
                 default_converter = converter_class()
                 self.converter_mapping[file_type] = default_converter
 
     def _add_fallback_mapping(self):
         """Setup fallback converter for file types that don't have specific converters from instances list."""
 
-        # Find file types that don't have converters
         file_types_without_converters = [
             file_type for file_type in EXTENSION_MAP.keys() if file_type not in self.converter_mapping
         ]

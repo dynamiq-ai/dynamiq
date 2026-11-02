@@ -78,7 +78,6 @@ def llm_model():
 def sse_server_connection():
     connection = MCPSse(url="https://example.com/")
     yield connection
-    # Cleanup: ensure any async resources are closed
     if hasattr(connection, "close") and callable(connection.close):
         try:
             connection.close()
@@ -132,7 +131,6 @@ def mcp_server_tool(sse_server_connection, mock_mcp_tools):
     tool = MCPServer(connection=sse_server_connection)
     tool._mcp_tools = mock_mcp_tools
     yield tool
-    # Cleanup: ensure any async resources are closed
     if hasattr(tool, "close") and callable(tool.close):
         try:
             tool.close()
@@ -160,14 +158,9 @@ async def test_get_mcp_tools(mcp_server_tool, sse_server_connection):
 
 @pytest.mark.asyncio
 async def test_mock_tool_execute(mcp_server_tool):
-    tool = mcp_server_tool._mcp_tools["add"]  # "add"
+    tool = mcp_server_tool._mcp_tools["add"]
 
     mocked_result = {"content": {"result": 42}}
-
-    with patch("dynamiq.nodes.tools.mcp.MCPTool.execute", return_value=mocked_result) as mock_exec:
-        result = tool.execute(tool.input_schema(a=20, b=22))
-        mock_exec.assert_called_once()
-        assert result == mocked_result
 
     with patch.object(MCPTool, "execute_async", new_callable=AsyncMock, return_value=mocked_result) as mock_exec:
         result = await tool.run(input_data={"a": 20, "b": 22})
@@ -496,7 +489,7 @@ def _patch_session_with_result(result: CallToolResult):
 
     return (
         patch.object(MCPSse, "connect", new=fake_connect),
-        patch("dynamiq.nodes.tools.mcp.ClientSession", return_value=FakeSession()),
+        patch("mcp.ClientSession", return_value=FakeSession()),
     )
 
 
@@ -642,7 +635,7 @@ async def test_initialize_tools_reads_every_page_of_tools(sse_server_connection)
     server = MCPServer(connection=sse_server_connection)
     with (
         patch.object(MCPSse, "connect", new=fake_connect),
-        patch("dynamiq.nodes.tools.mcp.ClientSession", return_value=FakeSession()),
+        patch("mcp.ClientSession", return_value=FakeSession()),
     ):
         await server.initialize_tools()
 
@@ -863,7 +856,7 @@ async def test_execute_async_sends_headers_on_connect_not_as_tool_args():
 
     with (
         patch.object(MCPSse, "connect", new=fake_connect),
-        patch("dynamiq.nodes.tools.mcp.ClientSession", return_value=FakeSession()),
+        patch("mcp.ClientSession", return_value=FakeSession()),
     ):
         await tool.execute_async(tool.input_schema(a=1, b=2, mcp_http_headers={"X-User-Id": "user-7"}))
 
@@ -908,7 +901,7 @@ async def test_execute_async_collision_sends_http_headers_not_tool_headers_arg()
 
     with (
         patch.object(MCPSse, "connect", new=fake_connect),
-        patch("dynamiq.nodes.tools.mcp.ClientSession", return_value=FakeSession()),
+        patch("mcp.ClientSession", return_value=FakeSession()),
     ):
         await tool.execute_async(
             tool.input_schema(

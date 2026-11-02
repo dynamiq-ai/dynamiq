@@ -58,19 +58,16 @@ def test_extracts_entities_attributes_and_relationships(extractor):
     for node in nodes:
         by_label.setdefault(node["labels"][0], []).append(node)
 
-    # --- entities: the people/organizations stated in the text were extracted ---
     person_names = [(n.get("name") or "").lower() for n in by_label.get("PERSON", [])]
     org_names = [(n.get("name") or "").lower() for n in by_label.get("ORGANIZATION", [])]
     assert any("jane" in name for name in person_names), f"no Jane among PERSON nodes: {person_names}"
     assert any("acme" in name for name in org_names), f"no Acme among ORGANIZATION nodes: {org_names}"
 
-    # --- ontology enforcement: the off-ontology location fact must not survive ---
     allowed_labels = {"PERSON", "ORGANIZATION", "SYSTEM", ATTRIBUTE_VALUE_LABEL}
     assert set(by_label) <= allowed_labels, f"off-ontology labels survived: {set(by_label) - allowed_labels}"
     all_names = [(n.get("name") or "").lower() for n in nodes]
     assert not any("new york" in name for name in all_names), "off-ontology entity 'New York' survived"
 
-    # --- relationships: Jane works at Acme; only legal types/triples survived ---
     person_ids = {n["id"] for n in by_label.get("PERSON", [])}
     org_ids = {n["id"] for n in by_label.get("ORGANIZATION", [])}
     works_at = [r for r in relationships if r["type"] == "WORKS_AT"]
@@ -81,7 +78,7 @@ def test_extracts_entities_attributes_and_relationships(extractor):
     rel_types = {r["type"] for r in relationships}
     assert rel_types <= {"WORKS_AT", "USES", HAS_ATTRIBUTE_TYPE}, f"illegal relationship types: {rel_types}"
 
-    # --- attributes: declared Person attributes were promoted to HAS_ATTRIBUTE edges ---
+    # Declared Person attributes are promoted to HAS_ATTRIBUTE edges, not kept as node properties.
     attr_edges = [r for r in relationships if r["type"] == HAS_ATTRIBUTE_TYPE]
     attr_keys = {r["properties"].get("key") for r in attr_edges}
     assert attr_keys & {"title", "salary"}, f"expected title/salary attribute edges, got keys: {attr_keys}"
@@ -95,7 +92,7 @@ def test_extracts_entities_attributes_and_relationships(extractor):
     for node in by_label.get("PERSON", []):
         assert "title" not in node["properties"] and "salary" not in node["properties"]
 
-    # --- document metadata + provenance ride on every relationship, never on nodes ---
+    # Document metadata and provenance ride on every relationship, never on nodes.
     for rel in relationships:
         assert rel["properties"]["allowed_principals"] == ["group:finance"]
         assert rel["properties"]["source"] == "hr-wiki"

@@ -14,6 +14,7 @@ from dynamiq.prompts import Prompt
 from dynamiq.serializers.types import RequirementData, WorkflowYamlData
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.jsonpath import filter_all as jsonpath_filter_all
+from dynamiq.utils.lazy_imports import OptionalDependencyError
 from dynamiq.utils.logger import logger
 
 
@@ -239,19 +240,23 @@ class WorkflowYAMLLoader:
         if entity := entity_registry.get(entity_type):
             return entity
 
+        error = None
         try:
             entity = ConnectionManager.get_connection_by_type(entity_type)
-        except ValueError:
-            pass
+        except ValueError as e:
+            error = e.__cause__
+        except OptionalDependencyError as e:
+            raise WorkflowYAMLLoaderException(f"Entity '{entity_type}' is not available. {e}") from e
 
         if not entity:
             try:
                 entity = NodeManager.get_node_by_type(entity_type)
-            except ValueError:
-                pass
+            except ValueError as e:
+                error = e.__cause__ or error
 
         if not entity:
-            raise WorkflowYAMLLoaderException(f"Entity '{entity_type}' is not valid.")
+            reason = f" {error}" if error else ""
+            raise WorkflowYAMLLoaderException(f"Entity '{entity_type}' is not valid.{reason}") from error
 
         entity_registry[entity_type] = entity
         return entity
@@ -323,7 +328,6 @@ class WorkflowYAMLLoader:
         conn_init_data = conn_data.copy()
         conn_init_data.pop("type", None)
 
-        # Generate UUID for connection id if not provided
         if "id" not in conn_init_data:
             conn_init_data["id"] = generate_uuid()
 
@@ -652,12 +656,12 @@ class WorkflowYAMLLoader:
             max_workers=max_workers,
         )
         for param_name, param_data in node_init_data.items():
-            # TODO: dummy fix, revisit this!
-            # We had to add this condition because some nodes have a `schema`/`response_format` params,
-            # that have a `type` field that contains types supported by JSON schema (e.g., string, object).
             if param_name == "hooks":
                 updated_node_init_data[param_name] = cls.get_hooks_with_initialized_nodes(param_data, **kwargs)
 
+            # TODO: dummy fix, revisit this!
+            # We had to add this condition because some nodes have a `schema`/`response_format` params,
+            # that have a `type` field that contains types supported by JSON schema (e.g., string, object).
             elif param_name in ("schema", "response_format", "agent_factory"):
                 updated_node_init_data[param_name] = param_data
 
@@ -772,6 +776,12 @@ class WorkflowYAMLLoader:
 
             return new_nodes
 
+        # Resolve the node types first: resolving one can import its module, and threads importing modules that
+        # import each other can deadlock.
+        for node_data in nodes_to_create.values():
+            if node_type := node_data.get("type"):
+                cls.get_entity_by_type(entity_type=node_type, entity_registry=registry)
+
         with ContextAwareThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_node_id = {
                 executor.submit(
@@ -833,7 +843,6 @@ class WorkflowYAMLLoader:
 
         node_cls = cls.get_entity_by_type(entity_type=node_type, entity_registry=registry)
 
-        # Init node params
         node_init_data = node_data.copy()
         if node_id:
             node_init_data["id"] = node_id

@@ -112,52 +112,6 @@ def evaluate(answer):
     run_metric("JSON Validity Check", user_code_json_validity, input_data_json)
 
 
-def run_bleu_metric():
-    user_code_bleu = r"""
-from dynamiq.evaluations.metrics import BleuScoreEvaluator
-
-def evaluate(ground_truth_answer, answer):
-    bleu_evaluator = BleuScoreEvaluator()
-    return bleu_evaluator.run_single(ground_truth_answer=ground_truth_answer, answer=answer)
-"""
-    input_data_bleu = [
-        {
-            "ground_truth_answer": "The cat sits on the mat. It is quiet.",
-            "answer": "The cat sits on the mat. It is silent.",
-        }
-    ]
-    run_metric("BLEU", user_code_bleu, input_data_bleu)
-
-
-def run_rouge_metric():
-    user_code_rouge = r"""
-from dynamiq.evaluations.metrics import RougeScoreEvaluator
-
-def evaluate(ground_truth_answer, answer):
-    rouge_evaluator = RougeScoreEvaluator()
-    return rouge_evaluator.run_single(ground_truth_answer=ground_truth_answer, answer=answer)
-"""
-    input_data_rouge = [
-        {
-            "ground_truth_answer": "The quick brown fox jumps over the lazy dog.",
-            "answer": "A quick brown fox jumps over the lazy dog.",
-        }
-    ]
-    run_metric("ROUGE", user_code_rouge, input_data_rouge)
-
-
-def run_levenstein_metric():
-    user_code_leven = r"""
-from dynamiq.evaluations.metrics import StringSimilarityEvaluator, DistanceMeasure
-
-def evaluate(ground_truth_answer, answer):
-    evaluator = StringSimilarityEvaluator(distance_measure=DistanceMeasure.LEVENSHTEIN)
-    return evaluator.run_single(ground_truth_answer=ground_truth_answer, answer=answer)
-"""
-    input_data_leven = [{"ground_truth_answer": "Hello world", "answer": "H3llo wor1d"}]
-    run_metric("Levenshtein Similarity", user_code_leven, input_data_leven)
-
-
 def main():
     run_exact_match_metric()
     run_email_presence_metric()
@@ -165,10 +119,6 @@ def main():
     run_yes_presence_metric()
     run_arithmetic_sum_metric()
     run_json_validity_metric()
-
-    run_bleu_metric()
-    run_rouge_metric()
-    run_levenstein_metric()
 
 
 if __name__ == "__main__":

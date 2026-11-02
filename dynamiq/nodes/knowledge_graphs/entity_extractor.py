@@ -324,9 +324,9 @@ class KnowledgeGraphEntityExtractor(Node):
         nodes: list[dict] = []
         relationships: list[dict] = []
 
-        # Process each document independently, stamping its metadata onto everything it produces. One
-        # document's LLM failure skips only that chunk; if EVERY document fails it's systemic (bad creds),
-        # so we raise rather than report an empty graph as success.
+        # Process each document independently, stamping its metadata onto its relationships. One
+        # document's LLM failure skips only that document; if every document fails, the cause is systemic (such as
+        # bad credentials), so this raises instead of reporting an empty graph as success.
         failed = 0
         for document in input_data.documents:
             check_cancellation(config)
@@ -603,7 +603,6 @@ class KnowledgeGraphEntityExtractor(Node):
             return None
 
         text = content.strip()
-        # Strip ```json ... ``` / ``` ... ``` fences if present.
         fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.DOTALL)
         if fence:
             text = fence.group(1).strip()
@@ -718,7 +717,6 @@ class KnowledgeGraphEntityExtractor(Node):
             if source_id is None or target_id is None or not rel_type:
                 continue
             source_id, target_id = str(source_id), str(target_id)
-            # Skip dangling relationships whose endpoints were not extracted as entities.
             if source_id not in id_to_label or target_id not in id_to_label:
                 logger.debug(f"KnowledgeGraphEntityExtractor: skipping relationship with unresolved endpoint: {rel}")
                 continue

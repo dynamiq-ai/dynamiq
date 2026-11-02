@@ -1,3 +1,7 @@
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from databricks.sql.types import Row
 
@@ -334,3 +338,31 @@ def test_select_execute_for_agents(mock_fetchall_sql_response_for_agents, connec
     mock_cursor_with_select.fetchall.assert_called_once()
     output_dump = result.output
     assert output_dump["content"] == output
+
+
+def test_queries_on_a_shared_connection_run_one_at_a_time(mocker):
+    active = 0
+    most_active = 0
+    counter_lock = threading.Lock()
+
+    def execute(query):
+        nonlocal active, most_active
+        with counter_lock:
+            active += 1
+            most_active = max(most_active, active)
+        time.sleep(0.05)
+        with counter_lock:
+            active -= 1
+
+    cursor = mocker.Mock(description=None)
+    cursor.execute.side_effect = execute
+    client = mocker.Mock()
+    client.cursor.return_value = cursor
+    mocker.patch("mysql.connector.connect", return_value=client)
+    sql_tool = SQLExecutor(connection=connections.MySQL(host="test_host", database="db", user="user", password="pw"))
+
+    with ThreadPoolExecutor(4) as pool:
+        results = list(pool.map(lambda _: sql_tool.run({"query": "select 1"}), range(8)))
+
+    assert all(result.status == RunnableStatus.SUCCESS for result in results)
+    assert most_active == 1

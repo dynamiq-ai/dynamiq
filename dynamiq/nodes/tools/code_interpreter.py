@@ -541,7 +541,6 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
             dir_path = "/".join(file_name.split("/")[:-1])
             self._run_shell_command(f"mkdir -p {self.input_dir}/{shlex.quote(dir_path)}", sandbox)
 
-        # Reset file position to beginning
         file.seek(0)
 
         target_path = (
@@ -796,7 +795,6 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
 
             new_files = {k: v for k, v in all_files.items() if k not in uploaded_files}
 
-            # Convert files to BytesIO objects for proper storage handling
             files_bytesio = []
             if new_files:
                 result_text += "## Generated Files (ready for download)\n\n"
@@ -805,15 +803,12 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
                         result_text += f"- {file_path}: {file_content}\n"
                     else:
                         try:
-                            # Decode content to bytes
                             if file_content.startswith("data:"):
-                                # Handle data URI format
                                 mime_part = file_content.split(";")[0].replace("data:", "")
                                 base64_part = file_content.split(",", 1)[1]
                                 content_bytes = base64.b64decode(base64_part)
                                 content_type = mime_part
                             else:
-                                # Handle plain base64 content
                                 content_bytes = base64.b64decode(file_content)
                                 content_type = detect_mime_type(content_bytes, file_path)
 
@@ -821,13 +816,11 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
                             file_size = len(content_bytes)
                             result_text += f"- **{file_name}** ({file_size:,} bytes, {content_type})\n"
 
-                            # Create BytesIO object with metadata
                             file_bytesio = io.BytesIO(content_bytes)
                             file_bytesio.name = file_name
                             file_bytesio.description = f"Generated file from sandbox: {file_path}"
                             file_bytesio.content_type = content_type
 
-                            # Ensure the BytesIO object is positioned at the beginning for reading
                             file_bytesio.seek(0)
 
                             files_bytesio.append(file_bytesio)

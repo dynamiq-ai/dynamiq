@@ -19,9 +19,7 @@ from dynamiq.prompts import Prompt
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
 
-# Default prompt prefix length: [system_message, user_message].
-# At runtime, _history_offset is recalculated to len(prompt.messages) before the ReAct loop,
-# which may be larger when memory history messages are injected.
+# Number of leading prompt messages that summarization keeps: the system message.
 DEFAULT_HISTORY_OFFSET = 1
 
 MAX_CHECKPOINT_FILE_STORE_BYTES = 10 * 1024 * 1024

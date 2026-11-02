@@ -203,7 +203,7 @@ def agent_input(test_input_string):
 
 @pytest.fixture(scope="module")
 def run_config():
-    return RunnableConfig(request_timeout=120)
+    return RunnableConfig()
 
 
 @pytest.fixture(scope="module")
@@ -257,7 +257,7 @@ def run_and_assert_agent(agent: Agent, agent_input, expected_length, run_config)
     wf = Workflow(flow=Flow(nodes=[agent]))
     result = wf.run(
         input_data=agent_input,
-        config=RunnableConfig(callbacks=[streaming], request_timeout=120),
+        config=RunnableConfig(callbacks=[streaming]),
     )
 
     assert (
@@ -356,7 +356,7 @@ def _run_comprehensive_schema_test(llm, comprehensive_tool, run_config, inferenc
             "input": "Analyze the text 'Hello world from Python testing' in summary format with limit "
             "5 and high priority"
         },
-        config=RunnableConfig(callbacks=[streaming], request_timeout=120),
+        config=RunnableConfig(callbacks=[streaming]),
     )
 
     assert result.status == RunnableStatus.SUCCESS, f"Agent run failed for {label}: {result.output}"

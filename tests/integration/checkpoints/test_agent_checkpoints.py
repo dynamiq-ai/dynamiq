@@ -668,8 +668,6 @@ class TestAppendModeAgentCheckpoints:
         assert chain[0].status == CheckpointStatus.FAILED
 
 
-# ---------------------------------------------------------------- prompt roundtrip
-
 RT_TOOL_ID = "prompt-roundtrip-tool"
 RT_TOOL_NAME = "human-input"
 RT_ANSWER = "yes, go ahead"

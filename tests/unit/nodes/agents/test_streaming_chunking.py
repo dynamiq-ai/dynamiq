@@ -23,11 +23,6 @@ SAMPLE_TOOL_NAME = "search_tool"
 SAMPLE_TOOL_INPUT = "Find information about the chunking buffer behavior end-to-end."
 
 
-# ---------------------------------------------------------------------------
-# Callback factory + assertion helpers
-# ---------------------------------------------------------------------------
-
-
 def _make_callback_for_mode(mode: InferenceMode, min_chunk_chars: int = 0):
     agent = MagicMock()
     agent.streaming.enabled = True
@@ -100,11 +95,6 @@ def _assert_chunking(reasoning: list[str], answers: list[str], min_chunk_chars: 
         assert len(chunk) >= min_chunk_chars, f"REASONING chunk {len(chunk)} < {min_chunk_chars}"
     for chunk in answers[:-1]:
         assert len(chunk) >= min_chunk_chars, f"ANSWER chunk {len(chunk)} < {min_chunk_chars}"
-
-
-# ---------------------------------------------------------------------------
-# Mocked-LLM payload builders + chunk feeders
-# ---------------------------------------------------------------------------
 
 
 def _payload_for_mode(mode: InferenceMode, thought: str, answer: str) -> str | None:
@@ -197,11 +187,6 @@ def _feed_fc_parallel_tool_chunks(cb, calls: list) -> None:
             )
 
 
-# ---------------------------------------------------------------------------
-# Final-answer path: REASONING + ANSWER, all 4 inference modes.
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("min_chunk_chars", [0, 16, 64], ids=lambda n: f"chunk{n}")
 @pytest.mark.parametrize(
     "mode",
@@ -235,12 +220,7 @@ def test_streaming_chunking_for_all_modes(mode, min_chunk_chars):
     assert "".join(answers).strip() == SAMPLE_ANSWER.strip()
 
 
-# ---------------------------------------------------------------------------
-# Tool-call path: REASONING + TOOL_INPUT.
 # DEFAULT mode parser does not stream TOOL_INPUT, so it's excluded.
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("min_chunk_chars", [0, 16, 64], ids=lambda n: f"chunk{n}")
 @pytest.mark.parametrize(
     "mode",
@@ -288,18 +268,13 @@ def test_streaming_chunking_tool_call_path(mode, min_chunk_chars):
     else:
         assert "".join(tool_inputs).strip() == SAMPLE_TOOL_INPUT.strip()
 
-    # No final-answer events on this path.
     assert not _emitted_by_step(
         cb, StreamingState.ANSWER
     ), f"{mode.value}/chunk{min_chunk_chars}: ANSWER emitted on tool-call path"
 
 
-# ---------------------------------------------------------------------------
 # FC parallel tool calls: each tool gets its own _streaming_tool_run_id and
 # its own per-tool flush at the boundary.
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("min_chunk_chars", [0, 16, 64], ids=lambda n: f"chunk{n}")
 def test_streaming_chunking_parallel_tool_calls(min_chunk_chars):
     cb = _make_callback_for_mode(InferenceMode.FUNCTION_CALLING, min_chunk_chars=min_chunk_chars)

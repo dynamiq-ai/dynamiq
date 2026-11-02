@@ -75,7 +75,6 @@ class InMemoryFileStore(FileStore):
             logger.info(f"File '{file_path}' already exists. Skipping...")
             return self._create_file_info(file_path, self._files[file_path])
 
-        # Convert content to bytes
         if isinstance(content, str):
             content_bytes = content.encode("utf-8")
         elif isinstance(content, bytes):

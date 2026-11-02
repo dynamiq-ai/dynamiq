@@ -122,7 +122,6 @@ class TextFileConverter(BaseConverter):
         encoding = self._detect_encoding(data)
         content = data.decode(encoding, errors="replace")
 
-        # Create documents from the text file content
         return self._create_documents(
             filepath=filepath,
             content=content,

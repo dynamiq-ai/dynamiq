@@ -5,7 +5,7 @@ import re
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from enum import Enum
-from functools import cached_property, partial
+from functools import cache, cached_property, partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
@@ -18,9 +18,13 @@ from dynamiq.utils.logger import logger
 from dynamiq.utils.user_agent import USER_AGENT
 
 if TYPE_CHECKING:
+    import ssl
+
+    import httpx
     from chromadb import ClientAPI as ChromaClient
     from google.cloud.documentai import DocumentProcessorServiceClient as DocumentAIClient
     from neo4j import Driver as Neo4jDriver
+    from openai import AsyncOpenAI as AsyncOpenAIClient
     from openai import OpenAI as OpenAIClient
     from pinecone import Pinecone as PineconeClient
     from qdrant_client import QdrantClient
@@ -52,6 +56,8 @@ class BaseConnection(BaseModel, ABC):
     """
 
     id: str = Field(default_factory=generate_uuid)
+    # A node's clone, such as a Map item's or a parallel tool call's, keeps the id: the client cache is keyed by it.
+    keeps_id: ClassVar[bool] = True
 
     @computed_field
     @cached_property
@@ -276,6 +282,33 @@ class Http(BaseConnection):
         )
 
 
+@cache
+def _shared_ssl_context() -> "ssl.SSLContext":
+    """One TLS context for all OpenAI SDK clients in the process.
+
+    httpx builds a context per client, and building one parses the whole CA bundle: 25-50 ms of CPU per client (twice
+    that behind an HTTPS proxy, which gets its own), paid by every node that creates one. A context loads the trust
+    store once and is safe to share. `SSL_CERT_FILE` / `SSL_CERT_DIR` are read on first use, as httpx reads them.
+    Only HTTP/1.1 clients may share it: httpcore sets the ALPN protocols on the context for every connection it opens.
+    """
+    import httpx
+
+    return httpx.create_ssl_context()
+
+
+def _openai_http_client(async_client: bool = False) -> "httpx.Client | httpx.AsyncClient":
+    """The httpx client the OpenAI SDK builds for itself, on the shared TLS context."""
+    try:  # The SDK's own default type: the SDK's defaults, and it closes itself when garbage collected.
+        from openai._base_client import AsyncHttpxClientWrapper as AsyncClient
+        from openai._base_client import SyncHttpxClientWrapper as SyncClient
+    except ImportError:
+        from openai import DefaultAsyncHttpxClient as AsyncClient
+        from openai import DefaultHttpxClient as SyncClient
+
+    client_cls = AsyncClient if async_client else SyncClient
+    return client_cls(verify=_shared_ssl_context())
+
+
 class OpenAI(BaseApiKeyConnection):
     """
     Represents a connection to the OpenAI service.
@@ -300,9 +333,22 @@ class OpenAI(BaseApiKeyConnection):
         # Import in runtime to save memory
         from openai import OpenAI as OpenAIClient
 
-        openai_client = OpenAIClient(api_key=self.api_key, base_url=self.url)
+        openai_client = OpenAIClient(api_key=self.api_key, base_url=self.url, http_client=_openai_http_client())
         logger.debug("Connected to OpenAI")
         return openai_client
+
+    async def connect_async(self) -> "AsyncOpenAIClient":
+        """
+        Creates an async client for the OpenAI service.
+
+        Returns:
+            AsyncOpenAIClient: An AsyncOpenAI client with the connection's API key and endpoint.
+        """
+        from openai import AsyncOpenAI as AsyncOpenAIClient
+
+        return AsyncOpenAIClient(
+            api_key=self.api_key, base_url=self.url, http_client=_openai_http_client(async_client=True)
+        )
 
     @property
     def conn_params(self) -> dict:
@@ -924,6 +970,8 @@ class Qdrant(BaseApiKeyConnection):
         qdrant_client = QdrantClient(
             url=self.url,
             api_key=self.api_key,
+            # The server version check costs a request per client and warns for any server more than a minor away.
+            check_compatibility=False,
         )
 
         return qdrant_client
@@ -1189,10 +1237,10 @@ class Tavily(Http):
     method: Literal[HTTPMethod.POST] = HTTPMethod.POST
 
     @model_validator(mode="after")
-    def setup_data(self):
-        """Setup data after model validation."""
+    def setup_headers(self):
+        """Setup authorization headers after model validation."""
         if self.api_key:
-            self.data.update({"api_key": self.api_key})
+            self.headers.update({"Authorization": f"Bearer {self.api_key}"})
         return self
 
 
@@ -1709,9 +1757,9 @@ class Snowflake(BaseConnection):
     snowflake_schema: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_SCHEMA", "schema"), alias="schema")
 
     def connect(self):
-        try:
-            import snowflake.connector
+        import snowflake.connector
 
+        try:
             conn = snowflake.connector.connect(
                 user=self.user,
                 password=self.password,
@@ -1807,10 +1855,8 @@ class Elasticsearch(BaseConnection):
         from elasticsearch import Elasticsearch
         from elasticsearch.exceptions import AuthenticationException
 
-        # Build connection params
         conn_params = {}
 
-        # Handle authentication
         if self.api_key is not None:
             if self.api_key_id is not None:
                 conn_params["api_key"] = (self.api_key_id, self.api_key)
@@ -1821,19 +1867,16 @@ class Elasticsearch(BaseConnection):
         elif self.cloud_id is None:  # Only require auth for non-cloud deployments
             raise ValueError("Either API key or username/password must be provided")
 
-        # Handle SSL/TLS
         if self.use_ssl:
             if self.ca_path is not None:
                 conn_params["ca_certs"] = self.ca_path
             conn_params["verify_certs"] = self.verify_certs
 
-        # Handle cloud deployment
         if self.cloud_id is not None:
             conn_params["cloud_id"] = self.cloud_id
         else:
             conn_params["hosts"] = [self.url]
 
-        # Create client
         try:
             es_client = Elasticsearch(**conn_params)
         except Exception as e:
@@ -2104,9 +2147,9 @@ class DatabricksSQL(BaseConnection):
     access_token: str = Field(default_factory=partial(get_env_var, "DATABRICKS_TOKEN"))
 
     def connect(self):
-        try:
-            from databricks import sql
+        from databricks import sql
 
+        try:
             conn = sql.connect(
                 server_hostname=self.server_hostname,
                 http_path=self.http_path,

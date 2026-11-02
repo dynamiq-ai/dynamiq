@@ -84,9 +84,6 @@ def sandbox(runtime):
         sb.close(kill=True)
 
 
-# --- command execution -------------------------------------------------------
-
-
 def test_session_is_created_by_the_first_command(runtime):
     """No InvokeAgentRuntime bootstrap: the first command creates the session (spike #1)."""
     sb = make_sandbox(runtime)
@@ -174,9 +171,6 @@ def test_background_command_detaches(sandbox):
     assert result.background is True
 
 
-# --- file transfer -----------------------------------------------------------
-
-
 def test_upload_and_retrieve_roundtrip(sandbox):
     content = b"hello from the runtime backend\n"
     path = sandbox.upload_file(f"round-{uuid.uuid4().hex}.txt", content)
@@ -254,9 +248,6 @@ def test_large_upload_without_relay_bucket_explains_itself(sandbox):
         sandbox.upload_file("too-big.bin", os.urandom(sandbox.inline_transfer_max_bytes + 1))
 
 
-# --- persistence, views, reconnection ----------------------------------------
-
-
 def test_workspace_survives_stop_and_resume(runtime):
     """Session storage is flushed by StopRuntimeSession and restored on the next invoke."""
     connection, runtime_arn = runtime
@@ -316,8 +307,6 @@ def test_concurrent_commands_on_one_session(sandbox):
     assert [r.stdout.strip() for r in results] == [f"concurrent-{i}" for i in range(5)]
     assert all(r.is_success for r in results)
 
-
-# --- session env --------------------------------------------------------------
 
 ENV_PATH = f"{BASE_PATH}/.dqenv"
 
@@ -415,9 +404,6 @@ def test_no_session_env_leaves_commands_unprefixed(runtime):
         assert sandbox.run_command_shell('printf "%s" "${DQ_LIVE_TOKEN:-unset}"').stdout == "unset"
     finally:
         sandbox.close(kill=True)
-
-
-# --- metadata ----------------------------------------------------------------
 
 
 def test_get_sandbox_info_reports_no_public_url(sandbox):

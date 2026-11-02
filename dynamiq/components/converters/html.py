@@ -58,7 +58,6 @@ class HTMLConverter(BaseConverter):
         Returns:
             List of Documents
         """
-        # Get the file path or name for BytesIO
         if isinstance(file, BytesIO):
             filepath = get_filename_for_bytesio(file)
         else:
@@ -72,10 +71,8 @@ class HTMLConverter(BaseConverter):
             with open(file, "rb") as f:
                 html_content = f.read()
 
-        # Parse the HTML content
         elements = self._parse_html_content(html_content)
 
-        # Create documents from the HTML elements
         return self._create_documents(
             filepath=filepath,
             elements=elements,
@@ -101,7 +98,6 @@ class HTMLConverter(BaseConverter):
             # a str input makes it reject pages starting with <?xml ... encoding=...?>.
             return lxml_html.fromstring(html_content)
         except etree.ParserError:
-            # Handle malformed HTML by cleaning it first
             cleaned = self._clean_html(html_content.decode("utf-8", errors="replace"))
             return lxml_html.fromstring(cleaned)
 
@@ -120,7 +116,7 @@ class HTMLConverter(BaseConverter):
         try:
             return parser.unescape(html_content)
         except AttributeError:
-            # For Python 3.9+, HTMLParser.unescape is deprecated
+            # Python 3.9 removed HTMLParser.unescape.
             return html_module.unescape(html_content)
 
     def _create_documents(
@@ -139,7 +135,6 @@ class HTMLConverter(BaseConverter):
 
         markdown_content = self._convert_to_markdown(elements)
 
-        # Clean up excessive newlines
         markdown_content = re.sub(r"\n{4,}", "\n\n", markdown_content)
         markdown_content = markdown_content.strip()
 

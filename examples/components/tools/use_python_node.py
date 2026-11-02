@@ -112,7 +112,7 @@ def run(input_data):
     }
 """
 
-    python_node = Python(code=python_code_with_math)
+    python_node = Python(code=python_code_with_math, extra_allowed_modules=["dynamiq"])
 
     input_data = {
         "content": "Document content",

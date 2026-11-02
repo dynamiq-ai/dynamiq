@@ -6,6 +6,7 @@ from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.nodes.llms._strict import to_strict_subset_function
 from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.prompts.prompts import VisionMessageType
+from dynamiq.utils.litellm import on_litellm_import
 from dynamiq.utils.logger import logger
 
 
@@ -62,12 +63,11 @@ def _patch_litellm_anthropic_strict_forward() -> bool:
 
     _patched.__dynamiq_strict_patch__ = True
     config_cls._map_tool_helper = _patched
+    logger.debug("Patched LiteLLM AnthropicConfig to forward `strict: true` for Anthropic tools.")
     return True
 
 
-_LITELLM_ANTHROPIC_STRICT_PATCHED = _patch_litellm_anthropic_strict_forward()
-if _LITELLM_ANTHROPIC_STRICT_PATCHED:
-    logger.debug("Patched LiteLLM AnthropicConfig to forward `strict: true` for Anthropic tools.")
+on_litellm_import(_patch_litellm_anthropic_strict_forward)
 
 # Anthropic strict tool use — per-request caps documented in the API:
 # https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use

@@ -1,4 +1,4 @@
-ARG PYTHON_VERSION=3.13.10
+ARG PYTHON_VERSION=3.14.10
 
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
@@ -22,7 +22,7 @@ COPY ./pyproject.toml /app/pyproject.toml
 COPY ./uv.lock /app/uv.lock
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project
+    uv sync --frozen --no-install-project --extra all
 
 FROM runtime AS develop
 

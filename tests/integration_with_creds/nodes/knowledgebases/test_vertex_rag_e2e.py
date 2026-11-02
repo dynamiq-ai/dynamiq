@@ -13,7 +13,7 @@ failing obscurely.
                                  When unset the module bootstraps a temporary corpus, which
                                  provisions a RagManagedDb (Spanner) instance that bills per hour
                                  of existence until the corpus is deleted.
-    VERTEXAI_LLM_RANKER_MODEL    optional; defaults to gemini-2.5-flash. Model availability is
+    VERTEXAI_LLM_RANKER_MODEL    optional; defaults to gemini-3.8-flash. Model availability is
                                  regional, so a 404 here is an environment gap, not a failure.
     VERTEXAI_RANK_SERVICE_MODEL  optional; defaults to semantic-ranker-default@latest. Needs
                                  discoveryengine.rankingConfigs.rank on the *calling* identity,
@@ -424,11 +424,6 @@ def _sources(result) -> set[str]:
     return {d.metadata.get("source_display_name") for d in result.output["documents"]}
 
 
-# --------------------------------------------------------------------------------------------
-# Retrieval
-# --------------------------------------------------------------------------------------------
-
-
 def test_retrieve_returns_relevant_documents(tool, fixture):
     _requires_bootstrapped(fixture)
     result = tool.run(input_data={"query": REFUND_QUERY})
@@ -463,11 +458,6 @@ def test_document_ids_are_stable_across_calls(tool):
 
     assert first.status == second.status == RunnableStatus.SUCCESS
     assert [d.id for d in first.output["documents"]] == [d.id for d in second.output["documents"]]
-
-
-# --------------------------------------------------------------------------------------------
-# Scoping: files, metadata filters
-# --------------------------------------------------------------------------------------------
 
 
 def test_rag_file_ids_restrict_retrieval(fixture):
@@ -545,11 +535,6 @@ def test_metadata_filter_is_cel_not_sql(fixture):
     assert result.error.recoverable
 
 
-# --------------------------------------------------------------------------------------------
-# Thresholds and ranking
-# --------------------------------------------------------------------------------------------
-
-
 def test_vector_distance_threshold_filters_results(fixture):
     _requires_bootstrapped(fixture)
     loose = VertexAIRagSearch(
@@ -581,7 +566,7 @@ def test_vector_similarity_threshold_is_accepted(fixture):
 
 def test_llm_ranker_is_applied(fixture):
     _requires_bootstrapped(fixture)
-    model = os.getenv("VERTEXAI_LLM_RANKER_MODEL", "gemini-2.5-flash")
+    model = os.getenv("VERTEXAI_LLM_RANKER_MODEL", "gemini-3.8-flash")
     result = VertexAIRagSearch(
         connection=_connection(), rag_corpus_id=fixture.corpus, llm_ranker_model=model, top_k=5
     ).run(input_data={"query": REFUND_QUERY})
@@ -605,11 +590,6 @@ def test_rank_service_is_applied(fixture):
     _skip_if_environment_gap(result, f"semantic ranker {model}")
     assert result.output["documents"]
     assert all(d.metadata["reranked"] is True for d in result.output["documents"])
-
-
-# --------------------------------------------------------------------------------------------
-# Response mapping
-# --------------------------------------------------------------------------------------------
 
 
 def test_scores_are_present_and_passed_through(tool):
@@ -653,11 +633,6 @@ def test_metadata_fields_allowlist_controls_formatted_content(fixture):
     assert "rag_corpus" not in allowlisted.output["content"]
     assert "source_display_name" in allowlisted.output["content"]
     assert "rag_corpus" in everything.output["content"]
-
-
-# --------------------------------------------------------------------------------------------
-# Addressing, errors, serialisation
-# --------------------------------------------------------------------------------------------
 
 
 def test_endpoint_follows_the_corpus_region_not_the_connection(fixture):

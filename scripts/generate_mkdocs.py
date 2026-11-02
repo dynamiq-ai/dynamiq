@@ -33,7 +33,7 @@ def generate_documentation_file(file_path):
     new_docs_file = os.path.join(docs_folder, file_name)
 
     # Generate the file content
-    file_content = ":::" + ".".join(file_path_splits).replace(".py", "\n")
+    file_content = ":::" + ".".join(file_path_splits).removesuffix(".py") + "\n"
 
     # Write the content to the new documentation file
     with open(new_docs_file, "w") as f:

@@ -31,10 +31,6 @@ shared gating, whitelist, per-request cap, and fail-safe fallback live in
 
 from typing import Any
 
-# ---------------------------------------------------------------------------
-# OpenAI structured-outputs strict shape (nullable-union optionality)
-# ---------------------------------------------------------------------------
-
 
 def add_null_to_type(prop: Any) -> Any:
     """Make a converted property nullable so it can sit in ``required`` while
@@ -180,11 +176,6 @@ def to_openai_strict_function(fn: dict) -> dict:
     return out
 
 
-# ---------------------------------------------------------------------------
-# Required-omission strict subset (Anthropic + native-schema providers)
-# ---------------------------------------------------------------------------
-
-
 def clean_strict_subset_schema(schema: Any) -> Any:
     """Recursively clean a schema to the required-omission strict subset.
 
@@ -273,14 +264,9 @@ def to_strict_subset_function(fn: dict, *, attach_flag: bool = True) -> dict:
     return out
 
 
-# ---------------------------------------------------------------------------
-# Provider mixin — shared by the OpenAI-shape providers (OpenAI, Azure, Cerebras,
-# DeepSeek). The subset-shape providers (Anthropic, Cohere) call
-# ``to_strict_subset_function`` directly from their own ``_to_strict_function``,
-# since each uses it once with a different ``attach_flag``.
-# ---------------------------------------------------------------------------
-
-
+# The subset-shape providers (Anthropic, Cohere) call ``to_strict_subset_function``
+# directly from their own ``_to_strict_function``, since each uses it once with a
+# different ``attach_flag``.
 class OpenAIStrictToolsMixin:
     """Mixin: convert tools to the OpenAI structured-outputs strict shape.
 

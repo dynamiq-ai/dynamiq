@@ -86,10 +86,7 @@ def _parse_comparison_condition(condition: dict[str, Any]) -> dict[str, Any]:
         raise VectorStoreFilterException(msg)
     operator: str = condition["operator"]
     if field.startswith("metadata."):
-        # Remove the "metadata." prefix if present.
-        # Documents are flattened when using the PineconeDocumentStore
-        # so we don't need to specify the "metadata." prefix.
-        # Instead of raising an error we handle it gracefully.
+        # PineconeVectorStore flattens metadata into the record, so the prefix is accepted and dropped.
         field = field.replace("metadata.", "")
 
     value: Any = condition["value"]

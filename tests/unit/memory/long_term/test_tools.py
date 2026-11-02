@@ -2,9 +2,6 @@ from dynamiq.memory.long_term.backends.in_memory import InMemoryLongTermMemoryBa
 from dynamiq.nodes.tools.long_term_memory import RecallFactsTool, RememberFactTool, build_long_term_memory_tools
 
 
-# --- RememberFactTool ---
-
-
 def test_remember_tool_persists_a_fact(backend, user_id):
     tool = RememberFactTool(backend=backend, user_id=user_id)
     result = tool.execute(tool.input_schema(content="User likes pizza"))
@@ -62,9 +59,6 @@ def test_remember_tool_agent_optimized_reports_update(fake_embedder, user_id):
     tool.execute(tool.input_schema(content="User likes pizza"))
     updated = tool.execute(tool.input_schema(content="User loves pizza"))
     assert updated["content"] == "Fact updated."
-
-
-# --- RecallFactsTool ---
 
 
 def test_recall_tool_returns_hits(backend, user_id):
@@ -184,9 +178,6 @@ def test_recall_tool_strips_query_whitespace(backend, user_id):
     assert result["content"], "stripped query should still match the stored fact"
 
 
-# --- factory ---
-
-
 def test_factory_builds_default_two_tools(backend, user_id):
     tools = build_long_term_memory_tools(backend=backend, user_id=user_id)
     assert {t.name for t in tools} == {"remember_fact", "recall_facts"}
@@ -196,9 +187,6 @@ def test_factory_bakes_user_id_into_each_tool(backend, user_id):
     tools = build_long_term_memory_tools(backend=backend, user_id=user_id)
     for tool in tools:
         assert tool.user_id == user_id
-
-
-# --- serialization ---
 
 
 def test_remember_tool_to_dict_excludes_live_backend(backend, user_id):

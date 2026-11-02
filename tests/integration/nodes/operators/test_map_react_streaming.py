@@ -92,7 +92,7 @@ def run(input_data):
         parallel_tool_calls_enabled=True,
         tools=[python_tool, exa_tool, firecrawl_tool],
         streaming=StreamingConfig(enabled=True, event="map_react_stream", mode=StreamingMode.ALL),
-        max_loops=20,
+        max_loops=3,
         behaviour_on_max_loops=Behavior.RETURN,
     )
 
@@ -130,10 +130,8 @@ def run(input_data):
     for entity_id, items in llm_events_by_entity.items():
         assert len(items) > 0
         joined = "".join(str(chunk) for _, chunk in items)
-        # Check for XML format or mocked response
         assert ("<thought>" in joined) or ("<action>" in joined) or ("mocked_response" in joined)
 
-    # Verify each tool produced at least one trace
     def is_tool_group(g):
         return g == "tools" or getattr(g, "value", None) == "tools"
 

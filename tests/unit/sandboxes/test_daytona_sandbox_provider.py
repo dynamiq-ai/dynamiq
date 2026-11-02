@@ -18,7 +18,6 @@ def mock_daytona_env():
     mock_client.create.return_value = mock_sandbox
     mock_client.get.return_value = mock_sandbox
 
-    # Default process.exec result
     default_result = MagicMock()
     default_result.exit_code = 0
     default_result.result = ""
@@ -169,7 +168,6 @@ def test_close_kill(daytona_sandbox, mock_daytona_env):
     mock_client = mock_daytona_env["client"]
     mock_sdk_sandbox = mock_daytona_env["sandbox"]
 
-    # Trigger sandbox creation
     daytona_sandbox._ensure_sandbox()
 
     daytona_sandbox.close(kill=True)
@@ -182,7 +180,6 @@ def test_close_no_kill(daytona_sandbox, mock_daytona_env):
     """Test close without kill keeps sandbox alive."""
     mock_client = mock_daytona_env["client"]
 
-    # Trigger sandbox creation
     daytona_sandbox._ensure_sandbox()
 
     daytona_sandbox.close(kill=False)

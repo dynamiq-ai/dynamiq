@@ -76,6 +76,8 @@ class PyPDFFileConverter(BaseConverter):
             elements = self._partition_file_into_elements(file)
         else:
             raise TypeError("Expected a Path object or a BytesIO object.")
+        if elements is None:
+            return []
         return self._create_documents(
             filepath=file_path,
             elements=elements,
@@ -85,22 +87,23 @@ class PyPDFFileConverter(BaseConverter):
 
     @staticmethod
     def _partition_file_into_elements(
-        file: Path | BytesIO,
-    ) -> PdfReader:
+        file: str | BytesIO,
+    ) -> PdfReader | None:
         """
         Partition a file into elements using the PyPDFReader.
 
         Args:
-            filepath (Path): The path to the file to partition.
+            file (str | BytesIO): The path to the file, or the file, to partition.
 
         Returns:
-            PdfReader: PdfReader object with elements extracted from the file.
+            PdfReader | None: PdfReader object with elements extracted from the file, or None if PyPDF cannot read
+                the file.
         """
         try:
             return PdfReader(file)
         except Exception as e:
-            logger.warning(f"PyPDF converter could not process file {file.name or str(file)}. Error: {e}")
-            return []
+            logger.warning(f"PyPDF converter could not process file {getattr(file, 'name', file)}. Error: {e}")
+            return None
 
     def _create_documents(
         self,
@@ -118,7 +121,7 @@ class PyPDFFileConverter(BaseConverter):
         document_metadata.update(self._normalize_pdf_metadata(elements.metadata))
 
         if document_creation_mode == DocumentCreationMode.ONE_DOC_PER_FILE:
-            text = "".join(page.extract_text(extraction_mode=self.extraction_mode) for page in elements.pages)
+            text = "\n".join(page.extract_text(extraction_mode=self.extraction_mode) for page in elements.pages)
             return [Document(content=text, metadata=document_metadata)]
 
         if document_creation_mode == DocumentCreationMode.ONE_DOC_PER_PAGE:

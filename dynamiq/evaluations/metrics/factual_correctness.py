@@ -149,7 +149,6 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
         self._initialize_evaluators()
 
     def _initialize_evaluators(self):
-        # Claim Decomposition Evaluator
         decomposition_instructions = (
             "Decompose the 'Input Text' into standalone factual claims.\n"
             "- Each claim should be a simple, verifiable statement.\n"
@@ -182,7 +181,6 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
             llm=self.llm,
         )
 
-        # NLI Evaluator
         nli_instructions = (
             "For each 'Claim', determine if it is supported by the 'Premise'.\n"
             "- Return 'verdict': 1 for supported, 0 for unsupported claims.\n"
@@ -350,7 +348,6 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
         for claim in context_claims:
             lines.append(f"     - {claim}")
         lines.extend(["", "2. Claim Verification:"])
-        # Map verdicts to emojis: 1 -> ✅, 0 -> ❌
         mapped_context = [("✅" if v == 1 else "❌") for v in context_verdicts]
         lines.extend(
             [

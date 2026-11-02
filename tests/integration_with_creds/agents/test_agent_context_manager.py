@@ -51,8 +51,7 @@ def run(input_data):
 
 @pytest.fixture(scope="module")
 def run_config():
-    """Create a runnable config with extended timeout."""
-    return RunnableConfig(request_timeout=180)
+    return RunnableConfig()
 
 
 @pytest.mark.flaky(reruns=3)
@@ -67,7 +66,7 @@ def test_automatic_context_manager_invocation(llm_instance, python_tool, run_con
     logger.info("Testing automatic Context Manager Tool invocation on token limit")
     logger.info(f"{'='*80}\n")
 
-    # Create agent with REPLACE mode and LOW token limit to trigger automatic summarization
+    # A low token limit triggers automatic summarization.
     agent = Agent(
         name="test-auto-summarization",
         llm=llm_instance,
@@ -95,7 +94,6 @@ def test_automatic_context_manager_invocation(llm_instance, python_tool, run_con
         )
     }
 
-    # Store initial message count
     initial_message_count = len(agent._prompt.messages)
     logger.info(f"Initial message count: {initial_message_count}")
 
@@ -104,7 +102,6 @@ def test_automatic_context_manager_invocation(llm_instance, python_tool, run_con
     assert result.status == RunnableStatus.SUCCESS, f"Agent failed: {result.error}"
     logger.info("Agent completed successfully")
 
-    # Check final message count
     final_message_count = len(agent._prompt.messages)
     logger.info(f"Final message count: {final_message_count}")
     # Everything should be summarized
@@ -129,7 +126,7 @@ def test_automatic_context_manager_auto_clean(llm_instance, python_tool, run_con
     logger.info("Testing automatic Context Manager Tool auto clean on token limit")
     logger.info(f"{'='*80}\n")
 
-    # Create agent with REPLACE mode and LOW token limit to trigger automatic summarization
+    # A low token limit triggers automatic summarization.
     agent = Agent(
         name="test-auto-summarization",
         llm=llm_instance,
@@ -154,7 +151,6 @@ def test_automatic_context_manager_auto_clean(llm_instance, python_tool, run_con
         )
     }
 
-    # Store initial message count
     initial_message_count = len(agent._prompt.messages)
     logger.info(f"Initial message count: {initial_message_count}")
 
@@ -163,7 +159,6 @@ def test_automatic_context_manager_auto_clean(llm_instance, python_tool, run_con
     assert result.status == RunnableStatus.SUCCESS, f"Agent failed: {result.error}"
     logger.info("Agent completed successfully")
 
-    # Check final message count
     final_message_count = len(agent._prompt.messages)
     logger.info(f"Final message count: {final_message_count}")
 

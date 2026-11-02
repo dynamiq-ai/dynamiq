@@ -27,7 +27,7 @@ DYNAMIQ_BASE_URL = "https://api.getdynamiq.ai"
 #   "project_id": "your-project-id"
 # }
 
-# Expected structure of `.dynamiq/credentials.json`:
+# Expected structure of `$XDG_CONFIG_HOME/dynamiq/credentials.json`:
 # {
 #   "api_key": "your-api-key-here",
 #   "api_host": "https://api.getdynamiq.ai"

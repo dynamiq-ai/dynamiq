@@ -4,7 +4,6 @@ from dynamiq.evaluations.metrics import FaithfulnessEvaluator
 
 
 def test_faithfulness_evaluator(openai_node):
-    # Sample data
     questions = ["Who was Albert Einstein and what is he best known for?", "Tell me about the Great Wall of China."]
     answers = [
         (
@@ -34,10 +33,8 @@ def test_faithfulness_evaluator(openai_node):
         ),
     ]
 
-    # Initialize evaluator with the provided openai_node
     evaluator = FaithfulnessEvaluator(llm=openai_node)
 
-    # Mock the statement simplifier
     evaluator._statement_simplifier.run = MagicMock(
         side_effect=[
             # First call: simplify statements for the first answer
@@ -70,7 +67,6 @@ def test_faithfulness_evaluator(openai_node):
         ]
     )
 
-    # Mock the NLI evaluator
     evaluator._nli_evaluator.run = MagicMock(
         side_effect=[
             # First call: Check faithfulness for the first question
@@ -131,9 +127,7 @@ def test_faithfulness_evaluator(openai_node):
         ]
     )
 
-    # Run the evaluator
     run_output = evaluator.run(questions=questions, answers=answers, contexts=contexts, verbose=False)
-    # Extract computed scores and reasoning from output results
     faithfulness_scores = [res.score for res in run_output.results]
     reasonings = [res.reasoning for res in run_output.results]
 
@@ -142,7 +136,6 @@ def test_faithfulness_evaluator(openai_node):
     # For the second question: 2 out of 3 statements are faithful -> score 0.6667.
     expected_scores = [1.0, 0.6667]
 
-    # Assert the computed scores are as expected and reasoning is provided.
     for computed, expected, reason in zip(faithfulness_scores, expected_scores, reasonings):
         assert abs(computed - expected) < 0.01, f"Expected {expected}, got {computed}"
         assert isinstance(reason, str) and reason.strip() != "", "Reasoning is empty."
@@ -182,10 +175,8 @@ def test_faithfulness_evaluator_with_list_of_lists(openai_node):
         ],
     ]
 
-    # Initialize evaluator
     evaluator = FaithfulnessEvaluator(llm=openai_node)
 
-    # Mock the statement simplifier
     evaluator._statement_simplifier.run = MagicMock(
         side_effect=[
             # First call: simplify statements for the first answer
@@ -216,7 +207,6 @@ def test_faithfulness_evaluator_with_list_of_lists(openai_node):
         ]
     )
 
-    # Mock the NLI evaluator
     evaluator._nli_evaluator.run = MagicMock(
         side_effect=[
             # First call: Check faithfulness for the first question
@@ -277,13 +267,10 @@ def test_faithfulness_evaluator_with_list_of_lists(openai_node):
         ]
     )
 
-    # Run the evaluator with contexts passed as list[list[str]]
     run_output = evaluator.run(questions=questions, answers=answers, contexts=contexts, verbose=False)
-    # Extract computed scores and reasoning from output results
     faithfulness_scores = [res.score for res in run_output.results]
     reasonings = [res.reasoning for res in run_output.results]
 
-    # Expected scores based on the mocked data:
     expected_scores = [1.0, 0.6667]
 
     for computed, expected, reason in zip(faithfulness_scores, expected_scores, reasonings):

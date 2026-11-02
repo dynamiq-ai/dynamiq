@@ -3,7 +3,6 @@ import types
 from concurrent.futures import as_completed
 from typing import Any, Callable, Literal, Mapping, Union, get_args, get_origin
 
-from litellm import get_supported_openai_params, supports_response_schema
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from pydantic_core import from_json
 
@@ -52,6 +51,7 @@ from dynamiq.types.streaming import (
 )
 from dynamiq.utils import generate_uuid, serialize_files_in_value
 from dynamiq.utils.json_parser import parse_llm_json_output
+from dynamiq.utils.litellm import get_supported_openai_params, supports_response_schema
 from dynamiq.utils.logger import logger
 
 
@@ -1464,7 +1464,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     preserved=to_preserve,
                 )
 
-            # Stream the result
             self._stream_agent_event(
                 AgentToolResultEventMessageData(
                     tool_run_id=tool_run_id,
@@ -1686,18 +1685,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 - action_input: The tool input to use
                 - skipped_tools: List of tool names that were skipped
         """
-        # Get ContextManagerTool names
         context_manager_names = {
             self.sanitize_tool_name(t.name) for t in self.tools if isinstance(t, ContextManagerTool)
         }
 
-        # Check if ContextManagerTool is in a parallel tool list
         if isinstance(action_input, list):
             for tool_data in action_input:
                 if isinstance(tool_data, dict):
                     tool_name = self.sanitize_tool_name(tool_data.get("name", ""))
                     if tool_name in context_manager_names:
-                        # Collect names of other tools that will be skipped
                         skipped_tools = [
                             td.get("name", "unknown")
                             for td in action_input
@@ -1710,7 +1706,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         )
                         return True, tool_data.get("name", ""), tool_data.get("input", {}), skipped_tools
         elif isinstance(action, str) and self.sanitize_tool_name(action) in context_manager_names:
-            # Single tool mode - ContextManagerTool detected, no tools skipped
             return True, action, action_input, []
 
         return False, action, action_input, []
@@ -1749,13 +1744,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 if action_input is None:
                     return None
 
-            # Check if ContextManagerTool is in the action - if so, skip parallel mode
             skip_parallel, action, action_input, skipped_tools = self._should_skip_parallel_mode(action, action_input)
 
-            # Handle XML parallel mode (only for multiple tools, not for ContextManagerTool)
             tools_data = action_input if isinstance(action_input, list) else [action_input]
 
-            # Check subagent invocation limits before executing
             subagent_error = self._check_subagent_limits(tools_data, action)
             if subagent_error:
                 # Emitted, not added as a bare observation: every id in the batch needs a reply.
@@ -1802,8 +1794,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 tool_result = f"{tool_result}{skipped_notice}" if tool_result else skipped_notice
 
             self._emit_tool_observations(tool_result, ordered_results, success=tool_success)
-
-        # else: No action or no tools available - no reasoning to stream
 
         return None
 
@@ -1877,11 +1867,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
         )
         logger.debug(f"Agent {self.name} - {self.id}: Loop {loop_num}, reasoning:\n{llm_reasoning}...")
 
-        # Append assistant message to conversation history BEFORE parsing
-        # This ensures the LLM can see its own output during error recovery
+        # Append BEFORE parsing so the LLM can see its own output during error recovery.
         self._append_assistant_message(llm_result, llm_generated_output)
 
-        # Parse LLM output based on inference mode
         match self.inference_mode:
             case InferenceMode.DEFAULT:
                 result = self._handle_default_mode(llm_generated_output, loop_num)
@@ -1892,7 +1880,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             case InferenceMode.XML:
                 result = self._handle_xml_mode(llm_generated_output, loop_num, config, **kwargs)
 
-        # Resolve the parsed result into a ReactStep.
         if result[1] == "final_answer":
             self._resolve_requested_output_files(strict=True)
             final_answer = result[2]
@@ -2299,7 +2286,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""
-        # Generate inference-mode schemas
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
             self._tools = schema_generator.generate_function_calling_schemas(
                 self._offered_tools(self.tools),
@@ -2312,7 +2298,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self._offered_tools(self.tools), self.sanitize_tool_name, self.delegation_allowed
             )
 
-        # Build the entire prompt in one call
         model_name = getattr(self.llm, "model", None)
         response_format_schema = (
             schema_generator.unwrap_response_format(self.response_format) if self.response_format is not None else None
@@ -2583,7 +2568,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     )
                     logger.info(f"Agent {self.name} - {self.id}: running sequentially ({reason}): {seq_names}")
 
-                # Phase 1: run parallel-eligible tools concurrently
                 if len(parallel_group) > 1:
                     # Bounded: the model decides how many tools to call, not thread count.
                     max_workers = min(len(parallel_group), self.max_parallel_tool_calls)
@@ -2624,7 +2608,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     if parallel_deps:
                         self._run_depends = parallel_deps
 
-                # Phase 2: run sequential-only tools one-by-one
                 for tool_payload in sequential_group:
                     check_cancellation(config)
                     all_results.append(

@@ -386,7 +386,7 @@ class CuaDesktopTool(ConnectionNode):
                 elif isinstance(fobj, io.BytesIO):
                     data = fobj.getvalue()
                 elif isinstance(fobj, str):
-                    # Handle string file inputs by treating them as file paths or content
+                    # A string is the file's content, never a path to read.
                     data = fobj.encode("utf-8")
                 else:
                     data = bytes(str(fobj), encoding="utf-8")
@@ -405,14 +405,12 @@ class CuaDesktopTool(ConnectionNode):
 
     async def _init_client(self):
         """Initialize CUA computer (idempotent)."""
-        # Check if already initialized
         if self._computer is not None:
             return
 
         # Use lock only for the check-and-set to avoid holding it during async operations
         with self._init_lock:
             if self._computer is None:
-                # Create computer instance
                 self._computer = self.connection.connect()
             else:
                 # Another coroutine already set it
@@ -469,7 +467,6 @@ class CuaDesktopTool(ConnectionNode):
 
         await self._init_client()
 
-        # Filter out screenshots from previous actions
         files_to_upload = self._filter_screenshots(input_data.files)
         uploads_report = None
         if files_to_upload:
@@ -498,15 +495,12 @@ class CuaDesktopTool(ConnectionNode):
         if not files:
             return []
 
-        # Normalize to list
         if not isinstance(files, list):
             files = [files]
 
         filtered = []
         for f in files:
-            # Check if file has a name attribute (BytesIO objects)
             if hasattr(f, "name"):
-                # Skip files named screenshot.png or containing "screenshot" in the name
                 if isinstance(f.name, str) and "screenshot" in f.name.lower():
                     logger.debug(f"Filtering out screenshot file: {f.name}")
                     continue
@@ -539,7 +533,6 @@ class CuaDesktopTool(ConnectionNode):
                 recoverable=True,
             )
 
-        # Map actions to CUA Computer API
         logger.info(f"CuaDesktopTool executing action={action_enum.value}")
         logger.debug(f"CuaDesktopTool executing action={action_enum.value} params={params}")
         files: list[io.BytesIO] | None = None
@@ -554,19 +547,16 @@ class CuaDesktopTool(ConnectionNode):
             num_clicks = params.get("num_clicks", 1)
             delay = params.get("delay")
 
-            # Move to coordinates if provided
             if coordinates:
                 x, y = coordinates
                 await self._computer.interface.move_cursor(x, y, delay=None)
 
-            # Perform clicks
             for _ in range(num_clicks):
                 if button == CuaMouseButton.LEFT:
                     await self._computer.interface.left_click(delay=delay if _ == num_clicks - 1 else None)
                 elif button == CuaMouseButton.RIGHT:
                     await self._computer.interface.right_click(delay=delay if _ == num_clicks - 1 else None)
                 elif button == CuaMouseButton.MIDDLE:
-                    # Middle click via mouse_down/mouse_up
                     await self._computer.interface.mouse_down(button=button, delay=None)
                     await self._computer.interface.mouse_up(button=button, delay=delay if _ == num_clicks - 1 else None)
 
@@ -580,7 +570,6 @@ class CuaDesktopTool(ConnectionNode):
             button = params.get("button", "left")
             delay = params.get("delay")
 
-            # Move to coordinates if provided
             if coordinates:
                 x, y = coordinates
                 await self._computer.interface.move_cursor(x, y, delay=None)
@@ -605,13 +594,11 @@ class CuaDesktopTool(ConnectionNode):
             duration = params.get("duration", 0.5)
             delay = params.get("delay")
 
-            # If single coordinate, use drag_to; otherwise use drag
             if len(path) == 1:
                 x, y = path[0]
                 await self._computer.interface.drag_to(x, y, button=button, duration=duration, delay=delay)
                 result = f"Dragged to ({x}, {y}) using {button} button."
             else:
-                # Convert list of lists to list of tuples
                 path_tuples = [(p[0], p[1]) for p in path]
                 await self._computer.interface.drag(path_tuples, button=button, duration=duration, delay=delay)
                 result = f"Dragged along path with {len(path)} points using {button} button."
@@ -631,7 +618,6 @@ class CuaDesktopTool(ConnectionNode):
             delay = params.get("delay")
 
             if isinstance(selected_keys, str):
-                # Single key
                 if action_type == CuaKeyAction.PRESS:
                     await self._computer.interface.press(selected_keys, delay=delay)
                     result = f"Pressed key: {selected_keys}."
@@ -642,19 +628,16 @@ class CuaDesktopTool(ConnectionNode):
                     await self._computer.interface.key_up(selected_keys, delay=delay)
                     result = f"Key up: {selected_keys}."
             else:
-                # Key combination
                 if action_type == CuaKeyAction.PRESS:
                     await self._computer.interface.hotkey(*selected_keys, delay=delay)
                     result = f"Pressed key combination: {'+'.join(selected_keys)}."
                 elif action_type == CuaKeyAction.DOWN:
-                    # Press multiple keys down in sequence
                     for key in selected_keys:
                         await self._computer.interface.key_down(key, delay=None)
                     if delay:
                         await asyncio.sleep(delay)
                     result = f"Keys down: {'+'.join(selected_keys)}."
                 elif action_type == CuaKeyAction.UP:
-                    # Release multiple keys in reverse sequence
                     for key in reversed(selected_keys):
                         await self._computer.interface.key_up(key, delay=None)
                     if delay:
@@ -669,7 +652,6 @@ class CuaDesktopTool(ConnectionNode):
             delay = params.get("delay")
 
             if clicks is not None and direction is not None:
-                # Use scroll_up/scroll_down
                 if direction == CuaScrollDirection.DOWN:
                     await self._computer.interface.scroll_down(clicks=clicks, delay=delay)
                     result = f"Scrolled down {clicks} clicks."
@@ -677,7 +659,6 @@ class CuaDesktopTool(ConnectionNode):
                     await self._computer.interface.scroll_up(clicks=clicks, delay=delay)
                     result = f"Scrolled up {clicks} clicks."
             else:
-                # Use x/y scroll
                 await self._computer.interface.scroll(x, y, delay=delay)
                 result = f"Scrolled by ({x}, {y})."
             files = await self._append_screenshot(files)
@@ -686,7 +667,6 @@ class CuaDesktopTool(ConnectionNode):
             box_color = params.get("box_color", "#FF0000")
             box_thickness = params.get("box_thickness", 2)
             scale_factor = params.get("scale_factor", 1.0)
-            # Convert list of lists to list of tuples if provided
             boxes_tuples = [(b[0], b[1], b[2], b[3]) for b in boxes] if boxes else None
             img_bytes = await self._computer.interface.screenshot(
                 boxes=boxes_tuples, box_color=box_color, box_thickness=box_thickness, scale_factor=scale_factor
@@ -778,7 +758,6 @@ class CuaDesktopTool(ConnectionNode):
                 recoverable=True,
             )
 
-        # Include upload summary in result if available
         if uploads_report:
             summary = "; ".join(
                 [
@@ -825,14 +804,12 @@ class CuaDesktopTool(ConnectionNode):
                     if hasattr(self._computer, "stop"):
                         stop_method = getattr(self._computer, "stop")
                         if is_coroutine_function(stop_method):
-                            # Method is async, run it in the event loop
                             if self._loop and not self._loop.is_closed():
                                 future = asyncio.run_coroutine_threadsafe(stop_method(), self._loop)
-                                future.result(timeout=5.0)  # Wait up to 5 seconds for cleanup
+                                future.result(timeout=5.0)
                             else:
                                 logger.warning("Event loop not available for async cleanup")
                         else:
-                            # Method is synchronous
                             stop_method()
                 except Exception as e:
                     logger.warning(f"Failed to cleanup CUA computer: {e}")

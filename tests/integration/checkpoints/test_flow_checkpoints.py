@@ -691,12 +691,10 @@ class TestCheckpointStatusLifecycle:
         # Resume — the first save on resume must NOT overwrite original_id.
         flow.run_sync(input_data={"query": "test"}, resume_from=original_id)
 
-        # The original checkpoint must still exist and be unchanged.
         original_still_exists = backend.load(original_id)
         assert original_still_exists is not None, "Original checkpoint was overwritten — regression!"
         assert original_still_exists.id == original_id
 
-        # A new snapshot linked to the original must have been created.
         all_checkpoints = backend.get_list_by_flow(flow.id, limit=50)
         children = [cp for cp in all_checkpoints if cp.parent_checkpoint_id == original_id]
         assert len(children) >= 1, "No APPEND snapshot linked to the original checkpoint was created"
@@ -1090,12 +1088,10 @@ class TestAsyncCheckpointBehaviour:
         # Resume — the first async save must NOT overwrite original_id.
         await flow.run_async(input_data={"query": "test"}, resume_from=original_id)
 
-        # The original checkpoint must still exist and be unchanged.
         original_still_exists = await backend.load_async(original_id)
         assert original_still_exists is not None, "Original checkpoint was overwritten — regression!"
         assert original_still_exists.id == original_id
 
-        # A new snapshot linked to the original must have been created.
         all_checkpoints = await backend.get_list_by_flow_async(flow.id, limit=50)
         children = [cp for cp in all_checkpoints if cp.parent_checkpoint_id == original_id]
         assert len(children) >= 1, "No APPEND snapshot linked to the original checkpoint was created"

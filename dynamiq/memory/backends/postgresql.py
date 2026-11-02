@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 import uuid
 from enum import Enum
@@ -24,6 +25,12 @@ class FetchMode(str, Enum):
 class PostgresMemoryError(Exception):
     """Base exception class for PostgreSQL Memory Backend errors."""
     pass
+
+
+# Concurrent CREATE TABLE IF NOT EXISTS statements for a new table can fail with a duplicate key error, and every run
+# builds its own backend, so a process creates each table once, one at a time.
+_created_tables: set[tuple] = set()
+_create_tables_lock = threading.Lock()
 
 
 class PostgreSQL(MemoryBackend):
@@ -74,7 +81,7 @@ class PostgreSQL(MemoryBackend):
             self._conn = self.connection.connect()
             self._is_closed = False
             if self.create_if_not_exist:
-                self._create_table_and_indices()
+                self._ensure_table()
             logger.debug(f"PostgreSQL backend connected to table '{self.table_name}'.")
         except psycopg.Error as e:
             logger.error(f"Failed to initialize PostgreSQL connection or table '{self.table_name}': {e}")
@@ -138,53 +145,66 @@ class PostgreSQL(MemoryBackend):
             logger.error(f"PostgreSQL error executing SQL: {e}\nSQL: {sql_str}\nParams: {params}")
             raise PostgresMemoryError(f"PostgreSQL error: {e}") from e
 
+    def _ensure_table(self) -> None:
+        """Create the table and its indices, once per process for each database and table."""
+        connection = self.connection
+        table = (connection.host, connection.port, connection.database, connection.user, self.table_name)
+        with _create_tables_lock:
+            if table not in _created_tables:
+                self._create_table_and_indices()
+                _created_tables.add(table)
+
     def _create_table_and_indices(self) -> None:
         """Creates the table and necessary indices if they don't exist."""
         logger.debug(f"Ensuring table '{self.table_name}' and indices exist...")
+        # Processes that start together would race on the CREATE statements, so they run one at a time under a lock
+        # that PostgreSQL releases when the transaction ends.
+        with self._conn.transaction():
+            self._execute_sql("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"dynamiq.memory.{self.table_name}",))
 
-        table_sql = SQL(
+            table_sql = SQL(
+                """
+                CREATE TABLE IF NOT EXISTS {table_name} (
+                    {message_id_col} UUID PRIMARY KEY,
+                    {role_col} TEXT NOT NULL,
+                    {content_col} TEXT,
+                    {metadata_col} JSONB,
+                    {timestamp_col} DOUBLE PRECISION NOT NULL
+                );
             """
-            CREATE TABLE IF NOT EXISTS {table_name} (
-                {message_id_col} UUID PRIMARY KEY,
-                {role_col} TEXT NOT NULL,
-                {content_col} TEXT,
-                {metadata_col} JSONB,
-                {timestamp_col} DOUBLE PRECISION NOT NULL
-            );
-        """
-        ).format(
-            table_name=Identifier(self.table_name),
-            message_id_col=Identifier(self.message_id_col),
-            role_col=Identifier(self.role_col),
-            content_col=Identifier(self.content_col),
-            metadata_col=Identifier(self.metadata_col),
-            timestamp_col=Identifier(self.timestamp_col),
-        )
-        self._execute_sql(table_sql)
+            ).format(
+                table_name=Identifier(self.table_name),
+                message_id_col=Identifier(self.message_id_col),
+                role_col=Identifier(self.role_col),
+                content_col=Identifier(self.content_col),
+                metadata_col=Identifier(self.metadata_col),
+                timestamp_col=Identifier(self.timestamp_col),
+            )
+            self._execute_sql(table_sql)
 
-        table_short_name = "".join(filter(str.isalnum, self.table_name))[:10]
+            table_short_name = "".join(filter(str.isalnum, self.table_name))[:10]
 
-        ts_index_sql = SQL(
+            ts_index_sql = SQL(
+                """
+                CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({timestamp_col});
             """
-            CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({timestamp_col});
-        """
-        ).format(
-            index_name=Identifier(f"idx_{table_short_name}_timestamp"),
-            table_name=Identifier(self.table_name),
-            timestamp_col=Identifier(self.timestamp_col),
-        )
-        self._execute_sql(ts_index_sql)
+            ).format(
+                index_name=Identifier(f"idx_{table_short_name}_timestamp"),
+                table_name=Identifier(self.table_name),
+                timestamp_col=Identifier(self.timestamp_col),
+            )
+            self._execute_sql(ts_index_sql)
 
-        meta_index_sql = SQL(
+            meta_index_sql = SQL(
+                """
+                CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} USING GIN ({metadata_col});
             """
-            CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} USING GIN ({metadata_col});
-        """
-        ).format(
-            index_name=Identifier(f"idx_{table_short_name}_metadata_gin"),
-            table_name=Identifier(self.table_name),
-            metadata_col=Identifier(self.metadata_col),
-        )
-        self._execute_sql(meta_index_sql)
+            ).format(
+                index_name=Identifier(f"idx_{table_short_name}_metadata_gin"),
+                table_name=Identifier(self.table_name),
+                metadata_col=Identifier(self.metadata_col),
+            )
+            self._execute_sql(meta_index_sql)
         logger.debug(f"Table '{self.table_name}' and indices checked/created.")
 
     def _row_to_message(self, row: dict) -> Message:

@@ -214,7 +214,6 @@ class E2BSandbox(Sandbox):
                 except Exception as e:
                     raise SandboxConnectionError(self.sandbox_id, cause=e) from e
 
-            # Create new sandbox (no sandbox_id)
             self._sandbox = self._create_with_retry()
             self.sandbox_id = self._sandbox.sandbox_id
             logger.debug(f"E2B sandbox created: {self.sandbox_id}")
@@ -395,13 +394,11 @@ class E2BSandbox(Sandbox):
             target_dir = self.base_path
 
         try:
-            # Check if the directory exists
             check_cmd = f"test -d {shlex.quote(target_dir)} && echo exists"
             check_result = sandbox.commands.run(check_cmd)
             if check_result.exit_code != 0 or "exists" not in (check_result.stdout or ""):
                 return []
 
-            # List files recursively (configurable limit)
             cmd = f"find {shlex.quote(target_dir)} -type f 2>/dev/null | head -{self.max_output_files}"
             result = sandbox.commands.run(cmd)
             if result.exit_code != 0 or not (result.stdout or "").strip():

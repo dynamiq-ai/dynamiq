@@ -43,12 +43,13 @@ EXTENSION_MAP = {
         "heic",
         "avif",
     },
+    # The first type that lists an extension is the one detected, so the narrower types come first.
     FileType.DOCX_DOCUMENT: {"docx"},
     FileType.DOCUMENT: {"doc", "docx", "odt", "rtf"},
     FileType.PDF: {"pdf"},
     FileType.SPREADSHEET: {"xlsx", "csv", "tsv"},
-    FileType.PRESENTATION: {"ppt", "pptx", "odp"},
     FileType.PPTX_PRESENTATION: {"pptx"},
+    FileType.PRESENTATION: {"ppt", "pptx", "odp"},
     FileType.ARCHIVE: {
         "zip",
         "rar",

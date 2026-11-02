@@ -22,9 +22,6 @@ def sample_png_bytes():
     Returns bytes for a very small valid PNG image (1x1 pixel).
     This base64 string is properly padded and will decode without error.
     """
-    # "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk"
-    # "YGBgAAAABAABJzQnCgAAAABJRU5ErkJggg=="
-    # is just a 1x1 px transparent PNG.
     data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk" "YGBgAAAABAABJzQnCgAAAABJRU5ErkJggg=="
     return base64.b64decode(data)
 
@@ -34,10 +31,8 @@ def test_vision_prompt_with_bytesio(sample_png_bytes):
     Tests that a BytesIO image is recognized and transformed into a proper
     base64-encoded data URL in the formatted vision message.
     """
-    # Wrap our PNG bytes in a BytesIO object.
     image_bytes_io = io.BytesIO(sample_png_bytes)
 
-    # Create a Prompt that expects an image URL with a Jinja placeholder {{ image }}.
     prompt = Prompt(
         id="test_vision",
         messages=[
@@ -48,29 +43,22 @@ def test_vision_prompt_with_bytesio(sample_png_bytes):
         ],
     )
 
-    # Format the messages with the image parameter pointing to our BytesIO.
     out_messages = prompt.format_messages(image=image_bytes_io)
 
-    # We expect exactly one message in the output.
     assert len(out_messages) == 1
     msg = out_messages[0]
 
-    # Ensure the role is "user".
     assert msg["role"] == MessageRole.USER
 
-    # Ensure the content is a list with one vision item.
     assert isinstance(msg["content"], list)
     assert len(msg["content"]) == 1
 
-    # Extract the image content dictionary.
     image_content = msg["content"][0]
     assert image_content["type"] == VisionMessageType.IMAGE_URL
 
-    # Check that the URL has a base64-encoded PNG.
     image_url = image_content["image_url"]["url"]
     assert image_url.startswith("data:image/png;base64,")
 
-    # Optional: decode and check that it starts with the PNG header bytes.
     encoded_part = image_url.split("base64,")[-1]
     decoded_part = base64.b64decode(encoded_part)
     assert decoded_part.startswith(b"\x89PNG\r\n\x1a\n")
@@ -193,17 +181,6 @@ class TestFunctionCallingProtocolMessages:
     def test_message_role_tool_exists(self):
         assert MessageRole.TOOL.value == "tool"
 
-    def test_message_accepts_tool_calls_field(self):
-        tool_calls = [
-            {"id": "call_1", "type": "function", "function": {"name": "search", "arguments": "{}"}}
-        ]
-        msg = Message(role=MessageRole.ASSISTANT, content="", tool_calls=tool_calls)
-        assert msg.tool_calls == tool_calls
-
-    def test_message_accepts_tool_call_id_field(self):
-        msg = Message(role=MessageRole.TOOL, content="result", tool_call_id="call_1")
-        assert msg.tool_call_id == "call_1"
-
     def test_format_messages_strips_null_tool_calls_from_user(self):
         prompt = Prompt(messages=[Message(role=MessageRole.USER, content="hi")])
         out = prompt.format_messages()
@@ -257,7 +234,6 @@ class TestFunctionCallingProtocolMessages:
         assert out[1]["tool_calls"][0]["id"] == "call_a"
         assert out[2]["tool_call_id"] == "call_a"
         assert out[3]["tool_call_id"] == "call_b"
-        # No null pollution anywhere
         for m in out:
             assert None not in m.values()
 

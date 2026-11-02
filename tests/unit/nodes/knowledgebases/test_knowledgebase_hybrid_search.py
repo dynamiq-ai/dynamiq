@@ -124,7 +124,6 @@ def test_execute_merges_dedupes_and_appends_graph_facts(vector_node, graph_node)
 
     # Deduped by id (vector "2" wins the tie), graph-only "3" appended.
     assert [doc.id for doc in result["documents"]] == ["1", "2", "3"]
-    # Provenance tagged on every document.
     assert [doc.metadata["retrieval_source"] for doc in result["documents"]] == ["vector", "vector", "graph"]
     # The `facts` triples are appended -- NOT the `content`, which would duplicate the source-doc text.
     assert "--- Graph Facts ---\nAcme -[USES]-> Helios" in result["content"]
@@ -152,7 +151,7 @@ def test_execute_reranks_and_applies_limit(vector_node, graph_node):
 
 def test_execute_applies_limit_without_reranker(vector_node, graph_node):
     """limit caps the merged pool even when no reranker is configured (order preserved)."""
-    node = _hybrid(vector_node, graph_node, limit=2)  # no reranker
+    node = _hybrid(vector_node, graph_node, limit=2)
     vector_node.client.request.return_value = _vector_response(
         [{"id": "1", "content": "a"}, {"id": "2", "content": "b"}, {"id": "3", "content": "c"}]
     )
@@ -257,7 +256,7 @@ def test_execute_falls_back_to_sub_node_user_when_input_user_missing(vector_node
 
 def test_execute_degrades_when_one_source_fails(vector_node, graph_node):
     """A single sub-search failure degrades to the surviving source instead of failing the whole call."""
-    vector_node.client.request.return_value = _vector_response([], status_code=403)  # vector fails
+    vector_node.client.request.return_value = _vector_response([], status_code=403)
     graph_node.client.request.return_value = _graph_response(
         {"content": "", "source_documents": [{"id": "2", "content": "beta"}]}
     )
@@ -267,7 +266,6 @@ def test_execute_degrades_when_one_source_fails(vector_node, graph_node):
         DynamiqKnowledgebaseHybridSearchInputSchema(query="q"), RunnableConfig(callbacks=[])
     )
 
-    # Only the graph source doc survives; no exception raised.
     assert [doc.id for doc in result["documents"]] == ["2"]
 
 
@@ -307,7 +305,6 @@ def test_execute_degrades_when_reranker_fails(vector_node, graph_node):
             DynamiqKnowledgebaseHybridSearchInputSchema(query="q"), RunnableConfig(callbacks=[])
         )
 
-    # Reranker failed -> merged order preserved, no exception raised.
     assert [doc.id for doc in result["documents"]] == ["1", "2"]
 
 

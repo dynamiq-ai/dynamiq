@@ -269,8 +269,6 @@ def test_as_of_is_not_a_known_root_for_an_expression_node():
     assert flowcheck.check_expressions(control, "screen") == ([], [])
 
 
-# --- what the engine refuses to build ----------------------------------------------------------------------------
-
 SELF_REFUSAL = (
     "Jinja reserves the name 'self' inside an expression, so a top-level key of that name cannot be read; "
     "nest it inside a record or rename the input"
@@ -468,9 +466,6 @@ def test_a_derived_value_may_take_a_name_the_engine_lets_it_shadow(name):
     assert flowcheck.check_rules(node, "screen") == []
 
 
-# --- a rule's message --------------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("message", "error"),
     [
@@ -531,8 +526,6 @@ def test_a_disabled_rules_message_is_not_parsed_at_all():
 
     assert flowcheck.check_expressions(node, "screen") == ([], [])
 
-
-# --- a node inside another ---------------------------------------------------------------------------------------
 
 MAP = "dynamiq.nodes.operators.Map"
 

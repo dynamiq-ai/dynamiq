@@ -101,7 +101,6 @@ class DocumentSplitter(BaseModel):
         if split_by == DocumentSplitBy.TITLE:
             # Restore the heading marker in front of every unit except the first one
             return units[:1] + [split_at + unit for unit in units[1:]]
-        # Add the delimiter back to all units except the last one
         for i in range(len(units) - 1):
             units[i] += split_at
         return units
@@ -125,6 +124,7 @@ class DocumentSplitter(BaseModel):
         for seg in segments:
             current_units = [unit for unit in seg if unit is not None]
             txt = "".join(current_units)
-            if len(txt) > 0:
+            # A chunk of only whitespace, such as the newline after a PDF's last sentence, has no text to embed.
+            if txt.strip():
                 text_splits.append(txt)
         return text_splits

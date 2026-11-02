@@ -7,9 +7,7 @@ from dynamiq.components.retrievers.pinecone import PineconeDocumentRetriever as 
 from dynamiq.connections import Pinecone
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.retrievers.base import RetrieverInputSchema
-from dynamiq.nodes.retrievers.pinecone import (
-    PineconeDocumentRetriever,
-)  # Adjust the import based on your module structure
+from dynamiq.nodes.retrievers.pinecone import PineconeDocumentRetriever
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import PineconeVectorStore
 from dynamiq.storages.vector.pinecone import PineconeSimilarityMetric
@@ -18,7 +16,7 @@ from dynamiq.storages.vector.pinecone import PineconeSimilarityMetric
 @pytest.fixture
 def mock_pinecone_vector_store():
     mock_store = MagicMock(spec=PineconeVectorStore)
-    mock_store.client = MagicMock()  # Add the client attribute to the mock
+    mock_store.client = MagicMock()
     mock_store.metric = PineconeSimilarityMetric.COSINE
     return mock_store
 

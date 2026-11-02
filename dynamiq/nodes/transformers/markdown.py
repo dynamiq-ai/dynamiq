@@ -5,7 +5,8 @@ from typing import Any, ClassVar, Literal
 
 import markdown
 from bs4 import BeautifulSoup
-from inscriptis import ParserConfig, get_text
+from inscriptis import get_text
+from inscriptis.model.config import ParserConfig
 from pydantic import BaseModel, ConfigDict, Field
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas

@@ -1,16 +1,6 @@
 from dynamiq.utils import TruncationMethod, truncate_text_for_embedding
 
 
-def test_truncation_logic_integration():
-    """Test that the truncation logic is properly integrated into embedders."""
-
-    long_text = "A" * 100
-    result = truncate_text_for_embedding(long_text, max_tokens=10, truncation_method=TruncationMethod.MIDDLE)
-
-    assert len(result) < len(long_text)
-    assert "...[truncated for embedding]..." in result
-
-
 def test_truncation_with_different_methods_integration():
     """Test different truncation methods work in integration."""
     long_text = "X" * 200

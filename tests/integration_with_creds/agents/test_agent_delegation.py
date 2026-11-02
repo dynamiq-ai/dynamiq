@@ -31,7 +31,7 @@ def agent_role():
 @pytest.fixture(scope="module")
 def run_config():
     """Standard runnable configuration."""
-    return RunnableConfig(request_timeout=120)
+    return RunnableConfig()
 
 
 @pytest.mark.flaky(reruns=3)
@@ -72,7 +72,7 @@ def test_delegation_flag_verified_in_traces(llm_instance, run_config, inference_
         "the CalculatorAgentTool and use delegate_final.",
         inference_mode=inference_mode,
         tools=[calculator_agent],
-        delegation_allowed=True,  # Enable delegation
+        delegation_allowed=True,
         verbose=True,
     )
 

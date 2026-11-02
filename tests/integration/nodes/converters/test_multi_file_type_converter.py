@@ -37,11 +37,6 @@ def _contents(documents):
     return [doc.content for doc in documents]
 
 
-# ---------------------------------------------------------------------------
-# (a) Correctness + output ordering with multiple files of different types
-# ---------------------------------------------------------------------------
-
-
 def test_preserves_output_order_with_files(converter):
     """Documents map back to the input files in their original order."""
     files = [_txt(f"content number {i}", f"file_{i}.txt") for i in range(8)]
@@ -94,11 +89,6 @@ def test_file_paths_preserve_per_file_metadata(tmp_path, converter):
         assert f"body {idx}" in doc.content
 
 
-# ---------------------------------------------------------------------------
-# (b) Conversions actually run concurrently
-# ---------------------------------------------------------------------------
-
-
 def test_conversions_run_concurrently_via_barrier(converter):
     """All N converters must be inside run() simultaneously, proving real parallelism.
 
@@ -148,7 +138,6 @@ def test_parallel_is_faster_than_sequential(converter):
 
     assert result.status == RunnableStatus.SUCCESS
     sequential_estimate = n * sleep_s
-    # Parallel execution should be well under half the sequential time.
     assert (
         elapsed < sequential_estimate / 2
     ), f"Expected parallel run << {sequential_estimate:.3f}s sequential, got {elapsed:.3f}s"
@@ -352,11 +341,6 @@ def test_cancellation_during_extraction_is_not_masked(converter):
 
     assert result.status == RunnableStatus.CANCELED
     assert converter_calls == []
-
-
-# ---------------------------------------------------------------------------
-# (c) Error propagation matches prior behavior
-# ---------------------------------------------------------------------------
 
 
 def test_single_file_failure_fails_the_node(converter):

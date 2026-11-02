@@ -76,7 +76,8 @@ def _regenerate_ids(
         if id(obj) in seen:
             return obj
         seen.add(id(obj))
-        # A rule, a row or a field keeps the id the user wrote, and holds nothing else to rename.
+        # Rules, rows and fields keep the id the user wrote, and connections the id their cached client is keyed
+        # by. None of them holds anything else to rename.
         if getattr(obj, "keeps_id", False):
             return obj
         if hasattr(obj, "id") and getattr(obj, "id") not in keep_ids:
