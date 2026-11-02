@@ -15,57 +15,53 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # Started first so that Neo4j pulls and boots while the dependencies install.
+      - name: Start Neo4j
+        run: >-
+          docker run --detach --name neo4j --publish 7687:7687
+          --env NEO4J_AUTH=neo4j/testpassword
+          --health-cmd "cypher-shell -u neo4j -p testpassword 'RETURN 1' || exit 1"
+          --health-interval 3s --health-timeout 5s --health-retries 40 --health-start-period 5s
+          neo4j:5-community
+
       - name: Checkout code
         uses: actions/checkout@v7
 
-      # Loading the test image back into the daemon costs ~90s of tarball export/import against the
-      # legacy overlay2 store. The containerd store takes the layers directly. Must precede buildx,
-      # since restarting the daemon would kill the builder container.
-      - name: Enable the containerd image store
-        run: |
-          echo '{"features":{"containerd-snapshotter":true}}' | sudo tee /etc/docker/daemon.json
-          sudo systemctl restart docker
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Create .env file
-        uses: SpicyPizza/create-envfile@v2
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.0
         with:
-          envkey_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          envkey_UNSTRUCTURED_API_KEY: ${{ secrets.UNSTRUCTURED_API_KEY }}
-          envkey_PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
-          envkey_PINECONE_CLOUD: ${{ secrets.PINECONE_CLOUD }}
-          envkey_PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
-          envkey_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          envkey_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          envkey_QDRANT_URL: ${{ secrets.QDRANT_URL }}
-          envkey_QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-          envkey_EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
-          envkey_E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
-          envkey_AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          envkey_AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          envkey_AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-          # Opt-in for the live Bedrock AgentCore tests; empty (unset secret) keeps them skipped.
-          envkey_BEDROCK_AGENTCORE_TESTS: ${{ secrets.BEDROCK_AGENTCORE_TESTS }}
-          # A networkMode=PUBLIC interpreter id; only needed for the package-installation test,
-          # which skips when unset because the built-in interpreter has no network egress.
-          envkey_BEDROCK_AGENTCORE_INTERPRETER_ID: ${{ secrets.BEDROCK_AGENTCORE_INTERPRETER_ID }}
+          version: "0.11.24"
 
-      # Started before the image load so Neo4j's pull and startup overlap with it instead of sitting
-      # on the critical path; by the time the test container starts it is already healthy.
-      - name: Start Neo4j
-        run: docker compose up -d neo4j
+      - name: Install dependencies
+        run: uv sync --frozen --extra all
 
-      - name: Load Test Image
-        uses: docker/bake-action@v7
-        with:
-          source: .
-          load: true
-          set: |
-            *.cache-from=type=gha
-            *.cache-to=type=gha,mode=max
-          targets: dynamiq-app-test
+      - name: Wait for Neo4j
+        timeout-minutes: 2
+        run: until [ "$(docker inspect --format '{{.State.Health.Status}}' neo4j)" = healthy ]; do sleep 2; done
 
       - name: Run integration tests with creds
-        run: docker compose up dynamiq-app-test-integration-with-creds --exit-code-from dynamiq-app-test-integration-with-creds
+        env:
+          PYTEST_XDIST_AUTO_NUM_WORKERS: 8
+          NEO4J_URI: bolt://localhost:7687
+          NEO4J_USERNAME: neo4j
+          NEO4J_PASSWORD: testpassword
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          UNSTRUCTURED_API_KEY: ${{ secrets.UNSTRUCTURED_API_KEY }}
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_CLOUD: ${{ secrets.PINECONE_CLOUD }}
+          PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          # Opt-in for the live Bedrock AgentCore tests; empty (unset secret) keeps them skipped.
+          BEDROCK_AGENTCORE_TESTS: ${{ secrets.BEDROCK_AGENTCORE_TESTS }}
+          # A networkMode=PUBLIC interpreter id; only needed for the package-installation test,
+          # which skips when unset because the built-in interpreter has no network egress.
+          BEDROCK_AGENTCORE_INTERPRETER_ID: ${{ secrets.BEDROCK_AGENTCORE_INTERPRETER_ID }}
+        run: make test-integration-with-creds
