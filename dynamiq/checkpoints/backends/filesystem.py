@@ -4,12 +4,14 @@ import json
 import os
 import re
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Iterator
 
 from pydantic import ConfigDict, Field, PrivateAttr
 
+from dynamiq.checkpoints.backends._filesystem_lock import directory_lock
 from dynamiq.checkpoints.backends.base import CheckpointBackend
 from dynamiq.checkpoints.types import CheckpointStatus
 from dynamiq.utils import decode_reversible, encode_reversible
@@ -24,13 +26,21 @@ class FileSystem(CheckpointBackend):
     Directory layout::
 
         {base_path}/
-          {flow_id}/
-            {created_at}__{wf_run_id}/          # wf_run_id if available, otherwise run_id
-              {created_at}__{checkpoint_id}.json
+          {digest}__{flow_slug}/
+            {created_at}__{digest}__{run_slug}/
+              {created_at}__{digest}__{checkpoint_slug}.json
 
     Using ``wf_run_id`` (workflow-level run ID) for the run directory groups all
     checkpoints from the same logical workflow execution together, including resumes.
     When the flow runs standalone (no parent Workflow), ``run_id`` is used as fallback.
+    Paths identify the initial placement, not the current run: an upsert replaces the
+    existing file even when a resume changes its run IDs. Queries use the stored data.
+    Legacy paths remain readable and are updated in place. Duplicate legacy records
+    raise on reads; saving an authoritative checkpoint consolidates those copies.
+    Listings fail on invalid records rather than silently resuming an older snapshot:
+    an unreadable payload cannot safely be assigned to a flow or run. Queries scan
+    the store because a record's current scope may differ from its initial directory.
+    All processes writing this directory must use this backend's locking protocol.
     """
 
     TIMESTAMP_FORMAT: ClassVar[str] = "%Y-%m-%dT%H-%M-%S-%f"
@@ -43,7 +53,7 @@ class FileSystem(CheckpointBackend):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def model_post_init(self, __context: Any) -> None:
-        self._base_dir = Path(self.base_path)
+        self._base_dir = Path(self.base_path).resolve()
         self._base_dir.mkdir(parents=True, exist_ok=True)
 
     @property
@@ -55,8 +65,11 @@ class FileSystem(CheckpointBackend):
 
     @staticmethod
     def _safe_id(raw_id: str) -> str:
-        """Sanitize an ID for use as a directory/file name."""
-        return re.sub(r"[^a-zA-Z0-9_\-]", "_", raw_id)
+        """Keep names bounded and distinct on case-insensitive filesystems too."""
+        slug = re.sub(r"[^a-zA-Z0-9_\-]", "_", raw_id)[:8]
+        # 128 digest bits keep names collision-resistant without tripling path
+        # length for UUID identities on Windows installations with MAX_PATH limits.
+        return f"{sha256(raw_id.encode('utf-8')).hexdigest()[:32]}__{slug}"
 
     def _format_timestamp(self, dt: datetime) -> str:
         raw = dt.strftime(self.TIMESTAMP_FORMAT)
@@ -99,64 +112,111 @@ class FileSystem(CheckpointBackend):
         return f"{self._format_timestamp(created_at)}__{self._safe_id(checkpoint_id)}.json"
 
     def _find_checkpoint_path(self, checkpoint_id: str) -> Path | None:
-        """Search all flow/run dirs for a checkpoint file containing this ID."""
-        safe = self._safe_id(checkpoint_id)
+        """Resolve an exact identity; caller must hold the directory lock."""
+        paths = self._matching_paths(checkpoint_id)
+        if len(paths) > 1:
+            raise ValueError(f"Ambiguous checkpoint {checkpoint_id!r}: {len(paths)} stored copies")
+        return paths[0] if paths else None
+
+    def _checkpoint_paths(self) -> Iterator[Path]:
+        """Visit only the supported three-level layout, without following symlinks."""
         for flow_dir in self._base_dir.iterdir():
-            if not flow_dir.is_dir():
+            if flow_dir.is_symlink() or not flow_dir.is_dir():
                 continue
             for run_dir in flow_dir.iterdir():
-                if not run_dir.is_dir():
+                if run_dir.is_symlink() or not run_dir.is_dir():
                     continue
-                for cp_file in run_dir.glob(f"*__{safe}.json"):
-                    return cp_file
-        return None
+                for cp_file in run_dir.glob("*.json"):
+                    if not cp_file.is_symlink() and cp_file.is_file():
+                        yield cp_file
+
+    def _matching_paths(self, checkpoint_id: str) -> list[Path]:
+        legacy_id = re.sub(r"[^a-zA-Z0-9_\-]", "_", checkpoint_id)
+        suffixes = (f"__{self._safe_id(checkpoint_id)}.json", f"__{legacy_id}.json")
+        paths = []
+        for path in self._checkpoint_paths():
+            if path.name.endswith(suffixes):
+                # A legacy filename can describe several IDs. Never trust it for
+                # loading, overwriting or deleting the actual record.
+                checkpoint = self._load_file(path)
+                if checkpoint.id == checkpoint_id:
+                    paths.append(path)
+        return sorted(paths)
 
     def save(self, checkpoint: FlowCheckpoint) -> str:
-        run_dir = self._get_or_create_run_dir(
-            checkpoint.flow_id, checkpoint.run_id, checkpoint.created_at, checkpoint.wf_run_id
-        )
-
-        filename = self._checkpoint_filename(checkpoint.id, checkpoint.created_at)
-        target = run_dir / filename
-
         copy = checkpoint.model_copy(deep=True)
+        with directory_lock(self._base_dir):
+            self._save(copy, self._matching_paths(copy.id))
+        return copy.id
 
-        fd, tmp_path = tempfile.mkstemp(dir=run_dir, suffix=".tmp")
+    def _save(self, checkpoint: FlowCheckpoint, existing: list[Path]) -> None:
+        if existing:
+            target = existing[0]
+        else:
+            run_dir = self._get_or_create_run_dir(
+                checkpoint.flow_id, checkpoint.run_id, checkpoint.created_at, checkpoint.wf_run_id
+            )
+            target = run_dir / self._checkpoint_filename(checkpoint.id, checkpoint.created_at)
+
+        fd, tmp_path = tempfile.mkstemp(dir=target.parent, suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(copy.to_dict(), f, default=encode_reversible, ensure_ascii=False)
+                json.dump(checkpoint.to_dict(), f, default=encode_reversible, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(tmp_path, target)
         except BaseException:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
             raise
 
-        return checkpoint.id
+        # Do not remove the last known good data until the replacement is published.
+        # If consolidation fails or the process dies, reads detect the ambiguity.
+        for duplicate in existing[1:]:
+            duplicate.unlink()
 
     def load(self, checkpoint_id: str) -> FlowCheckpoint | None:
-        from dynamiq.checkpoints.checkpoint import FlowCheckpoint  # deferred: avoids import cycle at package init
+        with directory_lock(self._base_dir):
+            return self._load(checkpoint_id)
 
+    def _load(self, checkpoint_id: str) -> FlowCheckpoint | None:
         path = self._find_checkpoint_path(checkpoint_id)
-        if not path:
-            return None
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f, object_hook=decode_reversible)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return None
-        return FlowCheckpoint(**data)
+        return self._load_file(path) if path else None
 
     def update(self, checkpoint: FlowCheckpoint) -> None:
-        if not self._find_checkpoint_path(checkpoint.id):
-            raise FileNotFoundError(f"Checkpoint {checkpoint.id} not found")
-        self.save(checkpoint)
+        copy = checkpoint.model_copy(deep=True)
+        with directory_lock(self._base_dir):
+            existing = self._matching_paths(copy.id)
+            if not existing:
+                raise FileNotFoundError(f"Checkpoint {copy.id} not found")
+            self._save(copy, existing)
 
     def delete(self, checkpoint_id: str) -> bool:
-        path = self._find_checkpoint_path(checkpoint_id)
-        if not path:
-            return False
-        path.unlink()
-        return True
+        with directory_lock(self._base_dir):
+            return self._delete(checkpoint_id)
+
+    def _delete(self, checkpoint_id: str) -> bool:
+        paths = self._matching_paths(checkpoint_id)
+        for path in paths:
+            path.unlink()
+        return bool(paths)
+
+    def _list(self, matches: Callable[[FlowCheckpoint], bool]) -> list[FlowCheckpoint]:
+        checkpoints = {}
+        seen = set()
+        duplicates = set()
+        for path in self._checkpoint_paths():
+            checkpoint = self._load_file(path)
+            if checkpoint.id in seen:
+                duplicates.add(checkpoint.id)
+            seen.add(checkpoint.id)
+            if matches(checkpoint):
+                checkpoints[checkpoint.id] = checkpoint
+        # A stale version may fail the query's filters while the other passes.
+        # Filtering first would make a conflicting identity look unambiguous.
+        if ambiguous := duplicates.intersection(checkpoints):
+            raise ValueError(f"Ambiguous checkpoints with duplicate stored copies: {sorted(ambiguous)!r}")
+        return sorted(checkpoints.values(), key=lambda cp: cp.created_at, reverse=True)
 
     def get_list_by_flow(
         self,
@@ -166,25 +226,12 @@ class FileSystem(CheckpointBackend):
         limit: int | None = None,
         before: datetime | None = None,
     ) -> list[FlowCheckpoint]:
-        flow_dir = self._flow_dir(flow_id)
-        if not flow_dir.exists():
-            return []
-
-        checkpoints = []
-        for run_dir in flow_dir.iterdir():
-            if not run_dir.is_dir():
-                continue
-            for cp_file in run_dir.glob("*.json"):
-                cp = self._load_file(cp_file)
-                if not cp:
-                    continue
-                if status and cp.status != status:
-                    continue
-                if before and cp.created_at >= before:
-                    continue
-                checkpoints.append(cp)
-
-        checkpoints.sort(key=lambda c: c.created_at, reverse=True)
+        with directory_lock(self._base_dir):
+            checkpoints = self._list(
+                lambda cp: cp.flow_id == flow_id
+                and (status is None or cp.status == status)
+                and (before is None or cp.created_at < before)
+            )
         return checkpoints[:limit] if limit is not None else checkpoints
 
     def get_latest_by_flow(self, flow_id: str, *, status: CheckpointStatus | None = None) -> FlowCheckpoint | None:
@@ -192,20 +239,8 @@ class FileSystem(CheckpointBackend):
         return results[0] if results else None
 
     def get_list_by_run(self, run_id: str, *, limit: int | None = None) -> list[FlowCheckpoint]:
-        checkpoints = []
-        for flow_dir in self._base_dir.iterdir():
-            if not flow_dir.is_dir():
-                continue
-            # Directories use wf_run_id when present, so match the IDs stored in each checkpoint.
-            for run_dir in flow_dir.iterdir():
-                if not run_dir.is_dir():
-                    continue
-                for cp_file in run_dir.glob("*.json"):
-                    cp = self._load_file(cp_file)
-                    if cp and (cp.run_id == run_id or cp.wf_run_id == run_id):
-                        checkpoints.append(cp)
-
-        checkpoints.sort(key=lambda x: x.created_at, reverse=True)
+        with directory_lock(self._base_dir):
+            checkpoints = self._list(lambda cp: cp.run_id == run_id or cp.wf_run_id == run_id)
         return checkpoints[:limit] if limit is not None else checkpoints
 
     def get_list_by_flow_and_run(
@@ -221,24 +256,57 @@ class FileSystem(CheckpointBackend):
         if wf_run_id:
             ids_to_match.add(wf_run_id)
 
-        checkpoints = [
-            cp
-            for cp in self.get_list_by_flow(flow_id, status=status)
-            if cp.run_id in ids_to_match or cp.wf_run_id in ids_to_match
-        ]
+        with directory_lock(self._base_dir):
+            checkpoints = self._list(
+                lambda cp: cp.flow_id == flow_id
+                and (status is None or cp.status == status)
+                and (cp.run_id in ids_to_match or cp.wf_run_id in ids_to_match)
+            )
         return checkpoints[:limit] if limit is not None else checkpoints
 
-    def _load_file(self, path: Path) -> FlowCheckpoint | None:
+    def cleanup_by_flow(self, flow_id: str, *, keep_count: int = 10, max_ttl_minutes: int | None = None) -> int:
+        # A resumed checkpoint must not be deleted between retention's query and delete.
+        with directory_lock(self._base_dir):
+            checkpoints = self._list(lambda cp: cp.flow_id == flow_id)[: self.max_cleanup_results]
+            continued_from = {cp.parent_checkpoint_id for cp in checkpoints}
+            deleted = 0
+            now = datetime.now(timezone.utc)
+            for index, cp in enumerate(checkpoints):
+                waiting = (
+                    keep_count > 0
+                    and cp.status in (CheckpointStatus.PAUSED, CheckpointStatus.PENDING_INPUT)
+                    and cp.id not in continued_from
+                )
+                expired = max_ttl_minutes is not None and (now - cp.created_at).total_seconds() / 60 > max_ttl_minutes
+                if (index >= keep_count and not waiting) or expired:
+                    deleted += self._delete(cp.id)
+            return deleted
+
+    def get_chain(self, checkpoint_id: str) -> list[FlowCheckpoint]:
+        with directory_lock(self._base_dir):
+            chain = []
+            seen = set()
+            current_id = checkpoint_id
+            while current_id and current_id not in seen:
+                seen.add(current_id)
+                checkpoint = self._load(current_id)
+                if checkpoint is None:
+                    break
+                chain.append(checkpoint)
+                current_id = checkpoint.parent_checkpoint_id
+            return chain
+
+    def _load_file(self, path: Path) -> FlowCheckpoint:
         from dynamiq.checkpoints.checkpoint import FlowCheckpoint  # deferred: avoids import cycle at package init
 
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f, object_hook=decode_reversible)
+            required = {"id", "flow_id", "run_id", "created_at", "updated_at", "status"}
+            if not isinstance(data, dict) or not required.issubset(data):
+                # Defaults generate fresh identities/timestamps when creating a
+                # checkpoint, but cannot reconstruct missing persisted state.
+                raise ValueError("Missing persisted checkpoint identity, timestamps or status")
             return FlowCheckpoint(**data)
-        except (json.JSONDecodeError, FileNotFoundError):
-            return None
-        except Exception:
-            from dynamiq.utils.logger import logger
-
-            logger.warning("FileSystem: failed to load checkpoint from %s", path, exc_info=True)
-            return None
+        except (ValueError, TypeError, UnicodeError) as exc:
+            raise ValueError(f"Invalid checkpoint in {path}") from exc
