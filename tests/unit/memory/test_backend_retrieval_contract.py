@@ -148,3 +148,34 @@ def test_postgres_backends_of_one_process_create_their_table_once(mocker):
 
     assert executed.call_count == 4  # the lock, the table and its two indices
     assert "pg_advisory_xact_lock" in executed.call_args_list[0].args[0]
+
+
+@pytest.fixture(params=["qdrant", "pinecone"])
+def vector_backend(request, mocker):
+    """A vector-store memory backend whose store returns documents newest-last-shuffled.
+
+    The stores need a live server, so the vector store is a stub; list_documents
+    returns the ten messages out of order, the way a vector DB gives no ordering.
+    """
+    from dynamiq.memory.backends.pinecone import Pinecone
+    from dynamiq.memory.backends.qdrant import Qdrant
+    from dynamiq.types import Document
+
+    cls = Qdrant if request.param == "qdrant" else Pinecone
+    store = mocker.MagicMock()
+    documents = [
+        Document(id=str(i), content=f"msg-{i}", metadata={"role": "user", "timestamp": float(i)})
+        for i in (4, 9, 0, 7, 2, 8, 1, 6, 3, 5)
+    ]
+    store.list_documents.return_value = documents
+    return cls.model_construct(vector_store=store, embedder=mocker.MagicMock(), connection=mocker.MagicMock())
+
+
+def test_vector_backend_get_all_with_limit_returns_the_most_recent(vector_backend):
+    result = vector_backend.get_all(limit=LIMIT)
+
+    assert [m.content for m in result] == ["msg-7", "msg-8", "msg-9"]
+
+
+def test_vector_backend_get_all_without_limit_returns_everything_oldest_first(vector_backend):
+    assert [m.content for m in vector_backend.get_all()] == [f"msg-{i}" for i in range(TOTAL)]
