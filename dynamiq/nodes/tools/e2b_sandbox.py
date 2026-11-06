@@ -9,6 +9,7 @@ from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.tools.code_interpreter import DESCRIPTION_SANDBOX_INTERPRETER as DESCRIPTION_E2B
 from dynamiq.nodes.tools.code_interpreter import BaseCodeInterpreterTool
 from dynamiq.nodes.tools.code_interpreter import CodeInterpreterInputSchema as E2BInterpreterInputSchema  # noqa: F401
+from dynamiq.nodes.tools.code_interpreter import shell_double_quote, split_pip_requirements, tail_of_output
 from dynamiq.utils.logger import logger
 
 
@@ -103,16 +104,31 @@ class E2BInterpreterTool(BaseCodeInterpreterTool):
         except Exception as e:
             raise ToolExecutionException(f"Error during shell command execution: {e}", recoverable=True)
 
-        output = process.wait()
+        try:
+            output = process.wait()
+        except Exception as e:
+            # The SDK's wait() raises CommandExitException, carrying the result, when the command exits non-zero.
+            if getattr(e, "exit_code", None) is None:
+                raise ToolExecutionException(f"Error during shell command execution: {e}", recoverable=True) from e
+            output = e
         if output.exit_code != 0:
-            raise ToolExecutionException(f"Error during shell command execution: {output.stderr}", recoverable=True)
+            pairs = (("stderr", output.stderr), ("stdout", output.stdout))
+            streams = [f"{name}: {tail_of_output(value)}" for name, value in pairs if value]
+            message = " ".join(streams) or "No output was produced."
+            raise ToolExecutionException(
+                f"Command failed with exit code {output.exit_code}. {message}", recoverable=True
+            )
         return output.stdout
 
     def _install_packages(self, sandbox: Any, packages: str) -> None:
         if packages:
             logger.debug(f"Tool {self.name} - {self.id}: Installing packages: {packages}")
+            # Quoted: the command runs in a shell, where an unquoted pin like "pandas>=2.0" is a redirection.
+            requirements = [shell_double_quote(requirement) for requirement in split_pip_requirements(packages)]
+            if not requirements:
+                return
             try:
-                process = sandbox.commands.run(f"pip install -qq {' '.join(packages.split(','))}")
+                process = sandbox.commands.run(f"pip install -qq {' '.join(requirements)}")
             except Exception as e:
                 raise ToolExecutionException(f"Error during package installation: {e}", recoverable=True)
 
@@ -153,6 +169,10 @@ class E2BInterpreterTool(BaseCodeInterpreterTool):
                 logger.debug(f"Tool {self.name} - {self.id}: Updated sandbox timeout to {timeout}s")
             except Exception as e:
                 logger.warning(f"Tool {self.name} - {self.id}: Failed to update sandbox timeout: {e}")
+
+    def _keep_sandbox_alive(self, sandbox: Sandbox, seconds: int) -> None:
+        # set_timeout(x) makes the sandbox expire x seconds from now, so it can also shorten the sandbox's life.
+        sandbox.set_timeout(max(seconds, self.timeout))
 
     def close(self) -> None:
         """Close the persistent sandbox if it exists."""

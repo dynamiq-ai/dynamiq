@@ -1,8 +1,10 @@
 """In-memory file storage implementation."""
 
 import base64
+import fnmatch
 import mimetypes
 import os
+import posixpath
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -131,19 +133,30 @@ class InMemoryFileStore(FileStore):
         self,
         directory: str | Path = "",
         recursive: bool = False,
+        pattern: str | None = None,
     ) -> list[FileInfo]:
-        """List files in storage."""
-        directory = str(directory)
+        """List files in storage.
+
+        ``directory`` matches whole path segments: ``docs`` lists ``docs/a.md`` but not ``docs-old/b.md``.
+        A ``directory`` that names a stored file lists that file.
+        ``pattern`` is a glob matched against the file name, or against the whole path when it contains ``/``.
+        """
+        directory = str(directory).rstrip("/")
+        prefix = f"{directory}/" if directory.strip("/") else ""
         files_list = []
 
         for file_path in self._files.keys():
-            if directory and not file_path.startswith(directory):
+            is_named_file = bool(prefix) and file_path == directory
+            if prefix and not is_named_file and not file_path.startswith(prefix):
                 continue
 
-            if not recursive:
-                rel_path = file_path[len(directory) :].lstrip("/")
+            if not recursive and not is_named_file:
+                rel_path = file_path[len(prefix) :].lstrip("/")
                 if "/" in rel_path:
                     continue
+
+            if pattern and not fnmatch.fnmatch(file_path if "/" in pattern else posixpath.basename(file_path), pattern):
+                continue
 
             files_list.append(self._create_file_info(file_path, self._files[file_path]))
 

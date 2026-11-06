@@ -1,8 +1,9 @@
 """Memory store backed by the Dynamiq platform API."""
 
 import builtins
+import json
 from datetime import datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import ConfigDict, Field
 
@@ -35,6 +36,9 @@ class DynamiqMemoryStore(MemoryStore):
         "two must be set. Sent with every request; never agent-supplied.",
     )
     timeout: float = Field(default=30, description="Timeout in seconds for API requests.")
+
+    # The platform rejects longer content.
+    max_content_length: ClassVar[int] = 8192
 
     @property
     def to_dict_exclude_params(self) -> dict[str, bool]:
@@ -135,10 +139,11 @@ class DynamiqMemoryStore(MemoryStore):
             raise MemoryPermissionError(f"Permission denied for '{memory_path}'", operation=operation, path=memory_path)
 
         raise MemoryStoreError(
-            f"Request to Dynamiq API failed: {status} {response.text}",
-            operation=operation,
-            path=memory_path,
+            f"Dynamiq API returned {status}: {_error_detail(response)}", operation=operation, path=memory_path
         )
+
+    def content_limit(self) -> int | None:
+        return self.max_content_length
 
     def list(self, prefix: str = "", user_id: str | None = None) -> builtins.list[MemoryEntry]:
         """List memories under ``prefix``."""
@@ -166,7 +171,18 @@ class DynamiqMemoryStore(MemoryStore):
         return data.get("content") or ""
 
     def write(self, path: str, content: str, user_id: str | None = None) -> MemoryEntry:
-        """Create or replace one memory."""
+        """Create or replace one memory.
+
+        Raises:
+            MemoryStoreError: If the content is longer than ``max_content_length``, before any request.
+        """
+        if len(content) > self.max_content_length:
+            raise MemoryStoreError(
+                f"'{path}' would be {len(content):,} characters, and a memory holds at most "
+                f"{self.max_content_length:,}. Shorten it, or split it into several memories.",
+                operation="write",
+                path=path,
+            )
         data = self._request(
             HTTPMethod.PUT,
             json={"path": path, "content": content, "user_id": self._scope(user_id, "write", path)},
@@ -208,3 +224,15 @@ class DynamiqMemoryStore(MemoryStore):
             size = len(content) if content is not None else fallback_size
 
         return MemoryEntry(path=data.get("path") or fallback_path, size=size, updated_at=updated_at)
+
+
+def _error_detail(response: Any) -> str:
+    """The message and field details of a platform error body, or the raw text."""
+    try:
+        error = response.json().get("error") or {}
+    except (ValueError, AttributeError):
+        return response.text
+    if not isinstance(error, dict) or not error.get("message"):
+        return response.text
+    details = error.get("details")
+    return f"{error['message']} {json.dumps(details)}" if details else error["message"]

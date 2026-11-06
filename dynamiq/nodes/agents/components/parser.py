@@ -6,6 +6,74 @@ import re
 from dynamiq.nodes.agents.exceptions import ActionParsingException
 from dynamiq.utils.logger import logger
 
+_ACTION_LABEL_RE = re.compile(r"^[ \t]*Action:", re.MULTILINE)
+_ACTION_INPUT_LABEL_RE = re.compile(r"^[ \t]*Action Input:", re.MULTILINE)
+_ANSWER_LABEL_RE = re.compile(r"^[ \t]*Answer:", re.MULTILINE)
+_OBSERVATION_LABEL_RE = re.compile(r"^[ \t]*Observation:", re.MULTILINE)
+_LABELS = ("Thought", "Action Input", "Action", "Final Answer", "Answer", "Output Files", "Observation")
+# A label written in bold or italics ("**Action:**", "**Action**:"), after a heading mark ("### Action:"), or in
+# another case ("action:"); and a label written as a heading alone on its line ("### Action").
+_DECORATED_LABEL_RE = re.compile(
+    rf"^([ \t]*)(?:#{{1,6}}[ \t]+)?([*_]{{1,2}})?({'|'.join(_LABELS)})\2?[ \t]*:(?:[*_]{{1,2}})?",
+    re.IGNORECASE | re.MULTILINE,
+)
+_HEADING_LABEL_RE = re.compile(rf"^([ \t]*)#{{1,6}}[ \t]+({'|'.join(_LABELS)})[ \t]*$", re.IGNORECASE | re.MULTILINE)
+
+
+def normalize_default_labels(output: str) -> str:
+    """``output`` with its Thought/Action/Action Input/Answer labels in the plain form the parser reads."""
+
+    def plain(indent: str, label: str) -> str:
+        return indent + next(name for name in _LABELS if name.lower() == label.lower()) + ":"
+
+    output = _HEADING_LABEL_RE.sub(lambda match: plain(match.group(1), match.group(2)), output)
+    return _DECORATED_LABEL_RE.sub(lambda match: plain(match.group(1), match.group(3)), output)
+
+
+def _default_action_label(output: str) -> re.Match | None:
+    """The reply's ``Action:`` label when an ``Action Input:`` follows it, which makes it a tool call.
+
+    Models write ``Action: None`` or ``Action: Final Answer`` before their answer; with no input to
+    run, that line does not make the reply an action.
+    """
+    action = _ACTION_LABEL_RE.search(output)
+    return action if action and _ACTION_INPUT_LABEL_RE.search(output, action.end()) else None
+
+
+def has_default_action_input(output: str) -> bool:
+    """Whether a DEFAULT-mode reply has reached an ``Action Input:`` label, after which text is the tool's input."""
+    return _default_action_label(output) is not None
+
+
+def is_default_final_answer(output: str) -> bool:
+    """Whether a DEFAULT-mode reply is a final answer rather than an action.
+
+    An ``Answer:`` label counts only when no tool call (an ``Action:`` with an ``Action Input:``) comes
+    before it, so a tool input that contains the text "Answer:" (a FAQ, a test fixture) is still run as
+    an action. A reply with neither label at the start of a line falls back to looking for "Answer:"
+    anywhere, as before.
+    """
+    answer = _ANSWER_LABEL_RE.search(output)
+    action = _default_action_label(output)
+    if answer and action:
+        return answer.start() < action.start()
+    if answer or action:
+        return bool(answer)
+    return "Answer:" in output
+
+
+def cut_default_reply_at_observation(output: str) -> str:
+    """The reply up to an ``Observation:`` the model wrote after its action, which it must not write.
+
+    ``Observation:`` is the DEFAULT mode's stop sequence, but reasoning models ignore stop sequences and
+    go on to invent the tool result and a final answer.
+    """
+    action = _default_action_label(output)
+    if not action:
+        return output
+    observation = _OBSERVATION_LABEL_RE.search(output, action.end())
+    return output[: observation.start()].rstrip() if observation else output
+
 
 def parse_default_thought(output: str) -> str:
     """
@@ -113,7 +181,8 @@ def parse_default_action(output: str) -> tuple[str | None, str | None, dict | li
                 raw_input = json_str_candidate[start_idx:json_end]
 
                 try:
-                    action_input = json.loads(raw_input)
+                    # strict=False: models put raw newlines and tabs inside JSON strings (code, multi-line text).
+                    action_input = json.loads(raw_input, strict=False)
                     actions.append({"tool_name": action_name, "tool_input": action_input})
                 except json.JSONDecodeError as e:
                     raise ActionParsingException(
@@ -140,7 +209,7 @@ def parse_default_action(output: str) -> tuple[str | None, str | None, dict | li
         return thought, action, action_input
 
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.warning(f"Agent reply could not be parsed: {e}")
         if isinstance(e, ActionParsingException):
             raise
         raise ActionParsingException(
@@ -172,7 +241,9 @@ def extract_default_final_answer(output: str) -> tuple[str, str, str]:
     """
     match = re.search(r"Thought:\s*(.*?)\s*Answer:\s*(.*)", output, re.DOTALL)
     if not match:
-        return "", "", ""
+        # An answer without a thought is still the answer.
+        bare = re.search(r"Answer:\s*(.*)", output, re.DOTALL)
+        return "", (bare.group(1).strip() if bare else ""), ""
 
     raw_thought = match.group(1).strip()
     answer = match.group(2).strip()

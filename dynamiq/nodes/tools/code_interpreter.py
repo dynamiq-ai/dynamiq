@@ -2,6 +2,7 @@ import abc
 import base64
 import io
 import json
+import re
 import shlex
 from pathlib import PurePosixPath
 from typing import Any, ClassVar, Literal
@@ -225,6 +226,97 @@ def handle_file_upload(files: list[bytes | io.BytesIO | FileInfo]) -> list[io.By
             raise ValueError(f"Error: Invalid file data type: {type(file)}. " f"Expected bytes or BytesIO or FileInfo.")
 
     return files_data
+
+
+# The most of each output stream that a failing command's error message carries. The agent hands a recoverable
+# error to the model whole, while it truncates a successful result, so a long log would otherwise fill the prompt.
+ERROR_OUTPUT_MAX_CHARS = 5000
+
+
+def tail_of_output(output: str, max_chars: int = ERROR_OUTPUT_MAX_CHARS) -> str:
+    """
+    Shorten a failing command's output for its error message, keeping the end, where the cause usually is.
+
+    Args:
+        output: The command's stdout or stderr.
+        max_chars: The most characters of the output to keep.
+
+    Returns:
+        str: The output itself if it fits, otherwise a note of how many characters were cut, then its last
+            max_chars characters.
+    """
+    if len(output) <= max_chars:
+        return output
+    return f"[{len(output) - max_chars:,} earlier characters cut]\n{output[-max_chars:]}"
+
+
+# The start of a version clause, which belongs to the requirement before it: the "<2.0" of "numpy>=1.20,<2.0".
+_VERSION_CLAUSE = re.compile(r"[<>=]|[!~]=")
+
+
+def split_pip_requirements(packages: str) -> list[str]:
+    """
+    Split a package list, written the way models and users write one, into the requirements to pass to pip.
+
+    Requirements are separated by commas or whitespace. Quotes around a requirement are removed, as the shell
+    removed them when the list was passed to pip unquoted. A comma inside extras, as in
+    "pandas[excel,performance]", separates nothing, and a version clause stays with its requirement, as in
+    "numpy>=1.20,<2.0" or "pandas >= 2.0".
+
+    Args:
+        packages: The package list.
+
+    Returns:
+        list[str]: The requirements, in order.
+    """
+    pieces: list[tuple[bool, str]] = []  # Each piece, and whether a comma came before it.
+    piece = quote = ""
+    comma_before = False
+    bracket_depth = 0
+    for char in packages:
+        if quote:
+            if char == quote:
+                quote = ""
+            else:
+                piece += char
+        elif char in "'\"":
+            quote = char
+        elif not bracket_depth and (char == "," or char.isspace()):
+            if piece:
+                pieces.append((comma_before, piece))
+                piece, comma_before = "", False
+            comma_before = comma_before or char == ","
+        else:
+            bracket_depth = max(0, bracket_depth + (char == "[") - (char == "]"))
+            piece += char
+    if piece:
+        pieces.append((comma_before, piece))
+
+    requirements: list[str] = []
+    after_lone_operator = False
+    for comma_before, piece in pieces:
+        if requirements and (after_lone_operator or _VERSION_CLAUSE.match(piece)):
+            requirements[-1] += ("," if comma_before else " ") + piece
+        else:
+            requirements.append(piece)
+        # The version after an operator written on its own, as in "pandas >= 2.0", is part of the clause too.
+        after_lone_operator = not piece.strip("<>=!~")
+    return requirements
+
+
+def shell_double_quote(value: str) -> str:
+    """
+    Quote a value for a POSIX shell so that redirections, pipes and globs in it stay literal, while a variable
+    such as the token in "git+https://$GH_TOKEN@github.com/org/repo.git" still expands.
+
+    Args:
+        value: The value to quote.
+
+    Returns:
+        str: The value in double quotes, with the characters that are special inside them escaped.
+    """
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("`", "\\`")
+    return f'"{escaped}"'
 
 
 class SandboxCreationErrorHandling(BaseModel):
@@ -713,12 +805,16 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
             except Exception as e:
                 logger.warning(f"Failed to create directories: {e}")
 
+        # The per-call timeout bounds this call's commands (passed to them below), and the sandbox has to outlive
+        # them. Its life is renewed on every such call, as one late in that life can outlive the sandbox even with
+        # a timeout shorter than the configured one. The configured timeout is not changed: later calls and new
+        # sandboxes keep it.
         if input_data.timeout and sandbox:
             try:
-                self.set_timeout(input_data.timeout)
-                logger.debug(f"Set per-call timeout to {input_data.timeout}s")
+                self._keep_sandbox_alive(sandbox, input_data.timeout)
+                logger.debug(f"Kept the sandbox alive for this call's {input_data.timeout}s timeout")
             except Exception as e:
-                logger.warning(f"Failed to set per-call timeout: {e}")
+                logger.warning(f"Failed to keep the sandbox alive for this call's timeout: {e}")
 
         try:
             content = {}
@@ -901,3 +997,14 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
             timeout: New timeout value in seconds.
         """
         self.timeout = timeout
+
+    def _keep_sandbox_alive(self, sandbox: Any, seconds: int) -> None:
+        """
+        Keep a sandbox running for at least the given time from now, and never for less than the configured timeout.
+
+        Does nothing by default, for providers that fix a sandbox's lifetime when it starts.
+
+        Args:
+            sandbox: The sandbox a call runs in.
+            seconds: The call's timeout in seconds.
+        """

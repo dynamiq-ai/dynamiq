@@ -1,0 +1,26 @@
+# Models the matrix runs, as OpenRouter names them. Ids and capabilities were checked against
+# https://openrouter.ai/api/v1/models on 2026-11-06; a model whose id disappears is skipped, not failed.
+#   parallel:  OpenRouter lists parallel_tool_calls for it, so the parallel scenario runs.
+#   reasoning: it reasons before answering, so it gets a larger output budget.
+# Prices are OpenRouter's, in USD per million input/output tokens.
+cheap:
+  - {id: anthropic/claude-haiku-5.5, parallel: false, reasoning: true}        # 0.1 / 0.5
+  - {id: openai/gpt-6-luna, parallel: false, reasoning: true}                 # 0.1 / 0.5
+  - {id: google/gemini-3.5-flash-lite, parallel: false, reasoning: true}      # 0.3 / 2.5
+  - {id: deepseek/deepseek-v4.1-flash, parallel: true, reasoning: true}       # 0.045 / 0.5
+  - {id: moonshotai/kimi-k2.6, parallel: true, reasoning: true}               # 0.65 / 3.41
+  - {id: z-ai/glm-5.3-flash, parallel: true, reasoning: true}                 # 0.15 / 0.5
+  - {id: qwen/qwen3.8-flash, parallel: false, reasoning: true}                # 0.15 / 0.47
+  - {id: minimax/minimax-m3.1-flash, parallel: false, reasoning: true}        # 0.075 / 0.3
+  - {id: mistralai/mistral-small-2603, parallel: false, reasoning: true}      # 0.15 / 0.6
+  - {id: meta-llama/llama-4-maverick, parallel: false, reasoning: false}      # 0.35 / 1.0
+  - {id: openai/gpt-oss-120b, parallel: false, reasoning: true}               # 0.15 / 0.6
+flagship:
+  - {id: anthropic/claude-sonnet-5.5, parallel: false, reasoning: true}       # 2 / 10
+  - {id: openai/gpt-6.1-sol, parallel: false, reasoning: true}                # 2 / 10
+  - {id: google/gemini-3.8-flash, parallel: false, reasoning: true}           # 0.825 / 4.125
+  - {id: x-ai/grok-4.7, parallel: false, reasoning: true}                     # 2 / 6
+  - {id: moonshotai/kimi-k3, parallel: true, reasoning: true}                 # 0.192 / 16
+  - {id: deepseek/deepseek-v4-pro-0813, parallel: false, reasoning: true}     # 0.107 / 4.28
+  - {id: qwen/qwen3.8-max-0902, parallel: false, reasoning: true}             # 2 / 6
+  - {id: mistralai/mistral-large-4-0, parallel: false, reasoning: true}       # 0.7 / 2.1

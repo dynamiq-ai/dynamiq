@@ -1059,6 +1059,11 @@ class Weaviate(BaseApiKeyConnection):
     timeout_init: int = Field(default=180, description="Timeout for initialization checks in seconds")
     timeout_query: int = Field(default=180, description="Timeout for query operations in seconds")
     timeout_insert: int = Field(default=120, description="Timeout for insert operations in seconds")
+    secure: bool = Field(
+        default=True,
+        description="Whether a custom deployment is reached over TLS. Set to False for a self-hosted Weaviate "
+        "served over plain HTTP, such as a local one; an empty api_key then connects without authentication.",
+    )
 
     def connect(self) -> "WeaviateClient":
         """
@@ -1088,11 +1093,11 @@ class Weaviate(BaseApiKeyConnection):
             weaviate_client = connect_to_custom(
                 http_host=self.http_host,
                 http_port=self.http_port,
-                http_secure=True,
+                http_secure=self.secure,
                 grpc_host=self.grpc_host,
                 grpc_port=self.grpc_port,
-                grpc_secure=True,
-                auth_credentials=Auth.api_key(self.api_key),
+                grpc_secure=self.secure,
+                auth_credentials=Auth.api_key(self.api_key) if self.api_key else None,
                 additional_config=AdditionalConfig(
                     timeout=Timeout(
                         init=self.timeout_init, query=self.timeout_query, insert=self.timeout_insert
@@ -2038,10 +2043,18 @@ class Databricks(BaseApiKeyConnection):
 def merge_mcp_http_headers(base: dict[str, Any] | None, extra: dict[str, Any] | None) -> dict[str, Any] | None:
     """Merge connection-level and per-call MCP HTTP headers without mutating either dict.
 
-    Per-call values win on duplicate keys. An empty merge returns ``None`` so the MCP client
-    keeps its default (no extra headers) rather than sending ``{}``.
+    Per-call values win on duplicate keys, compared case-insensitively as HTTP header names are: a
+    per-call ``authorization`` replaces the connection's ``Authorization`` instead of being sent next
+    to it. An empty merge returns ``None`` so the MCP client keeps its default (no extra headers)
+    rather than sending ``{}``.
     """
-    merged = {**(base or {}), **(extra or {})}
+    merged: dict[str, Any] = {}
+    names: dict[str, str] = {}  # lowercased name -> the spelling kept in ``merged``
+    for headers in (base or {}, extra or {}):
+        for key, value in headers.items():
+            merged.pop(names.get(str(key).lower(), key), None)
+            names[str(key).lower()] = key
+            merged[key] = value
     return merged or None
 
 

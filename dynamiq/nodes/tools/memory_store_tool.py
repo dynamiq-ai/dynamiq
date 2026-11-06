@@ -35,6 +35,7 @@ Usage examples:
 - {"action": "edit", "path": "preferences.md", "find": "British", "replace": "Australian"}"""
 
 READ_ONLY_NOTE = "\n\nThis memory is READ-ONLY: 'write', 'edit' and 'delete' are unavailable."
+LIMIT_NOTE_START = "\n\nEach memory holds at most"
 
 
 class MemoryStoreAction(str, Enum):
@@ -118,6 +119,11 @@ class MemoryStoreTool(Node):
             self.description = f"{self.description}\n\nYour memories:\n{listing}"
         if not self.write_enabled and READ_ONLY_NOTE not in self.description:
             self.description += READ_ONLY_NOTE
+        limit = self.backend.content_limit()
+        if self.write_enabled and limit and LIMIT_NOTE_START not in self.description:
+            self.description += (
+                f"{LIMIT_NOTE_START} {limit:,} characters: split one that would grow past that by topic."
+            )
         return self
 
     @property

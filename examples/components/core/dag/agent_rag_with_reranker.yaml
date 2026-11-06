@@ -19,7 +19,7 @@ nodes:
       id: agent-rag-llm
       type: dynamiq.nodes.llms.OpenAI
       connection: openai-conn
-      model: gpt-5-chat-latest
+      model: gpt-5.6-terra
     tools:
       - id: agent-rag-tool-with-ranker
         type: dynamiq.nodes.retrievers.VectorStoreRetriever

@@ -24,7 +24,7 @@ def set_wf_with_agent(cm):
     llm = OpenAI(
         id="openai",
         connection=OpenAIConnection(),
-        model="gpt-5-chat-latest",
+        model="gpt-5.6-terra",
         is_postponed_component_init=True,
     )
 

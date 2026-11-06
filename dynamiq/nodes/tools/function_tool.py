@@ -138,6 +138,9 @@ def function_tool(func: Callable[..., T]) -> type[FunctionTool[T]]:
             __config__=ConfigDict(extra="allow"),
         )
 
+    parameters = inspect.signature(func).parameters
+    takes_any_keyword = any(param.kind is inspect.Parameter.VAR_KEYWORD for param in parameters.values())
+
     class FunctionToolFromDecorator(FunctionTool[T]):
         name: str = Field(default=func.__name__)
         description: str = Field(
@@ -148,7 +151,12 @@ def function_tool(func: Callable[..., T]) -> type[FunctionTool[T]]:
         input_schema: ClassVar[type[BaseModel]] = create_input_schema(func)
 
         def run_func(self, input_data: BaseModel, **kwargs) -> T:
-            return func(**input_data.model_dump(), **kwargs)
+            arguments = {**input_data.model_dump(), **kwargs}
+            # The run context (config, run ids) and any extra argument a model sends reach only a function that takes
+            # them: a plain function would fail on the first keyword it does not declare.
+            if not takes_any_keyword:
+                arguments = {name: value for name, value in arguments.items() if name in parameters}
+            return func(**arguments)
 
     FunctionToolFromDecorator.__name__ = func.__name__
     FunctionToolFromDecorator.__qualname__ = (

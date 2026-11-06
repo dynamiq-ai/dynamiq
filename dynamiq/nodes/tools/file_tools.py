@@ -1,4 +1,5 @@
 import enum
+import hashlib
 import json
 import logging
 import mimetypes
@@ -25,8 +26,8 @@ from dynamiq.nodes.converters import (
 from dynamiq.nodes.converters.pypdf import DocumentCreationMode as PyPDFDocumentCreationMode
 from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.nodes.node import ensure_config
-from dynamiq.nodes.types import ActionType
 from dynamiq.nodes.tools.utils import find_positions
+from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox
 from dynamiq.storages.file.base import FileStore
@@ -37,9 +38,47 @@ logger = logging.getLogger(__name__)
 
 EXTRACTED_TEXT_SUFFIX = ".extracted.txt"
 RESERVED_AGENT_PATH_PREFIX = "._agent"
-# Types read raw instead of through a converter: no extracted-text cache (which would go stale
-# after a write) and no stripping, so line ranges match the bytes on disk.
 RAW_TEXT_FILE_TYPES = {FileType.PLAIN_TEXT_DATA}
+# First line of an extracted-text cache: the sha256 of the source it was extracted from. It travels
+# with the text, so the check works on every file store, including ones that keep no metadata.
+EXTRACTED_TEXT_HEADER_PREFIX = "dynamiq-extracted-from-sha256:"
+
+
+def _source_hash(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def visible_file_paths(paths: list[str]) -> list[str]:
+    """``paths`` without the read tool's extracted-text caches, which are never shown to the model as files.
+
+    A path counts as a cache only when its source sits next to it, so a user's own file that happens to
+    end in ".extracted.txt" stays visible.
+    """
+    listed = set(paths)
+    return [
+        path
+        for path in paths
+        if not (path.endswith(EXTRACTED_TEXT_SUFFIX) and path[: -len(EXTRACTED_TEXT_SUFFIX)] in listed)
+    ]
+
+
+def encode_extracted_text(text: str, source_content: bytes) -> bytes:
+    """Cache content for ``text``, extracted from ``source_content``."""
+    return f"{EXTRACTED_TEXT_HEADER_PREFIX}{_source_hash(source_content)}\n{text}".encode()
+
+
+def decode_extracted_text(cache_content: bytes, source_content: bytes) -> str | None:
+    """The cached text if it was extracted from exactly ``source_content``, otherwise None.
+
+    Any writer can replace the source (the write tool, a tool's generated files, an upload), so the
+    cache is checked against the content rather than trusted for as long as it exists. A cache
+    without the header, written by an older version, counts as stale and is rebuilt.
+    """
+    header, separator, text = cache_content.partition(b"\n")
+    expected = f"{EXTRACTED_TEXT_HEADER_PREFIX}{_source_hash(source_content)}".encode()
+    if not separator or header != expected:
+        return None
+    return text.decode("utf-8", errors="replace")
 
 
 def _line_of(content: str, offset: int) -> int:
@@ -336,6 +375,18 @@ class FileWriteInputSchema(BaseModel):
         """Validate file_path to prevent path traversal attacks."""
         allow_absolute = bool((info.context or {}).get("absolute_file_paths_allowed"))
         return validate_file_path(v, allow_absolute=allow_absolute)
+
+    @field_validator("edits", mode="before")
+    @classmethod
+    def coerce_edits(cls, v: Any) -> Any:
+        """Accept the list encoded as a JSON string, or a single edit without the list, as models often send."""
+        if isinstance(v, str):
+            try:
+                # Not strict: code edits often arrive with raw newlines inside the JSON strings.
+                v = json.loads(v, strict=False)
+            except json.JSONDecodeError:
+                return v
+        return [v] if isinstance(v, dict) else v
 
     @model_validator(mode="after")
     def validate_action_fields(self) -> "FileWriteInputSchema":
@@ -760,7 +811,7 @@ class FileReadTool(Node):
 
             cached_text, cached_path = (None, None)
             if allow_cache and not isinstance(self.file_store, Sandbox):
-                cached_text, cached_path = self._load_cached_text(input_data.file_path)
+                cached_text, cached_path = self._load_cached_text(input_data.file_path, content)
 
             if cached_text:
                 self._log_text_preview(cached_text, "cached extracted text")
@@ -820,7 +871,7 @@ class FileReadTool(Node):
                         cached_path = None
                         hint_enabled = False
                         if allow_cache and not isinstance(self.file_store, Sandbox):
-                            cached_path = self._persist_extracted_text(input_data.file_path, text_content)
+                            cached_path = self._persist_extracted_text(input_data.file_path, text_content, content)
                             hint_enabled = detected_type not in {FileType.TEXT, FileType.MARKDOWN}
 
                         render_text = text_content
@@ -974,10 +1025,7 @@ class FileReadTool(Node):
             logger.warning(f"Tool {self.name} - {self.id}: failed to list files after missing read: {exc}")
             return None
 
-        paths: list[str] = []
-        for file in available_files:
-            paths.append(file.path if hasattr(file, "path") else str(file))
-        return paths
+        return visible_file_paths([file.path if hasattr(file, "path") else str(file) for file in available_files])
 
     def _create_chunked_content(self, content: bytes, chunk_size: int, file_path: str) -> bytes:
         """
@@ -1112,8 +1160,8 @@ class FileReadTool(Node):
             f"{preview_text}{suffix}"
         )
 
-    def _persist_extracted_text(self, original_path: str, text_content: str) -> str | None:
-        """Persist extracted text so future reads/searches can reuse it."""
+    def _persist_extracted_text(self, original_path: str, text_content: str, source_content: bytes) -> str | None:
+        """Persist extracted text so future reads/searches of the same content can reuse it."""
         if not self.file_store:
             return None
 
@@ -1121,12 +1169,9 @@ class FileReadTool(Node):
         try:
             self.file_store.store(
                 cache_path,
-                text_content.encode("utf-8"),
+                encode_extracted_text(text_content, source_content),
                 content_type="text/plain",
-                metadata={
-                    "source": "file_read_tool",
-                    "original_path": original_path,
-                },
+                metadata={"source": "file_read_tool", "original_path": original_path},
                 overwrite=True,
             )
             logger.debug(f"Tool {self.name} - {self.id}: cached extracted text at {cache_path}")
@@ -1135,8 +1180,8 @@ class FileReadTool(Node):
             logger.warning(f"Tool {self.name} - {self.id}: failed to cache extracted text for {original_path}: {exc}")
             return None
 
-    def _load_cached_text(self, original_path: str) -> tuple[str | None, str | None]:
-        """Load cached extracted text if it exists."""
+    def _load_cached_text(self, original_path: str, source_content: bytes) -> tuple[str | None, str | None]:
+        """Load cached extracted text if it exists and was extracted from ``source_content``."""
         if not self.file_store:
             return None, None
 
@@ -1144,8 +1189,8 @@ class FileReadTool(Node):
         try:
             if not self.file_store.exists(cache_path):
                 return None, None
-            cached_bytes = self.file_store.retrieve(cache_path)
-            return cached_bytes.decode("utf-8"), cache_path
+            cached_text = decode_extracted_text(self.file_store.retrieve(cache_path), source_content)
+            return (cached_text, cache_path) if cached_text is not None else (None, None)
         except Exception as exc:
             logger.warning(f"Tool {self.name} - {self.id}: failed to load cached text for {original_path}: {exc}")
             return None, None
@@ -1622,7 +1667,9 @@ class FileSearchTool(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         try:
-            files_to_scan = self._resolve_files(input_data)
+            candidate_files = self._resolve_files(input_data)
+            files_to_scan = candidate_files[: input_data.max_files]
+            files_not_scanned = len(candidate_files) - len(files_to_scan)
             matches = []
             total_scanned = 0
             missing_files: list[str] = []
@@ -1675,11 +1722,14 @@ class FileSearchTool(Node):
                 total_scanned=total_scanned,
                 total_matches=len(matches),
                 missing_files=missing_files,
+                files_not_scanned=files_not_scanned,
+                max_files=input_data.max_files,
             )
             result = {
                 "content": {
                     "matches": matches,
                     "files_scanned": total_scanned,
+                    "files_not_scanned": files_not_scanned,
                     "total_matches": len(matches),
                     "message": message,
                 }
@@ -1703,12 +1753,12 @@ class FileSearchTool(Node):
     def _resolve_files(self, input_data: FileSearchInputSchema) -> list[str]:
         """Determine which files should be searched."""
         if isinstance(input_data.file_path, list) and input_data.file_path:
-            return input_data.file_path[: input_data.max_files]
+            return list(input_data.file_path)
         if isinstance(input_data.file_path, str) and input_data.file_path:
             return [input_data.file_path]
 
         files = self.file_store.list_files(recursive=input_data.recursive)
-        return [file.path for file in files[: input_data.max_files]]
+        return visible_file_paths([file.path for file in files])
 
     def _search_target_exists(self, file_path: str) -> bool:
         """Return True when the requested file or its extracted-text cache is present."""
@@ -1720,6 +1770,8 @@ class FileSearchTool(Node):
         total_scanned: int,
         total_matches: int,
         missing_files: list[str],
+        files_not_scanned: int = 0,
+        max_files: int | None = None,
     ) -> str:
         """Build a concise agent-facing status message for search results."""
         parts = []
@@ -1735,6 +1787,11 @@ class FileSearchTool(Node):
             parts.append(f"No matches found for '{query}' in {total_scanned} scanned file(s).")
         else:
             parts.append(f"Found {total_matches} match(es) for '{query}' in {total_scanned} scanned file(s).")
+        if files_not_scanned:
+            parts.append(
+                f"Only the first {max_files} file(s) were searched; {files_not_scanned} more file(s) were not "
+                "searched. Pass file_path to search specific files, or raise max_files."
+            )
         return " ".join(parts)
 
     def _search_file(
@@ -1795,23 +1852,29 @@ class FileSearchTool(Node):
         if not self.file_store:
             return None, None
 
-        candidates = [f"{file_path}{EXTRACTED_TEXT_SUFFIX}", file_path]
-        for candidate in candidates:
-            try:
-                if not self.file_store.exists(candidate):
-                    continue
-                raw = self.file_store.retrieve(candidate)[:max_bytes]
-                if not raw:
-                    continue
-                text = raw.decode("utf-8", errors="ignore")
+        # The read tool's hint names the cache itself; its first line is bookkeeping, not content.
+        source_path = file_path.removesuffix(EXTRACTED_TEXT_SUFFIX)
+        if source_path != file_path and self.file_store.exists(source_path):
+            file_path = source_path
+
+        cache_path = f"{file_path}{EXTRACTED_TEXT_SUFFIX}"
+        try:
+            if self.file_store.exists(cache_path) and self.file_store.exists(file_path):
+                cached_text = decode_extracted_text(
+                    self.file_store.retrieve(cache_path), self.file_store.retrieve(file_path)
+                )
+                if cached_text:
+                    logger.debug(f"Tool {self.name} - {self.id}: using cached extracted text for search: {cache_path}")
+                    return cached_text.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore"), cache_path
+        except Exception as exc:
+            logger.warning(f"Tool {self.name} - {self.id}: failed to read {cache_path} for search: {exc}")
+        try:
+            if self.file_store.exists(file_path):
+                text = self.file_store.retrieve(file_path)[:max_bytes].decode("utf-8", errors="ignore")
                 if text:
-                    if candidate.endswith(EXTRACTED_TEXT_SUFFIX):
-                        logger.debug(
-                            f"Tool {self.name} - {self.id}: using cached extracted text for search: {candidate}"
-                        )
-                    return text, candidate
-            except Exception as exc:
-                logger.warning(f"Tool {self.name} - {self.id}: failed to read {candidate} for search: {exc}")
+                    return text, file_path
+        except Exception as exc:
+            logger.warning(f"Tool {self.name} - {self.id}: failed to read {file_path} for search: {exc}")
         return None, None
 
     @staticmethod
@@ -1867,6 +1930,8 @@ class FileListTool(Node):
 
         try:
             files_list = self.file_store.list_files(directory=input_data.file_path, recursive=input_data.recursive)
+            visible = set(visible_file_paths([file.path for file in files_list]))
+            files_list = [file for file in files_list if file.path in visible]
             if files_list:
                 files_string = "Files currently available in the file store:\n"
                 for file in files_list:

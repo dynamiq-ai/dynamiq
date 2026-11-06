@@ -5,7 +5,7 @@ import uuid
 from dynamiq import Workflow
 from dynamiq.connections.managers import get_connection_manager
 from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
-from dynamiq.utils import logger
+from dynamiq.utils.logger import logger
 
 YAML_FILE_PATH = os.path.join(os.path.dirname(__file__), "agent_memory_dynamo_db_dag.yaml")
 WORKFLOW_ID = "dynamodb-chat-workflow"

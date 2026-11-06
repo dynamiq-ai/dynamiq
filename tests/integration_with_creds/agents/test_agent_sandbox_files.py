@@ -182,7 +182,7 @@ def test_agent_sandbox_creates_and_returns_file(openai_llm, image_bytes, e2b_con
 
         logger.info(f"--- Test Passed for Sandbox File Creation ({inference_mode.value}) ---")
     finally:
-        sandbox_backend.close()
+        sandbox_backend.close(kill=True)
 
 
 @pytest.mark.integration
@@ -238,4 +238,4 @@ def test_agent_sandbox_with_input_files_returns_output(openai_llm, e2b_connectio
 
         logger.info("--- Test Passed for Sandbox Input/Output File Handling ---")
     finally:
-        sandbox_backend.close()
+        sandbox_backend.close(kill=True)

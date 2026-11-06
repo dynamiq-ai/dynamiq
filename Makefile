@@ -91,3 +91,8 @@ publish-mkdocs:
 run-mkdocs-locally:
 	make build-mkdocs
 	uv run mkdocs serve
+
+# Live agent scenarios across models (tests/model_matrix). Spends money: needs OPENROUTER_API_KEY, and stops once
+# MODEL_MATRIX_BUDGET_USD is spent. Pick models with MODEL_MATRIX_TIER=cheap|flagship or MODEL_MATRIX_MODELS.
+test-model-matrix:
+	RUN_MODEL_MATRIX=1 uv run pytest tests/model_matrix -n 8 --dist loadgroup --timeout 150 -o faulthandler_timeout=180

@@ -2,9 +2,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from dynamiq.connections import Dynamiq
 from dynamiq.nodes.tools.memory_store_tool import MemoryStoreTool, MemoryStoreToolInputSchema
 from dynamiq.runnables import RunnableStatus
-from dynamiq.storages.memory import CompositeMemoryStore
+from dynamiq.storages.memory import CompositeMemoryStore, DynamiqMemoryStore
 from tests.unit.storages.memory.conftest import FakeMemoryStore
 
 
@@ -223,6 +224,15 @@ def test_the_description_names_each_memory(backend):
 
     assert "- user/ - What you learn about this user." in tool.description
     assert "- team/ - Conventions the whole team follows." in tool.description
+
+
+def test_the_description_states_the_size_limit_of_a_writable_memory(backend):
+    limited = DynamiqMemoryStore(connection=Dynamiq(url="https://api.example.ai", api_key="key"), memory_store_id="ms")
+    composite = CompositeMemoryStore(routes={"user/": backend, "team/": limited})
+
+    assert "Each memory holds at most 8,192 characters" in MemoryStoreTool(backend=composite).description
+    assert "Each memory holds" not in MemoryStoreTool(backend=composite, write_enabled=False).description
+    assert "Each memory holds" not in MemoryStoreTool(backend=backend).description
 
 
 def test_an_unrouted_path_is_relayed_with_the_valid_prefixes(backend):

@@ -22,7 +22,7 @@ def run_workflow_with_streaming():
     """
     # Set up LLM
     llm = OpenAI(
-        model="openai/gpt-5-chat-latest",
+        model="openai/gpt-5.6-terra",
         temperature=0.7,
     )
 

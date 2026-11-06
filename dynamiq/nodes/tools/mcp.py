@@ -13,6 +13,7 @@ from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.mocking import MockConfig
 from dynamiq.utils import is_called_from_async_context
 from dynamiq.utils.logger import logger
@@ -548,6 +549,7 @@ class MCPTool(ConnectionNode):
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
+        check_cancellation(config)
 
         input_dict, http_headers = split_mcp_http_headers(input_data)
 
@@ -663,7 +665,13 @@ Usage Strategy:
                     await session.initialize()
                     page = await session.list_tools()
                     tools = list(page.tools)
+                    seen_cursors: set[str] = set()
                     while page.nextCursor:
+                        if page.nextCursor in seen_cursors:
+                            # A server that hands back a cursor it already gave would be paged forever.
+                            logger.warning(f"Tool {self.name}: MCP server repeated a tools/list cursor; stopping.")
+                            break
+                        seen_cursors.add(page.nextCursor)
                         page = await session.list_tools(params=PaginatedRequestParams(cursor=page.nextCursor))
                         tools.extend(page.tools)
                     for tool in tools:

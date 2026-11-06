@@ -29,10 +29,10 @@ def create_openai_llm_with_error_handling() -> OpenAI:
 
     return OpenAI(
         connection=connection,
-        model="gpt-4o-mpini",
+        model="gpt-4o-mini",
         max_tokens=1000,
         temperature=0.7,
-        error_handling=error_handling
+        error_handling=error_handling,
     )
 
 

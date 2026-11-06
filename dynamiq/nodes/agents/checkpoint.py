@@ -215,6 +215,9 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
                 f"{len(file_store_state.get('files') or {})} file(s) into."
             )
             return
+        # A store an earlier run on this instance created for its uploads holds that run's files, not the
+        # paused run's, so it is emptied rather than merged into.
+        self._empty_auto_created_file_store()
         store.from_checkpoint_state(file_store_state)
 
     def set_pending_tool_call(

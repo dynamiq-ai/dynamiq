@@ -1,0 +1,76 @@
+name: Model Matrix
+
+# Live agent scenarios across models (tests/model_matrix). Each run spends money, so it runs only when asked:
+# the run-model-matrix label on a pull request from this repository, or a manual dispatch.
+on:
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: Models to run, from tests/model_matrix/models.yaml
+        type: choice
+        options: [cheap, flagship]
+        default: cheap
+      models:
+        description: Comma-separated OpenRouter model ids to run instead of a tier
+        required: false
+      budget_usd:
+        description: Stop starting cells once this much is spent
+        default: "3"
+  pull_request:
+    types: [labeled]
+
+jobs:
+  model-matrix:
+    name: Model Matrix
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.label.name == 'run-model-matrix' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: "0.11.24"
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra all
+
+      - name: Run the model matrix
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          MODEL_MATRIX_TIER: ${{ inputs.tier || 'cheap' }}
+          MODEL_MATRIX_MODELS: ${{ inputs.models }}
+          MODEL_MATRIX_BUDGET_USD: ${{ inputs.budget_usd || '3' }}
+        run: make test-model-matrix
+
+      - name: Summarize results
+        if: always()
+        run: |
+          [ -f model_matrix_results.jsonl ] || exit 0
+          uv run python - >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import collections, json
+          rows = [json.loads(line) for line in open("model_matrix_results.jsonl") if line.strip()]
+          by_model = collections.defaultdict(list)
+          for row in rows:
+              by_model[row["model"]].append(row)
+          print("| Model | Passed | Failed | Skipped | LLM calls | Cost (USD) |")
+          print("|---|---|---|---|---|---|")
+          for model, cells in sorted(by_model.items()):
+              count = collections.Counter(cell["outcome"] for cell in cells)
+              calls = sum(cell["llm_calls"] for cell in cells)
+              cost = sum(cell["cost_usd"] for cell in cells)
+              print(f"| {model} | {count['passed']} | {count['failed']} | {count['skipped']} | {calls} | {cost:.3f} |")
+          PY
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: model-matrix-results
+          path: model_matrix_results.jsonl
+          if-no-files-found: ignore

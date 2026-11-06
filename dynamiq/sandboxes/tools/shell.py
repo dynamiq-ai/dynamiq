@@ -54,7 +54,7 @@ class SandboxShellTool(Node):
         "- timeout (int, default 60): Max seconds to wait for completion.\n"
         "- run_in_background_enabled (bool, default false): Run without waiting for output.\n\n"
         "Paths: Input files are under {base_path}/input. Write outputs to {base_path}/output; "
-        "files there are automatically collected and returned after the run. "
+        "to return a file to the user, list it in the final answer's output files. "
         "If you start a dev server (e.g. npm run dev), "
         "use sandbox-info tool with the server port to get the public URL to share with the user.\n\n"
         "Examples:\n"
@@ -139,8 +139,12 @@ class SandboxShellTool(Node):
                 run_in_background_enabled=input_data.run_in_background_enabled,
             )
 
+            # stderr is shown on success too: warnings and logs (Python logging, pip) are written there.
+            content = result.stdout.rstrip("\n") if result.stdout else ""
+            if result.stderr:
+                content = f"{content}\nstderr: {result.stderr}" if content else f"stderr: {result.stderr}"
             output = {
-                "content": result.stdout if result.stdout else "(no output)",
+                "content": content or "(no output)",
                 "stdout": result.stdout,
                 "stderr": result.stderr,
                 "exit_code": result.exit_code,

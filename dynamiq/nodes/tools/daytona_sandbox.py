@@ -6,7 +6,13 @@ from pydantic import Field
 
 from dynamiq.connections import Daytona as DaytonaConnection
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
-from dynamiq.nodes.tools.code_interpreter import DESCRIPTION_SANDBOX_INTERPRETER, BaseCodeInterpreterTool
+from dynamiq.nodes.tools.code_interpreter import (
+    DESCRIPTION_SANDBOX_INTERPRETER,
+    BaseCodeInterpreterTool,
+    shell_double_quote,
+    split_pip_requirements,
+    tail_of_output,
+)
 from dynamiq.utils.logger import logger
 
 
@@ -99,14 +105,20 @@ class DaytonaInterpreterTool(BaseCodeInterpreterTool):
             raise ToolExecutionException(f"Error during shell command execution: {e}", recoverable=True)
 
         if result.exit_code != 0:
-            raise ToolExecutionException(f"Error during shell command execution: {result.result}", recoverable=True)
+            raise ToolExecutionException(
+                f"Error during shell command execution: {tail_of_output(result.result or '')}", recoverable=True
+            )
         return result.result
 
     def _install_packages(self, sandbox: Any, packages: str) -> None:
         if packages:
             logger.debug(f"Tool {self.name} - {self.id}: Installing packages: {packages}")
+            # Quoted: the command runs in a shell, where an unquoted pin like "pandas>=2.0" is a redirection.
+            requirements = [shell_double_quote(requirement) for requirement in split_pip_requirements(packages)]
+            if not requirements:
+                return
             try:
-                result = sandbox.process.exec(f"pip install -qq {' '.join(packages.split(','))}")
+                result = sandbox.process.exec(f"pip install -qq {' '.join(requirements)}")
             except Exception as e:
                 raise ToolExecutionException(f"Error during package installation: {e}", recoverable=True)
 
@@ -144,6 +156,13 @@ class DaytonaInterpreterTool(BaseCodeInterpreterTool):
                 logger.debug(f"Tool {self.name} - {self.id}: Updated sandbox auto-stop to {interval_minutes}min")
             except Exception as e:
                 logger.warning(f"Tool {self.name} - {self.id}: Failed to update sandbox timeout: {e}")
+
+    def _keep_sandbox_alive(self, sandbox: Any, seconds: int) -> None:
+        # Daytona stops a sandbox after the auto-stop interval passes without an SDK call, which a long command can
+        # take. An interval of 0 disables auto-stop, so it is left alone.
+        interval_minutes = self._resolve_auto_stop_interval()
+        if interval_minutes:
+            sandbox.set_autostop_interval(max(interval_minutes, (seconds + 59) // 60))
 
     def close(self) -> None:
         """Close the persistent sandbox if it exists."""
