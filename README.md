@@ -489,6 +489,13 @@ answer = result.output.get(answer_generator.id).get("output", {}).get("content")
 print(answer)
 ```
 
+### Long-term memory evaluation
+
+Evaluate ordered memory writes, updates, recalls and deletion with isolated test actors,
+coverage-aware retrieval metrics, offline evidence replay and paired regression checks.
+See the [memory evaluation guide](https://github.com/dynamiq-ai/dynamiq/blob/main/docs/memory-evaluation.md) and the
+[credential-free lifecycle example](https://github.com/dynamiq-ai/dynamiq/blob/main/examples/evaluations/memory_lifecycle.py).
+
 ### Simple Chatbot with Memory
 A simple chatbot that uses the `Memory` module to store and retrieve conversation history.
 
