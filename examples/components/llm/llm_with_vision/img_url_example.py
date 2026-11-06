@@ -71,7 +71,7 @@ def run_anthropic_bedrock(prompt):
 
     anthropic_bedrock_node = llms.Bedrock(
         name="Bedrock Vision Answer Generation",
-        model="bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
+        model="bedrock/global.anthropic.claude-sonnet-4-6",
         prompt=prompt,
         connection=AWSConnection(),
     )
