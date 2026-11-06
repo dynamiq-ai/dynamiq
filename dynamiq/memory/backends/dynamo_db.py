@@ -366,7 +366,9 @@ class DynamoDB(MemoryBackend):
         fe: Attr | None = None
         for key, value in filters.items():
             try:
-                current_cond = Attr(f"{self.metadata_attribute_name}.{key}").eq(value)
+                attr = Attr(f"{self.metadata_attribute_name}.{key}")
+                # A list means "any of these", matching the client-side filter and InMemory.
+                current_cond = attr.is_in(value) if isinstance(value, list) else attr.eq(value)
             except Exception as e:
                 logger.error(f"Could not build Attr condition for filter key '{key}': {e}. Skipping this filter.")
                 continue
