@@ -1674,6 +1674,39 @@ class Linkup(Http):
         return self
 
 
+class Keenable(Http):
+    """
+    Represents a connection to the Keenable Search API.
+
+    Keenable works without an API key through its public endpoint. When ``api_key`` is set
+    (or ``KEENABLE_API_KEY`` is in the environment), the keyed endpoint is used instead.
+
+    Attributes:
+        url (str): Base URL of the Keenable API.
+        method (Literal[HTTPMethod.POST]): HTTP method used for the request, defaults to POST.
+        api_key (str): Optional API key, fetched from the environment variable 'KEENABLE_API_KEY'.
+        app_title (str): Value sent as the ``X-Keenable-Title`` header to identify the app.
+    """
+
+    url: str = Field(default="https://api.keenable.ai/v1/")
+    method: Literal[HTTPMethod.POST] = HTTPMethod.POST
+    api_key: str | None = Field(default_factory=partial(get_env_var, "KEENABLE_API_KEY", ""))
+    app_title: str = Field(default="Dynamiq")
+
+    @property
+    def search_path(self) -> str:
+        """Keyed endpoint when an API key is set, otherwise the keyless public endpoint."""
+        return "search" if self.api_key else "search/public"
+
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Setup headers after model validation."""
+        self.headers.update({"Content-Type": "application/json", "X-Keenable-Title": self.app_title})
+        if self.api_key:
+            self.headers.update({"X-API-Key": self.api_key})
+        return self
+
+
 class Ollama(BaseConnection):
     """Represents a connection to Ollama API.
 
