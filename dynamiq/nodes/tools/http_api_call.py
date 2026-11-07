@@ -187,7 +187,9 @@ class HttpApiCall(ConnectionNode):
         """
         data = self.connection.data | self.data | input_data.data
         payload_type = input_data.payload_type or self.payload_type
-        files = {param: file_io.getvalue() for param, file_io in input_data.files.items()}
+        files = {
+            param: (getattr(file_io, "name", param), file_io.getvalue()) for param, file_io in input_data.files.items()
+        }
         url = input_data.url or self.url or self.connection.url
         if not url:
             raise ValueError("No url provided.")
