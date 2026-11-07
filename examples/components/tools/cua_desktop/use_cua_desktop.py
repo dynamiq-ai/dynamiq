@@ -24,7 +24,7 @@ def set_wf_with_agent(cm):
     llm = Anthropic(
         id="anthropic",
         connection=AnthropicConnection(),
-        model="claude-sonnet-4-5-20250929",
+        model="claude-sonnet-4-6",
         is_postponed_component_init=True,
     )
 
