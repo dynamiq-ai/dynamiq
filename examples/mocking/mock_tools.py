@@ -37,7 +37,7 @@ def lookup_order(order_id: str, **kwargs) -> str:
 
 def build_agent(refund_mock: MockConfig | None = None) -> tuple[Agent, Node]:
     """Returns the agent and its read-only lookup tool, so the tool can be excluded by id."""
-    llm = OpenAI(connection=OpenAIConnection(api_key=os.environ["OPENAI_API_KEY"]), model="gpt-4o-mini")
+    llm = OpenAI(connection=OpenAIConnection(api_key=os.environ["OPENAI_API_KEY"]), model="gpt-6-luna")
     refund = issue_refund()
     if refund_mock:
         refund.mock = refund_mock

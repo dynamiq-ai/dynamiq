@@ -28,11 +28,7 @@ def create_openai_llm_with_error_handling() -> OpenAI:
     )
 
     return OpenAI(
-        connection=connection,
-        model="gpt-4o-mpini",
-        max_tokens=1000,
-        temperature=0.7,
-        error_handling=error_handling
+        connection=connection, model="gpt-6-luna", max_tokens=1000, temperature=0.7, error_handling=error_handling
     )
 
 

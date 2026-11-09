@@ -10,8 +10,11 @@ from dynamiq.storages.vector import PineconeVectorStore, WeaviateVectorStore
 from dynamiq.types import Document
 
 QUERY_TEXT = "Why do retailers rely on AI copilots for store analytics and customer experience?"
-DOC_MODEL = "embed-v4.0"
-QUERY_MODEL = "embed-v4.0"
+# Cohere pairs these on purpose: Pro and Fast share one embedding space.
+DOC_MODEL = "cohere/embed-v5.0-pro"
+QUERY_MODEL = "cohere/embed-v5.0-fast"
+# Embed v5 defaults to 2048; 1536 matches the Pinecone store's default index dimension.
+EMBEDDING_DIMENSIONS = 1536
 
 RAW_DOCUMENTS = (
     {
@@ -121,13 +124,13 @@ def _build_documents() -> list[Document]:
 
 
 def _embed_documents(documents: list[Document]) -> list[Document]:
-    embedder = CohereEmbedder(model=DOC_MODEL, input_type="search_document")
+    embedder = CohereEmbedder(model=DOC_MODEL, input_type="search_document", dimensions=EMBEDDING_DIMENSIONS)
     embedder.embed_documents(documents)
     return documents
 
 
 def _embed_query() -> list[float]:
-    query_embedder = CohereEmbedder(model=QUERY_MODEL, input_type="search_query")
+    query_embedder = CohereEmbedder(model=QUERY_MODEL, input_type="search_query", dimensions=EMBEDDING_DIMENSIONS)
     return query_embedder.embed_text(QUERY_TEXT)["embedding"]
 
 

@@ -36,7 +36,7 @@ nodes:
       is_files_allowed: false
       callbacks: []
       connection: openai-conn
-      model: gpt-4o-mini
+      model: gpt-6-luna
       prompt: null
       type: dynamiq.nodes.llms.OpenAI
       depends: []
