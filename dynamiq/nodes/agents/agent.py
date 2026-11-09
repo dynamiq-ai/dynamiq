@@ -1,4 +1,7 @@
+import html
 import json
+import posixpath
+import re
 import types
 from concurrent.futures import as_completed
 from typing import Any, Callable, Literal, Mapping, Union, get_args, get_origin
@@ -26,15 +29,15 @@ from dynamiq.nodes.agents.hooks import HookPoint
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager, ReactPromptConfig
 from dynamiq.nodes.agents.utils import (
     SummarizationConfig,
-    ToolCacheEntry,
     XMLParser,
+    drop_answer_after_xml_action,
     extract_message_text,
     first_xml_output_block,
 )
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.schema_utils import strip_inaccessible_fields
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
-from dynamiq.nodes.tools.context_manager import ContextManagerTool
+from dynamiq.nodes.tools.context_manager import TOOL_OUTPUT_METADATA_KEY, ContextManagerTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsInputSchema, ToolCallItem
 from dynamiq.nodes.tools.todo_tools import TodoItem, TodoWriteTool
 from dynamiq.nodes.types import ActionType, Behavior, InferenceMode
@@ -88,7 +91,7 @@ class ToolCallArguments(BaseModel):
 class FinalAnswerArguments(BaseModel):
     thought: str = ""
     answer: str | dict | list
-    output_files: str = ""
+    output_files: str | list[str] = ""
 
     @field_validator("thought", mode="before")
     @classmethod
@@ -99,6 +102,13 @@ class FinalAnswerArguments(BaseModel):
     @classmethod
     def _coerce_output_files(cls, v: Any) -> str:
         return v or ""
+
+
+CUT_OFF_REPLY_MESSAGE = (
+    "Your previous response was cut off at the output token limit, so it was incomplete and was not used. "
+    "Send less in one response: split long content across several tool calls (for example, write a file in "
+    "parts and append the rest)."
+)
 
 
 class FunctionCall(BaseModel):
@@ -269,6 +279,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
     # Raw text of the most recent LLM call; kept so loop-level recovery
     # handlers can echo it back to the model after a parsing failure.
     _last_llm_output: str = PrivateAttr(default="")
+    _fixed_context_over_limit_warned: bool = PrivateAttr(default=False)
 
     @field_validator("response_format", mode="before")
     @classmethod
@@ -291,9 +302,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         Define attribute initializers for cloning.
 
-        Ensures that cloned agents get fresh instances of:
-        - _tool_cache: Independent tool execution cache
-        - state: Independent AgentState to avoid race conditions in parallel execution
+        Ensures that cloned agents get a fresh AgentState, to avoid race conditions in parallel execution.
 
         Returns:
             Dictionary mapping attribute names to initializer functions
@@ -301,7 +310,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         base = super().get_clone_attr_initializers()
         base.update(
             {
-                "_tool_cache": lambda _: {},
                 "state": lambda _: AgentState(),
             }
         )
@@ -320,6 +328,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         self._streaming_tool_run_id = None
         self._streaming_tool_run_ids = []
         self._pending_fc_tool_call_ids: list[str] = []
+        self._fixed_context_over_limit_warned = False
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -419,6 +428,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
         return False
 
     @staticmethod
+    def _annotation_accepts_str(annotation: Any) -> bool:
+        if annotation is str:
+            return True
+        if get_origin(annotation) in (Union, types.UnionType):
+            return str in get_args(annotation)
+        return False
+
+    @staticmethod
     def _extract_basemodel(annotation: Any) -> type[BaseModel] | None:
         """Return the BaseModel subclass in an annotation (handles ``Model | None``), else None."""
         if isinstance(annotation, type) and issubclass(annotation, BaseModel):
@@ -442,7 +459,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
         - **Free-form ``dict[str, Any]`` shipped as a JSON string.** Strict mode
           can't express an open object, so the provider converters send those
           fields as JSON-encoded strings. When the field is dict-typed and the
-          model supplied a JSON string, parse it back into a dict.
+          model supplied a JSON string, parse it back into a dict. A nested model
+          below a recursive one (a tree's children) is described as an open object
+          too, so it comes back the same way and is parsed for its model.
         - **``None`` for a non-nullable field.** Strict mode keeps every property in
           ``required`` and uses ``null`` as the "leave it at the default" signal. A
           field with a non-nullable default (``encoding: str = "utf-8"``) can't take
@@ -473,14 +492,19 @@ class Agent(HistoryManagerMixin, BaseAgent):
         both wire-encoding reversals apply at any depth.
         """
         if isinstance(value, str):
-            # Free-form dict shipped as a JSON string — parse it back.
-            if self._annotation_is_dict_like(annotation):
+            # Free-form dict shipped as a JSON string — parse it back. So is a nested model, unless the field also
+            # takes a string, which may then be meant as text.
+            nested_model = None if self._annotation_accepts_str(annotation) else self._extract_basemodel(annotation)
+            if nested_model is not None or self._annotation_is_dict_like(annotation):
                 stripped = value.strip()
                 if stripped.startswith("{") and stripped.endswith("}"):
                     try:
-                        return json.loads(stripped)
+                        parsed = json.loads(stripped)
                     except json.JSONDecodeError:
-                        pass  # leave as string; Pydantic will surface the error
+                        return value  # leave as string; Pydantic will surface the error
+                    if nested_model is not None and isinstance(parsed, dict):
+                        self._normalize_fields(nested_model.model_fields, parsed)
+                    return parsed
             return value
         if isinstance(value, dict):
             nested_model = self._extract_basemodel(annotation)
@@ -882,7 +906,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
             self._pending_fc_tool_call_ids = []
-            if "tool_calls" in dict[Any, Any](llm_result.output):
+            if not llm_result.output.get("tool_calls"):
+                # A reply without a function call stays in history: the correction that follows refers to
+                # it, and the model can resend it through provide_final_answer instead of rewriting it.
+                if llm_generated_output:
+                    self._prompt.messages.append(
+                        Message(role=MessageRole.ASSISTANT, content=llm_generated_output, static=True)
+                    )
+            else:
                 try:
                     tool_calls = llm_result.output["tool_calls"]
                     payload: list[dict] = []
@@ -965,7 +996,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
             return None, None, None
 
-        if "Answer:" in llm_generated_output:
+        if parser.is_default_final_answer(llm_generated_output):
             thought, final_answer, output_files_raw = parser.extract_default_final_answer(llm_generated_output)
             self._requested_output_files = self._parse_output_files_csv(output_files_raw)
             self.log_final_output(thought, final_answer, loop_num)
@@ -992,7 +1023,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             logger.info(f"Agent {self.name} - {self.id}: using function calling inference mode")
 
         if not llm_result.output.get("tool_calls"):
-            logger.error("Error: No function called.")
+            logger.warning(f"Agent {self.name} - {self.id}: the model replied without calling a function.")
             raise ActionParsingException(
                 "You must always respond by calling a function. "
                 "Call a tool function to continue, or call 'provide_final_answer' to finish.",
@@ -1166,10 +1197,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
         try:
             parsed_data = XMLParser.parse(
                 llm_generated_output,
-                required_tags=["thought", "answer"],
-                optional_tags=["output", "output_files"],
+                required_tags=["answer"],
+                optional_tags=["thought", "output", "output_files"],
             )
-            thought = parsed_data.get("thought")
+            thought = parsed_data.get("thought", "")
             final_answer = parsed_data.get("answer")
 
             self._requested_output_files = self._parse_output_files_csv(parsed_data.get("output_files") or "")
@@ -1182,17 +1213,19 @@ class Agent(HistoryManagerMixin, BaseAgent):
             try:
                 parsed_data = XMLParser.parse(
                     llm_generated_output,
-                    required_tags=["thought", "action", "action_input"],
-                    optional_tags=["output"],
+                    required_tags=["action"],
+                    optional_tags=["thought", "action_input", "output"],
                     json_fields=["action_input"],
                 )
-                thought = parsed_data.get("thought")
+                thought = parsed_data.get("thought", "")
                 action = parsed_data.get("action")
-                action_input = parsed_data.get("action_input")
+                action_input = parsed_data.get("action_input", {})
+                if action and not self.tool_by_names.get(self.sanitize_tool_name(action)):
+                    action, action_input = self._unnest_xml_action(action, action_input)
                 self.log_reasoning(thought, action, action_input, loop_num)
                 return thought, action, action_input
             except JSONParsingError as e:
-                logger.error(f"XMLParser: Invalid JSON in action_input: {e}")
+                logger.warning(f"XMLParser: Invalid JSON in action_input: {e}")
                 raise ActionParsingException(
                     "The <action_input> value must be valid JSON. Put the whole JSON on one line; "
                     'use \\n for newlines inside strings and \\" for quotes. '
@@ -1200,7 +1233,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     recoverable=True,
                 )
             except ParsingError as e:
-                logger.error(f"XMLParser: Empty or invalid XML response for action parsing: {e}")
+                logger.warning(f"XMLParser: Empty or invalid XML response for action parsing: {e}")
                 raise ActionParsingException(
                     "The previous response was empty or invalid. "
                     "Provide <thought> with either <action>/<action_input> or <answer>.",
@@ -1208,11 +1241,32 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
 
         except ParsingError as e:
-            logger.error(f"XMLParser: Empty or invalid XML response: {e}")
+            logger.warning(f"XMLParser: Empty or invalid XML response: {e}")
             raise ActionParsingException(
                 "The previous response was empty or invalid. " "Please provide the required XML tags.",
                 recoverable=True,
             )
+
+    def _unnest_xml_action(self, action: str, action_input: Any) -> tuple[str, Any]:
+        """Read the tool from an action some models (e.g. Amazon Nova) wrap in extra elements.
+
+        ``<action><tool>input</tool></action>`` with no ``<action_input>`` takes the element's JSON, or its
+        child elements as a dict, as the input; an action whose name is a known tool once its tags are
+        removed, such as ``<action>tool``, keeps its own input. Anything else is returned unchanged.
+        """
+        text = html.unescape(action)
+        bare = re.sub(r"</?[\w.-]+>", "", text).strip()
+        if bare != text.strip() and self.tool_by_names.get(self.sanitize_tool_name(bare)):
+            return bare, action_input
+        nested = re.fullmatch(r"\s*<([\w.-]+)>(.*)</\1>\s*", text, re.DOTALL)
+        if action_input or not nested or not self.tool_by_names.get(self.sanitize_tool_name(nested.group(1))):
+            return action, action_input
+        body = nested.group(2).strip()
+        try:
+            return nested.group(1), json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            fields = re.findall(r"<([\w.-]+)>(.*?)</\1>", body, re.DOTALL)
+            return (nested.group(1), {k: v.strip() for k, v in fields}) if fields else (action, action_input)
 
     def _setup_stop_sequences(self) -> None:
         """Configure LLM stop sequences based on the current inference mode."""
@@ -1236,12 +1290,22 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         # Reflect a run-time borrowed shared sandbox (tools/env attached after the init-time build).
         self._sync_react_prompt_for_shared_sandbox()
+        tools = self._runtime_tools
         system_message = Message(
             role=MessageRole.SYSTEM,
             content=self.generate_prompt(
                 tools_name=self.tool_names,
                 tool_description=self.tool_description,
-                input_formats=schema_generator.generate_input_formats(self._runtime_tools, self.sanitize_tool_name),
+                input_formats=schema_generator.generate_input_formats(
+                    tools, self.sanitize_tool_name, offered_names=self._offered_tool_names(tools)
+                ),
+                tool_description_overflow=(
+                    schema_generator.function_description_overflow(
+                        tools, self.sanitize_tool_name, offered_names=self._offered_tool_names(tools)
+                    )
+                    if self.inference_mode == InferenceMode.FUNCTION_CALLING
+                    else ""
+                ),
             ),
             static=True,
         )
@@ -1363,8 +1427,21 @@ class Agent(HistoryManagerMixin, BaseAgent):
         try:
             check_cancellation(config)
             if isinstance(tool, ContextManagerTool):
-                tool_result = None
                 to_summarize, to_preserve = self._split_history()
+                pending_ids = set(self._current_tool_call_ids())
+                if not to_preserve and to_summarize and pending_ids:
+                    # The assistant message carrying this call stays, with what follows it (such as the stub reply
+                    # to a provide_final_answer in the same batch): the replies to its tool calls follow it, and a
+                    # reply whose call was summarized away is dropped before the request is sent.
+                    start = next(
+                        (
+                            index
+                            for index in range(len(to_summarize) - 1, -1, -1)
+                            if pending_ids & {call.get("id") for call in to_summarize[index].tool_calls or []}
+                        ),
+                        len(to_summarize) - 1,
+                    )
+                    to_summarize, to_preserve = to_summarize[:start], [m.model_copy() for m in to_summarize[start:]]
                 if not to_summarize:
                     logger.info(f"Agent {self.name} - {self.id}: Nothing to summarize, skipping context compaction.")
                     skip_message = (
@@ -1390,16 +1467,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 to_summarize = self._run_hooks(HookPoint.BEFORE_MODEL, to_summarize, config, **kwargs).value
                 tool_input = {**(action_input if isinstance(action_input, dict) else {}), "messages": to_summarize}
             else:
-                tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
-                tool_result = self._tool_cache.get(tool_cache_entry, None)
                 tool_input = action_input
 
             delegate_final = self._should_delegate_final(tool, action_input)
 
+            # Every call runs, including one identical to an earlier call: tools are not assumed
+            # idempotent, and a shell, file or query result can change between two identical calls.
             dependency: dict | None = None
-            if not tool_result:
-                tool_kwargs = kwargs.copy()
-
+            try:
                 run_tool_result = self._run_tool(
                     tool,
                     tool_input,
@@ -1409,17 +1484,16 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     collect_dependency=collect_dependency,
                     is_parallel=is_parallel,
                     tool_run_id=tool_run_id,
-                    **tool_kwargs,
+                    **kwargs,
                 )
-                if collect_dependency:
-                    tool_result, tool_files, tool_output_meta, dependency = run_tool_result
-                else:
-                    tool_result, tool_files, tool_output_meta = run_tool_result
-
+            except (ValueError, RecoverableAgentException) as e:
+                if not isinstance(tool, ContextManagerTool):
+                    raise
+                run_tool_result = self._summary_failure_fallback(e, len(to_summarize), collect_dependency)
+            if collect_dependency:
+                tool_result, tool_files, tool_output_meta, dependency = run_tool_result
             else:
-                logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
-                tool_result, tool_output_meta = tool_result
-                tool_files = []
+                tool_result, tool_files, tool_output_meta = run_tool_result
 
             if delegate_final:
                 self.log_final_output(thought, tool_result, loop_num)
@@ -1523,6 +1597,23 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
             return error_message, [], False, False, None
 
+    def _summary_failure_fallback(self, error: Exception, dropped: int, collect_dependency: bool) -> tuple:
+        """What compaction does when no summary could be generated: drop the messages instead of ending the run.
+
+        The summarizer can fail or keep returning nothing (a provider outage, a reasoning model or a safety
+        filter answering with empty content). The messages it was given are removed with a note in their
+        place; the original request and the preserved recent messages are kept as after any compaction.
+        Returns the shape ``_run_tool`` returns.
+        """
+        logger.warning(
+            f"Agent {self.name} - {self.id}: context compaction could not generate a summary, so the "
+            f"{dropped} oldest messages are dropped instead. Error: {error}"
+        )
+        result = "The conversation history could not be summarized, so its oldest messages were removed."
+        summary = f"[{dropped} earlier messages were removed to fit the context window; no summary could be generated.]"
+        meta = {"summary": summary}
+        return (result, [], meta, None) if collect_dependency else (result, [], meta)
+
     def _add_observation(self, tool_result: Any) -> None:
         """Add observation to prompt.
 
@@ -1530,7 +1621,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
             tool_result: The result from the tool execution.
         """
         observation = f"Observation: {tool_result}\n"
-        self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
+        self._prompt.messages.append(
+            Message(role=MessageRole.USER, content=observation, static=True, metadata={TOOL_OUTPUT_METADATA_KEY: True})
+        )
 
     def _unanswered_tool_call_ids(self) -> list[str]:
         """Recover tool_call ids from history that still have no ``role: tool`` reply.
@@ -1611,6 +1704,41 @@ class Agent(HistoryManagerMixin, BaseAgent):
             return
         self._add_observation(mark_tool_failure(str(tool_result), success) if success is False else tool_result)
 
+    def _repair_parallel_input(self, action_input: Any) -> Any:
+        """The batch in the shape ParallelToolCallsInputSchema takes, from the shapes models also write.
+
+        A bare list of calls; "arguments" or "parameters" for "input"; a tool's arguments written next to "name";
+        "input" as a JSON string, or as a plain string for a tool with one required parameter.
+        """
+        if isinstance(action_input, list):
+            action_input = {"tools": action_input}
+        if not isinstance(action_input, dict) or not isinstance(action_input.get("tools"), list):
+            return action_input
+        tools = []
+        for item in action_input["tools"]:
+            if not isinstance(item, dict):
+                tools.append(item)
+                continue
+            item = dict(item)
+            for alias in ("arguments", "parameters", "args"):
+                if alias in item and "input" not in item:
+                    item["input"] = item.pop(alias)
+            tool_input = item.get("input", {})
+            if isinstance(tool_input, str):
+                try:
+                    tool_input = json.loads(tool_input, strict=False)
+                except json.JSONDecodeError:
+                    tool = self.tool_by_names.get(self.sanitize_tool_name(str(item.get("name", ""))))
+                    required = [n for n, f in tool.input_schema.model_fields.items() if f.is_required()] if tool else []
+                    if len(required) == 1:
+                        tool_input = {required[0]: tool_input}
+            flattened = {k: item.pop(k) for k in list(item) if k not in ToolCallItem.model_fields}
+            if isinstance(tool_input, dict):
+                tool_input = {**flattened, **tool_input}
+            item["input"] = tool_input
+            tools.append(item)
+        return {**action_input, "tools": tools}
+
     def _validate_parallel_tool_input(self, action_input: Any) -> list[dict[str, Any]] | None:
         """Validate and parse parallel tool input schema.
 
@@ -1623,11 +1751,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
             list: Validated tools list, or None if validation failed
         """
         try:
-            validated = ParallelToolCallsInputSchema.model_validate(action_input).model_dump()
-            return validated["tools"]
+            validated = ParallelToolCallsInputSchema.model_validate(self._repair_parallel_input(action_input))
+            return validated.model_dump()["tools"]
         except Exception as e:
             error_message = f"Invalid parallel tool input: {e}"
-            logger.error(error_message)
+            logger.warning(error_message)
             # Emitted, not added as a bare observation: every id in the batch needs a reply.
             self._emit_tool_observations(error_message, success=False)
             return None
@@ -1827,6 +1955,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 and fc_tools
                 and "tool_choice" not in kwargs
                 and getattr(self.llm, "tool_choice", None) is None
+                and self.llm.supports_forced_tool_choice()
             ):
                 forced_tool_choice = "required"
             llm_result = self._run_llm(
@@ -1851,6 +1980,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
             llm_generated_output = streaming_callback.accumulated_content
         else:
             llm_generated_output = llm_result.output.get("content", "")
+        if self.inference_mode == InferenceMode.DEFAULT and llm_generated_output:
+            llm_generated_output = parser.normalize_default_labels(llm_generated_output)
+            cut = parser.cut_default_reply_at_observation(llm_generated_output)
+            if cut != llm_generated_output:
+                logger.warning(
+                    f"Agent {self.name} - {self.id}: model wrote its own Observation after the action; "
+                    "keeping only the action."
+                )
+                llm_generated_output = cut
         if self.inference_mode == InferenceMode.XML and llm_generated_output:
             # Drop fabricated trailing <output> blocks so history and parsing see only the real step.
             first_block = self._first_output_block(llm_generated_output)
@@ -1860,6 +1998,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     "keeping only the first block and dropping the rest."
                 )
                 llm_generated_output = first_block
+            without_answer = drop_answer_after_xml_action(llm_generated_output)
+            if without_answer != llm_generated_output:
+                logger.warning(
+                    f"Agent {self.name} - {self.id}: model wrote an <answer> after its <action>; running the action."
+                )
+                llm_generated_output = without_answer
         self._last_llm_output = llm_generated_output
 
         llm_reasoning = (
@@ -1870,15 +2014,31 @@ class Agent(HistoryManagerMixin, BaseAgent):
         # Append BEFORE parsing so the LLM can see its own output during error recovery.
         self._append_assistant_message(llm_result, llm_generated_output)
 
-        match self.inference_mode:
-            case InferenceMode.DEFAULT:
-                result = self._handle_default_mode(llm_generated_output, loop_num)
-            case InferenceMode.FUNCTION_CALLING:
-                result = self._handle_function_calling_mode(llm_result, loop_num)
-            case InferenceMode.STRUCTURED_OUTPUT:
-                result = self._handle_structured_output_mode(llm_generated_output, loop_num)
-            case InferenceMode.XML:
-                result = self._handle_xml_mode(llm_generated_output, loop_num, config, **kwargs)
+        cut_off = llm_result.output.get("finish_reason") == "length"
+        try:
+            match self.inference_mode:
+                case InferenceMode.DEFAULT:
+                    result = self._handle_default_mode(llm_generated_output, loop_num)
+                case InferenceMode.FUNCTION_CALLING:
+                    result = self._handle_function_calling_mode(llm_result, loop_num)
+                case InferenceMode.STRUCTURED_OUTPUT:
+                    result = self._handle_structured_output_mode(llm_generated_output, loop_num)
+                case InferenceMode.XML:
+                    result = self._handle_xml_mode(llm_generated_output, loop_num, config, **kwargs)
+        except (ActionParsingException, ParsingError) as e:
+            # A reply cut off inside its action fails to parse; saying why gets a shorter reply next time.
+            if cut_off:
+                raise ActionParsingException(CUT_OFF_REPLY_MESSAGE, recoverable=True) from e
+            raise
+
+        # A cut-off action runs only if it is complete. Function calling parses a cut-off call's partial arguments,
+        # and XML reads an action without <action_input> as one that takes none; a DEFAULT or structured reply
+        # that ran on past a complete action parses as that action.
+        incomplete = self.inference_mode == InferenceMode.FUNCTION_CALLING or (
+            self.inference_mode == InferenceMode.XML and "</action_input>" not in (llm_generated_output or "").lower()
+        )
+        if cut_off and incomplete and result[1] not in (None, "final_answer"):
+            raise ActionParsingException(CUT_OFF_REPLY_MESSAGE, recoverable=True)
 
         if result[1] == "final_answer":
             self._resolve_requested_output_files(strict=True)
@@ -2039,8 +2199,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 elif self.inference_mode == InferenceMode.FUNCTION_CALLING:
                     extra_guidance = (
                         "You MUST respond by calling a function — never plain text. "
-                        "Call a tool with 'thought' and 'action_input', "
-                        "or call 'provide_final_answer' with 'thought' and 'answer' to finish."
+                        "Call a tool with 'thought' and the tool's parameters as its arguments, "
+                        "or call 'provide_final_answer' with 'thought' and 'answer' to finish. "
+                        "If your last reply was the final answer, send it through 'provide_final_answer'."
                     )
 
                 self._append_recovery_instruction(
@@ -2104,6 +2265,17 @@ class Agent(HistoryManagerMixin, BaseAgent):
             return
 
         if self.is_token_limit_exceeded():
+            if self.is_fixed_context_over_limit():
+                if not self._fixed_context_over_limit_warned:
+                    logger.warning(
+                        f"Agent {self.name} - {self.id}: the system prompt and tool schemas alone exceed the "
+                        "summarization limit, so only the history beyond max_preserved_tokens is summarized. "
+                        "Raise max_token_context_length or context_usage_ratio, or give the agent fewer tools."
+                    )
+                    self._fixed_context_over_limit_warned = True
+                to_summarize, _ = self._split_history()
+                if not to_summarize:
+                    return
             logger.info(
                 f"Agent {self.name} - {self.id}: Token limit exceeded. Automatically invoking Context Manager Tool."
             )
@@ -2126,14 +2298,27 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
 
     @staticmethod
-    def _parse_output_files_csv(raw: str) -> list[str]:
-        """Parse a comma-separated string of file paths into a list.
+    def _parse_output_files_csv(raw: str | list | tuple | None) -> list[str]:
+        """Parse a comma-separated string of file paths, or a list of them, into a list.
 
         Strips whitespace from each entry and drops empty entries.
         """
+        if isinstance(raw, (list, tuple)):
+            return [str(p).strip() for p in raw if str(p).strip()]
         if not raw or not raw.strip():
             return []
         return [p.strip() for p in raw.split(",") if p.strip()]
+
+    @staticmethod
+    def _output_file_candidates(path: str) -> list[str]:
+        """Spellings of a requested output path to look up, the path as given first.
+
+        The prompt asks for absolute paths while file store keys are relative, so ``/out/a.md`` and
+        ``./out/a.md`` also try ``out/a.md``; a bare file name at the root is the last resort.
+        """
+        normalized = posixpath.normpath(path)
+        candidates = [path, normalized, normalized.lstrip("/"), path.rsplit("/", 1)[-1]]
+        return list(dict.fromkeys(c for c in candidates if c and c != "."))
 
     def _resolve_requested_output_files(self, *, strict: bool = True) -> None:
         """Resolve ``_requested_output_files`` against the file backend.
@@ -2154,13 +2339,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
         resolved: list[str] = []
         file_not_found: list[str] = []
         for f in self._requested_output_files:
-            basename = f.rsplit("/", 1)[-1]
-            if file_backend.exists(f):
-                resolved.append(f)
-            elif f != basename and file_backend.exists(basename):
-                resolved.append(basename)
-            else:
+            found = next((c for c in self._output_file_candidates(f) if file_backend.exists(c)), None)
+            if found is None:
                 file_not_found.append(f)
+            elif found not in resolved:
+                resolved.append(found)
 
         if file_not_found and strict:
             raise OutputFileNotFoundError(f"File not found: {file_not_found}.", recoverable=True)
@@ -2271,10 +2454,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self.delegation_allowed,
                 self.sanitize_tool_name,
                 response_format=self.response_format,
+                offered_names=self._offered_tool_names(tools),
             )
         elif self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
             response_format = schema_generator.generate_structured_output_schemas(
-                tools, self.sanitize_tool_name, self.delegation_allowed
+                tools, self.sanitize_tool_name, self.delegation_allowed, offered_names=self._offered_tool_names(tools)
             )
         return fc_tools, response_format
 
@@ -2286,16 +2470,21 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""
+        offered = self._offered_tools(self.tools)
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
             self._tools = schema_generator.generate_function_calling_schemas(
-                self._offered_tools(self.tools),
+                offered,
                 self.delegation_allowed,
                 self.sanitize_tool_name,
                 response_format=self.response_format,
+                offered_names=self._offered_tool_names(offered),
             )
         elif self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
             self._response_format = schema_generator.generate_structured_output_schemas(
-                self._offered_tools(self.tools), self.sanitize_tool_name, self.delegation_allowed
+                offered,
+                self.sanitize_tool_name,
+                self.delegation_allowed,
+                offered_names=self._offered_tool_names(offered),
             )
 
         model_name = getattr(self.llm, "model", None)

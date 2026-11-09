@@ -1,3 +1,4 @@
+import re
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -8,11 +9,22 @@ from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.prompts.react.instructions import HISTORY_SUMMARIZATION_PROMPT_REPLACE
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, MessageRole
-from dynamiq.prompts.prompts import Prompt, VisionMessage
+from dynamiq.prompts.prompts import (
+    Prompt,
+    VisionMessage,
+    VisionMessageFileContent,
+    VisionMessageImageContent,
+    VisionMessageTextContent,
+)
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.litellm import token_counter
 from dynamiq.utils.logger import logger
+
+# The summarizer tells messages apart by these elements, so no content may open or close one.
+_MESSAGE_TAG = re.compile(r"<(/?message)", re.IGNORECASE)
+# Marks the user-role messages that carry a tool's result in the text protocols.
+TOOL_OUTPUT_METADATA_KEY = "tool_output"
 
 MERGE_SUMMARIES_PROMPT = (
     "The following are summaries of consecutive parts of a conversation. "
@@ -156,8 +168,10 @@ class ContextManagerTool(Node):
             role = getattr(m, "role", None)
             role_str = role.value if hasattr(role, "value") else str(role)
             content = getattr(m, "content", "") or ""
+            if (getattr(m, "metadata", None) or {}).get(TOOL_OUTPUT_METADATA_KEY):
+                role_str = MessageRole.TOOL.value
 
-            block_lines: list[str] = [f"[{role_str}]"]
+            block_lines: list[str] = []
 
             tool_calls = getattr(m, "tool_calls", None)
             if tool_calls:
@@ -171,10 +185,28 @@ class ContextManagerTool(Node):
                 if content:
                     block_lines.append(content)
             else:
-                block_lines.append(f"{content!r}")
+                block_lines.extend(self._describe_content_part(part) for part in content)
 
-            parts.append("\n".join(block_lines))
+            body = _MESSAGE_TAG.sub(r"&lt;\1", "\n".join(block_lines))
+            parts.append(f'<message role="{role_str}">\n{body}\n</message>')
         return Message(content="\n\n".join(parts), role=MessageRole.ASSISTANT, static=True)
+
+    @staticmethod
+    def _describe_content_part(part: Any) -> str:
+        """Text of a multimodal content part, or a placeholder for an image or file.
+
+        The summarizer gets text only: inlining an image's data URL would spend tens of thousands of
+        tokens on base64 it cannot read. A remote image keeps its URL so the summary can cite it.
+        """
+        if isinstance(part, VisionMessageTextContent):
+            return part.text
+        if isinstance(part, VisionMessageImageContent):
+            url = part.image_url.url
+            return f"[image: {url}]" if url.startswith(("http://", "https://")) else "[image]"
+        if isinstance(part, VisionMessageFileContent):
+            data = part.file.file_data or ""
+            return f"[file: {data}]" if data.startswith(("http://", "https://", "gs://")) else "[file]"
+        return f"[{getattr(part, 'type', 'content')}]"
 
     def _count_message_tokens(self, messages: list[Message | VisionMessage]) -> int:
         """Count tokens for a list of messages using the summarization LLM's tokenizer."""

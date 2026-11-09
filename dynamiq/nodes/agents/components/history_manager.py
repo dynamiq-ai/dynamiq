@@ -74,6 +74,16 @@ class HistoryManagerMixin:
             "total": messages + tools + response_format,
         }
 
+    def _exceeds_compaction_limit(self, tokens: int) -> bool:
+        """Whether a request of ``tokens`` tokens is over the limit that triggers summarization."""
+        return bool(
+            (
+                self.summarization_config.max_token_context_length
+                and tokens > self.summarization_config.max_token_context_length
+            )
+            or (tokens / self.llm.get_token_limit() > self.summarization_config.context_usage_ratio)
+        )
+
     def is_token_limit_exceeded(self) -> bool:
         """
         Check whether token limit for summarization is exceeded.
@@ -84,13 +94,7 @@ class HistoryManagerMixin:
         tokens = self.count_context_tokens()
         prompt_tokens = tokens["total"]
 
-        exceeded = bool(
-            (
-                self.summarization_config.max_token_context_length
-                and prompt_tokens > self.summarization_config.max_token_context_length
-            )
-            or (prompt_tokens / self.llm.get_token_limit() > self.summarization_config.context_usage_ratio)
-        )
+        exceeded = self._exceeds_compaction_limit(prompt_tokens)
         if exceeded:
             logger.info(
                 f"Agent {self.name} - {self.id}: context at {prompt_tokens}/{self.llm.get_token_limit()} tokens "
@@ -98,6 +102,19 @@ class HistoryManagerMixin:
                 f"response_format={tokens['response_format']})."
             )
         return exceeded
+
+    def is_fixed_context_over_limit(self) -> bool:
+        """Whether the system prompt and the tool and response schemas alone exceed the summarization limit.
+
+        Compaction only shortens the conversation, so it cannot get such a request under the limit, and it
+        would summarize again on every loop.
+        """
+        tokens = self.count_context_tokens()
+        system_tokens = token_counter(
+            model=self.llm.model,
+            messages=[m.model_dump(exclude={"metadata"}) for m in self._prompt.messages[: self._history_offset]],
+        )
+        return self._exceeds_compaction_limit(system_tokens + tokens["tools"] + tokens["response_format"])
 
     def _split_history(
         self,
@@ -123,6 +140,14 @@ class HistoryManagerMixin:
             n_tokens += msg_tokens
             preserve_count += 1
 
+        # What came after the model's last reply (tool results, a new question) it has not read yet, so that is kept
+        # whole with the reply, past max_preserved_tokens if need be: a summary must not stand in for it.
+        last_reply = max(
+            (index for index, msg in enumerate(conversation_history) if msg.role == MessageRole.ASSISTANT), default=None
+        )
+        if last_reply is not None and last_reply < len(conversation_history) - 1:
+            preserve_count = max(preserve_count, len(conversation_history) - last_reply)
+
         if preserve_count > 0:
             to_summarize = conversation_history[:-preserve_count]
             to_preserve = [m.copy() for m in conversation_history[-preserve_count:]]
@@ -135,9 +160,11 @@ class HistoryManagerMixin:
         while to_preserve and to_preserve[0].role == MessageRole.TOOL:
             to_summarize = list(to_summarize) + [to_preserve.pop(0)]
 
-        if to_summarize == [] and self.is_token_limit_exceeded():
-            to_summarize = conversation_history
-            to_preserve = []
+        # Summarizing everything only helps when the conversation is what fills the context. When the system
+        # prompt and tool schemas alone exceed the limit, it would summarize the whole history on every loop.
+        if to_summarize == [] and self.is_token_limit_exceeded() and not self.is_fixed_context_over_limit():
+            to_summarize = conversation_history[:last_reply] if last_reply is not None else conversation_history
+            to_preserve = [m.copy() for m in conversation_history[len(to_summarize) :]]
 
         return to_summarize, to_preserve
 

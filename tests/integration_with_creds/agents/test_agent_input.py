@@ -9,7 +9,7 @@ from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_react_agent_without_tools_or_memory():
     connection = OpenAIConnection()
     llm = OpenAI(
@@ -101,7 +101,7 @@ def run_config():
     return RunnableConfig()
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "test_id,agent_name,role",
     [

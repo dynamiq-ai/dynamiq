@@ -292,3 +292,18 @@ def test_stream_tool_input_allowlist(stream_tool_input, action_name, should_stre
         assert cb.agent.stream_content.call_count == 2
     else:
         cb.agent.stream_content.assert_not_called()
+
+
+def test_stream_tool_input_allowlist_covers_a_tool_the_model_knows_by_another_name():
+    """Two MCP servers have a `search` tool, so the model is offered `github_search`; the allowlist names the tool."""
+    cb = _make_callback()
+    tool = MagicMock(type="dynamiq.nodes.tools.MCPTool", action_type=None)
+    tool.name = "search"
+    cb.agent.tool_by_names = {"github_search": tool}
+    cb.agent.streaming.stream_tool_input = ["search"]
+    cb._current_action_name = "github_search"
+    cb.agent._streaming_tool_run_id = "test-run-id"
+
+    cb._emit("some input content", step=StreamingState.TOOL_INPUT)
+
+    assert cb.agent.stream_content.call_count == 2
