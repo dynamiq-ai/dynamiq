@@ -25,7 +25,7 @@ OPENAI_CONNECTION = connections.OpenAI(
 OPENAI_NODE_STREAMING_EVENT = "streaming-openai-1"
 OPENAI_NODE = llms.OpenAI(
     name="OpenAI",
-    model="gpt-4o-mini",
+    model="gpt-6-luna",
     connection=OPENAI_CONNECTION,
     streaming=StreamingConfig(enabled=True, event=OPENAI_NODE_STREAMING_EVENT),
 )

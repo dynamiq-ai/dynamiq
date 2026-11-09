@@ -4,7 +4,7 @@ from dynamiq.prompts import Prompt
 
 def run_perplexity_node(prompt: Prompt):
     perplexity_node = Perplexity(
-        model="llama-3.1-sonar-small-128k-online",
+        model="sonar",
         return_citations=True,
     )
     response = perplexity_node.run(input_data={}, prompt=prompt)
