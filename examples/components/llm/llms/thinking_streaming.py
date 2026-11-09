@@ -24,9 +24,9 @@ async def start_chat():
                 ),
             ],
         ),
-        thinking_enabled=True,
-        max_tokens=1100,  # Must be greater than 1024 (the default value for "thinking")
-        temperature=1.0,  # Should always be set to 1.0 when "thinking" is enabled
+        # Sonnet 5.5 only supports adaptive thinking. Without "display", Anthropic omits the thinking text.
+        thinking={"type": "adaptive", "display": "summarized"},
+        max_tokens=1100,
         streaming=StreamingConfig(enabled=True),
     )
     wf = Workflow()
