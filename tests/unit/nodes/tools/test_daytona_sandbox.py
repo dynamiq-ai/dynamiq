@@ -1,7 +1,7 @@
 """Unit tests for DaytonaInterpreterTool with mocked Daytona SDK."""
 
 import io
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -241,6 +241,36 @@ def test_persistent_sandbox_false(mock_daytona_sdk):
     tool.execute(input_data)
 
     mock_client.delete.assert_called_once_with(mock_sandbox)
+
+
+def test_per_call_timeout_keeps_the_sandbox_running_without_lowering_its_auto_stop(daytona_tool, mock_daytona_sdk):
+    """A long call raises the auto-stop interval for itself; a short one never takes it below the configured one."""
+    from dynamiq.nodes.tools.code_interpreter import CodeInterpreterInputSchema as DaytonaInterpreterInputSchema
+
+    mock_sandbox = mock_daytona_sdk["sandbox"]
+
+    daytona_tool.execute(DaytonaInterpreterInputSchema(shell_command="make build", timeout=1800))
+    daytona_tool.execute(DaytonaInterpreterInputSchema(shell_command="ls", timeout=30))
+
+    assert mock_sandbox.set_autostop_interval.call_args_list == [call(30), call(10)]
+    assert daytona_tool.timeout == 600
+
+
+def test_per_call_timeout_leaves_a_disabled_auto_stop_disabled(mock_daytona_sdk):
+    """An auto-stop interval of 0 keeps the sandbox running: a per-call timeout must not turn auto-stop on."""
+    from dynamiq.nodes.tools.code_interpreter import CodeInterpreterInputSchema as DaytonaInterpreterInputSchema
+    from dynamiq.nodes.tools.daytona_sandbox import DaytonaInterpreterTool
+
+    tool = DaytonaInterpreterTool(
+        connection=DaytonaConnection(api_key="test-key", api_url="https://test"),
+        persistent_sandbox=True,
+        auto_stop_interval=0,
+        is_optimized_for_agents=False,
+    )
+
+    tool.execute(DaytonaInterpreterInputSchema(shell_command="ls", timeout=30))
+
+    mock_daytona_sdk["sandbox"].set_autostop_interval.assert_not_called()
 
 
 def test_optimized_for_agents_output(daytona_tool, mock_daytona_sdk):

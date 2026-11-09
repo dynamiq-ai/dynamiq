@@ -146,6 +146,40 @@ def test_status_codes_map_to_memory_exceptions(store, client, status_code, expec
         store.read("prefs.md")
 
 
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (
+            {"code": "bad_input", "message": "This user already has the maximum of 100 memories in this store."},
+            "Dynamiq API returned 400: This user already has the maximum of 100 memories in this store.",
+        ),
+        (
+            {
+                "code": "bad_request",
+                "message": "The request could not be processed due to invalid input.",
+                "details": {"content": "cannot be blank"},
+            },
+            "Dynamiq API returned 400: The request could not be processed due to invalid input. "
+            '{"content": "cannot be blank"}',
+        ),
+    ],
+)
+def test_a_platform_error_reaches_the_model_as_its_message(store, client, error, expected):
+    client.request.return_value = _mock_response({"error": error}, status_code=400)
+
+    with pytest.raises(MemoryStoreError) as raised:
+        store.write("prefs.md", "x")
+
+    assert str(raised.value) == expected
+
+
+def test_content_over_the_platform_limit_is_refused_before_the_request(store, client):
+    with pytest.raises(MemoryStoreError, match="would be 8,193 characters, and a memory holds at most 8,192"):
+        store.write("digest.md", "x" * 8193)
+
+    client.request.assert_not_called()
+
+
 def test_transport_failure_raises_memory_store_error(store, client):
     client.request.side_effect = ConnectionError("boom")
 

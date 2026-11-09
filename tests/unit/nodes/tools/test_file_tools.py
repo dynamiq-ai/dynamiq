@@ -1210,3 +1210,136 @@ def test_file_read_tool_line_range_binary_fallback(file_store, llm_model):
     assert "beta" in result.output["content"]
     assert "gamma" in result.output["content"]
     assert "alpha" not in result.output["content"]
+
+
+@pytest.mark.parametrize("file_path", ["notes/plan.md", "notes/todo.txt"])
+def test_file_read_tool_md_and_txt_are_fresh_after_write(llm_model, file_path):
+    """.md and .txt go through their converter and cache, and a write never leaves the old text served."""
+    file_store = InMemoryFileStore()
+    file_store.store(file_path, b"\n# Plan\n- alpha\n- beta\n")
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    first = tool.run({"file_path": file_path, "brief": "Read v1"})
+    file_store.store(file_path, b"\n# Plan\n- alpha\n- gamma\n", overwrite=True)
+    second = tool.run({"file_path": file_path, "brief": "Read v2"})
+
+    assert "beta" in first.output["content"]
+    assert "gamma" in second.output["content"]
+    assert "beta" not in second.output["content"]
+
+
+def test_file_read_tool_rereads_a_converted_file_that_changed(file_store, llm_model):
+    """A converted format (here CSV) is re-extracted when the file changes, not served from its old cache."""
+    file_store.store("data/sales.csv", b"region,total\nEMEA,10\n")
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+    tool.run({"file_path": "data/sales.csv", "brief": "Read v1"})
+
+    file_store.store("data/sales.csv", b"region,total\nAPAC,99\n", overwrite=True)
+    second = tool.run({"file_path": "data/sales.csv", "brief": "Read v2"})
+
+    assert second.status == RunnableStatus.SUCCESS
+    assert "APAC" in second.output["content"]
+    assert "EMEA" not in second.output["content"]
+
+
+def test_file_search_tool_ignores_extracted_text_of_an_older_version(file_store, llm_model):
+    file_store.store("data/sales.csv", b"region,total\nEMEA,10\n")
+    FileReadTool(file_store=file_store, llm=llm_model).run({"file_path": "data/sales.csv", "brief": "Read"})
+    file_store.store("data/sales.csv", b"region,total\nAPAC,99\n", overwrite=True)
+    search_tool = FileSearchTool(file_store=file_store)
+
+    current = search_tool.run({"query": "APAC", "file_path": "data/sales.csv", "brief": "Search"})
+    stale = search_tool.run({"query": "EMEA", "file_path": "data/sales.csv", "brief": "Search stale"})
+
+    assert current.output["content"]["total_matches"] == 1
+    assert stale.output["content"]["total_matches"] == 0
+
+
+def test_file_list_and_search_do_not_show_extracted_text_caches(file_store, llm_model):
+    """The cache is the read tool's own bookkeeping: listing it, or counting a match in it twice, misleads the model."""
+    file_store.store("data/sales.csv", b"region,total\nEMEA,10\n")
+    FileReadTool(file_store=file_store, llm=llm_model).run({"file_path": "data/sales.csv", "brief": "Read"})
+
+    listing = FileListTool(file_store=file_store).run({"brief": "List", "recursive": True})
+    search = FileSearchTool(file_store=file_store).run({"query": "EMEA", "brief": "Search", "recursive": True})
+
+    assert "data/sales.csv" in listing.output["content"]
+    assert EXTRACTED_TEXT_SUFFIX not in listing.output["content"]
+    assert search.output["content"]["total_matches"] == 1
+
+
+def test_file_search_tool_searches_a_cache_named_by_the_read_hint_without_its_header(file_store, llm_model):
+    file_store.store("data/sales.csv", b"region,total\nEMEA,10\n")
+    FileReadTool(file_store=file_store, llm=llm_model).run({"file_path": "data/sales.csv", "brief": "Read"})
+
+    search = FileSearchTool(file_store=file_store).run(
+        {"query": "[0-9]+", "mode": "regex", "file_path": f"data/sales.csv{EXTRACTED_TEXT_SUFFIX}", "brief": "Search"}
+    )
+
+    assert [m["match"] for m in search.output["content"]["matches"]] == ["10"]
+
+
+class MetadataFreeFileStore(InMemoryFileStore):
+    """A store that keeps no metadata, which the FileStore interface allows."""
+
+    def list_files(self, *args, **kwargs):
+        return [info.model_copy(update={"metadata": {}}) for info in super().list_files(*args, **kwargs)]
+
+
+def test_extracted_text_cache_works_on_a_store_that_keeps_no_metadata(llm_model, mocker):
+    """A conversion can be an LLM call (images), so a cache that never validates costs one per read."""
+    file_store = MetadataFreeFileStore()
+    file_store.store("data/sales.csv", b"region,total\nEMEA,10\n")
+    read_tool = FileReadTool(file_store=file_store, llm=llm_model)
+    conversions = mocker.spy(read_tool, "_process_file_with_converter")
+
+    read_tool.run({"file_path": "data/sales.csv", "brief": "Read"})
+    read_tool.run({"file_path": "data/sales.csv", "brief": "Read again"})
+    file_store.store("data/sales.csv", b"region,total\nAPAC,99\n", overwrite=True)
+    after_write = read_tool.run({"file_path": "data/sales.csv", "brief": "Read the new version"})
+
+    assert conversions.call_count == 2
+    assert "APAC" in after_write.output["content"] and "EMEA" not in after_write.output["content"]
+
+
+def test_a_file_named_like_a_cache_without_its_source_stays_visible(file_store):
+    file_store.store("exports/notes.extracted.txt", b"my notes")
+
+    listing = FileListTool(file_store=file_store).run({"brief": "List", "recursive": True})
+
+    assert "exports/notes.extracted.txt" in listing.output["content"]
+
+
+def test_file_search_tool_says_which_files_it_did_not_scan(file_store):
+    """Past max_files the search stops; "no matches" alone would tell the model the text does not exist."""
+    for index in range(25):
+        file_store.store(f"logs/{index:02d}.log", b"NEEDLE" if index == 24 else b"hay")
+
+    result = FileSearchTool(file_store=file_store).run({"query": "NEEDLE", "brief": "Search", "recursive": True})
+
+    content = result.output["content"]
+    assert content["files_scanned"] == 20
+    assert content["files_not_scanned"] == 5
+    assert "5 more file(s) were not searched" in content["message"]
+
+
+@pytest.mark.parametrize(
+    "edits",
+    [
+        '[{"find": "x = 1", "replace": "x = 2"}]',
+        {"find": "x = 1", "replace": "x = 2"},
+        '{"find": "x = 1", "replace": "x = 2"}',
+        '[{"find": "x = 1\n", "replace": "x = 2\n"}]',
+    ],
+    ids=["json-string-list", "single-object", "json-string-object", "json-string-with-raw-newlines"],
+)
+def test_edit_accepts_edits_sent_as_a_json_string_or_a_single_object(file_store, edits):
+    """Models often send the list encoded as a string, or one edit without the list around it."""
+    file_store.store("app.py", b"x = 1\n")
+
+    result = FileWriteTool(file_store=file_store).run(
+        {"file_path": "app.py", "action": "edit", "edits": edits, "brief": "Edit"}
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert file_store.retrieve("app.py") == b"x = 2\n"

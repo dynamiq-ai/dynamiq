@@ -1,3 +1,4 @@
+import io
 from typing import Any, Callable, ClassVar, Literal
 from uuid import uuid4
 
@@ -24,6 +25,11 @@ def _failure_reason(result: RunnableResult) -> str:
     if result.error and result.error.failed_nodes:
         return "; ".join(f"{node.name or node.id}: {node.error_message}" for node in result.error.failed_nodes)
     return result.error.message if result.error else "unknown error"
+
+
+def _holds_files(value: Any) -> bool:
+    items = value if isinstance(value, (list, tuple)) else [value]
+    return any(isinstance(item, io.IOBase) for item in items)
 
 
 class SubWorkflowInputSchema(BaseModel):
@@ -88,7 +94,10 @@ class SubWorkflow(Node):
         if self.flow.id in active_flows:
             raise ValueError(f"Sub-workflow '{self.name}': flow '{self.flow.id}' is already running above this node")
 
-        values = input_data.model_dump()
+        # A dump would turn a file into an iterator over its lines, so files go to the flow as given.
+        raw = dict(input_data)
+        files = {key for key, value in raw.items() if _holds_files(value)}
+        values = input_data.model_dump(exclude=files) | {key: raw[key] for key in files}
         missing = [field.name for field in self.input_fields if field.required and values.get(field.name) is None]
         if missing:
             raise ValueError(f"Sub-workflow '{self.name}': required inputs missing: {', '.join(missing)}")
