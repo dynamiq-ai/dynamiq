@@ -18,7 +18,7 @@ nodes:
       type: dynamiq.nodes.llms.OpenAI
       name: ParentLLM
       connection: openai-conn
-      model: gpt-5.6-luna
+      model: gpt-6-luna
     inference_mode: FUNCTION_CALLING
     response_format:
       type: object

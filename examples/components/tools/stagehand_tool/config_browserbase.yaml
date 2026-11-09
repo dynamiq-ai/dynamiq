@@ -19,7 +19,7 @@ nodes:
             name: anthropic-llm
             type: dynamiq.nodes.llms.Anthropic
             connection: anthropic-conn
-            model: claude-sonnet-5
+            model: claude-sonnet-5-5
             temperature: 0.3
             max_tokens: 8192
             inference_mode: DEFAULT

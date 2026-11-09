@@ -14,7 +14,7 @@ async def start_chat():
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
     anthropic_node = Anthropic(
         name="anthropic",
-        model="claude-3-7-sonnet-20250219",
+        model="claude-sonnet-5-5",
         connection=AnthropicConnection(api_key=ANTHROPIC_API_KEY),
         prompt=Prompt(
             messages=[

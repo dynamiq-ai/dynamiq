@@ -28,7 +28,7 @@ def setup_agent_with_server(path_to_server: str):
         name="OpenAI LLM",
         id="openai-llm",
         connection=OpenAIConnection(id="openai-conn"),
-        model="gpt-4o-mini",
+        model="gpt-6-luna",
         temperature=0.3,
         max_tokens=1000,
     )
@@ -71,7 +71,7 @@ def setup_agent_with_tool(path_to_server: str):
         name="OpenAI LLM",
         id="openai-llm",
         connection=OpenAIConnection(id="openai-conn"),
-        model="gpt-4o-mini",
+        model="gpt-6-luna",
         temperature=0.3,
         max_tokens=1000,
     )

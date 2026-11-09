@@ -19,7 +19,7 @@ nodes:
       id: reader-llm
       type: dynamiq.nodes.llms.OpenAI
       connection: openai-conn
-      model: gpt-4o-mini
+      model: gpt-6-luna
       temperature: 0
       max_tokens: 2048
     tools:
@@ -47,7 +47,7 @@ nodes:
       id: ingest-llm
       type: dynamiq.nodes.llms.OpenAI
       connection: openai-conn
-      model: gpt-4o-mini
+      model: gpt-6-luna
       temperature: 0
       max_tokens: 2048
     tools:
