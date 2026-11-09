@@ -26,7 +26,7 @@ if __name__ == "__main__":
     tool_scrape = ScaleSerpTool(connection=connection_scale_serp)
     e2b = E2B()
     tool_code = E2BInterpreterTool(connection=e2b)
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=0)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-6.1-sol", temperature=0)
 
     storage = InMemoryFileStore()
 

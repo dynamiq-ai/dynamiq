@@ -58,7 +58,7 @@ def create_agent():
     tool_code = E2BInterpreterTool(connection=E2B())
     tool_scrape = FirecrawlTool(connection=Firecrawl())
     tool_search = ScaleSerpTool(connection=ScaleSerp())
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0.001)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-6-luna", temperature=0.001)
 
     agent_software = Agent(
         name="React Agent",
