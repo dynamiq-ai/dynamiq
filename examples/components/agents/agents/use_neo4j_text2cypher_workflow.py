@@ -27,7 +27,7 @@ INGEST_ROLE = (
 
 
 def build_ingest_agent() -> Agent:
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=0, max_tokens=2048)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-6.1-sol", temperature=0, max_tokens=2048)
     connection = Neo4j()
 
     cypher_executor = CypherExecutor(connection=connection, name="cypher_executor")

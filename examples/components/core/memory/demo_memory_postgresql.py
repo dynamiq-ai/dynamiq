@@ -23,7 +23,7 @@ LOGGER = logging.getLogger(__name__)
 WORKFLOW_ID = "postgresql-memory-workflow"
 DEFAULT_GREETING_PROMPT = "Hi, I'm Alex and Lisbon is my favourite city."
 DEFAULT_RECALL_PROMPT = "Do you remember what city I like the most?"
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-6-luna")
 POSTGRES_TABLE_NAME = os.getenv("POSTGRESQL_TABLE", "dynamiq_chat_memory")
 MEMORY_MESSAGE_LIMIT = int(os.getenv("POSTGRESQL_MESSAGE_LIMIT", "50"))
 

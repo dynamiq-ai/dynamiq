@@ -40,7 +40,7 @@ VIDEO_FILE = ""
 # Reads from the GEMINI_API_KEY env var -- never hardcode a real key in this file.
 # export GEMINI_API_KEY=...
 
-MODEL_NAME = "gemini/gemini-3.5-flash"
+MODEL_NAME = "gemini/gemini-3.8-flash"
 
 
 def build_video_input_message() -> VisionMessage:

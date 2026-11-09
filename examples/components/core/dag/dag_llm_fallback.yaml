@@ -18,7 +18,7 @@ nodes:
   openai-primary:
     type: dynamiq.nodes.llms.OpenAI
     name: OpenAI-Primary
-    model: gpt-4o
+    model: gpt-6.1-sol
     connection: openai-conn
     prompt: user-prompt
     error_handling:
