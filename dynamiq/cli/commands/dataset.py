@@ -120,7 +120,7 @@ def download_version(*, api: ApiClient, settings: Settings, dataset_version_id: 
     if not ok(response):
         raise click.ClickException(f"HTTP {response.status_code}: {response.text.strip()[:2000]}")
     if out_path:
-        with open(out_path, "w") as f:
+        with open(out_path, "w", encoding="utf-8") as f:
             f.write(response.text)
         click.echo(f"wrote {out_path}")
     else:
