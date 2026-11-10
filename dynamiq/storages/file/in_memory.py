@@ -134,10 +134,11 @@ class InMemoryFileStore(FileStore):
     ) -> list[FileInfo]:
         """List files in storage."""
         directory = str(directory)
+        prefix = directory if directory.endswith("/") else directory + "/"
         files_list = []
 
         for file_path in self._files.keys():
-            if directory and not file_path.startswith(directory):
+            if directory and not (file_path == directory or file_path.startswith(prefix)):
                 continue
 
             if not recursive:
