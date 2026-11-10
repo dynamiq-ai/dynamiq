@@ -102,21 +102,32 @@ def _run_stream(mode: str, events: list[dict]) -> RunnableResult:
     return asyncio.run(node.run_async(input_data={}, config=config))
 
 
+TOOL_CALL = '{"name": "get_weather", "arguments": {"city": "Paris"}}'
+
+
 @pytest.mark.parametrize("mode", ["sync", "async"])
-def test_a_reply_groq_rejects_while_streaming_it_reaches_the_caller_as_text(mode):
-    """Groq streams the reply's text, then rejects it in an error event that carries the tool call it held back."""
+@pytest.mark.parametrize(
+    "failed_generation",
+    [TOOL_CALL, "Checking the weather. " + TOOL_CALL],
+    ids=["without_the_streamed_text", "with_the_streamed_text"],
+)
+def test_a_reply_groq_rejects_while_streaming_it_reaches_the_caller_as_text(mode, failed_generation):
+    """Groq streams the reply's text, then rejects the reply in an error event that carries the tool call it held back.
+
+    For Qwen, the event's failed_generation starts with the text Groq already streamed.
+    """
     rejection = {
         "message": "attempted to call tool 'get_weather' which was not in request.tools",
         "type": "invalid_request_error",
         "code": "tool_use_failed",
-        "failed_generation": '{"name": "get_weather", "arguments": {"city": "Paris"}}',
+        "failed_generation": failed_generation,
         "status_code": 400,
     }
 
-    result = _run_stream(mode, [_text("Checking the weather. "), {"error": rejection}])
+    result = _run_stream(mode, [_text("Checking "), _text("the weather. "), {"error": rejection}])
 
     assert result.status == RunnableStatus.SUCCESS, result.error
-    assert result.output["content"] == 'Checking the weather. {"name": "get_weather", "arguments": {"city": "Paris"}}'
+    assert result.output["content"] == "Checking the weather. " + TOOL_CALL
 
 
 @pytest.mark.parametrize("mode", ["sync", "async"])

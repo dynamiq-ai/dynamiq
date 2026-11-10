@@ -47,26 +47,30 @@ def _stream_rejection(exc: BaseException | None) -> dict | None:
 class _RejectedReplyAsText:
     """A Groq stream that ends with a reply Groq rejected, as text, instead of raising while it is read.
 
-    Groq streams such a reply's text first and the rejection after it, which carries what was not streamed (a tool
-    call that failed validation) in "failed_generation".
+    Groq streams such a reply's text first and the rejection after it. The rejection's "failed_generation" holds the
+    tool call that failed validation, which was not streamed. For Qwen, it also starts with the text that was.
     """
 
     def __init__(self, stream: Any, llm_name: str):
         self._stream = stream
         self._llm_name = llm_name
+        self._chunks: list = []
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._stream, name)
 
     def __iter__(self):
         try:
-            yield from self._stream
+            for chunk in self._stream:
+                self._chunks.append(chunk)
+                yield chunk
         except Exception as exc:
             yield self._text_chunk(exc)
 
     async def __aiter__(self):
         try:
             async for chunk in self._stream:
+                self._chunks.append(chunk)
                 yield chunk
         except Exception as exc:
             yield self._text_chunk(exc)
@@ -80,7 +84,8 @@ class _RejectedReplyAsText:
         )
         from litellm import ModelResponseStream
 
-        delta = {"content": error["failed_generation"]}
+        streamed = "".join(chunk.choices[0].delta.content or "" for chunk in self._chunks if chunk.choices)
+        delta = {"content": error["failed_generation"].removeprefix(streamed)}
         return ModelResponseStream(
             model=self._stream.model, choices=[{"index": 0, "delta": delta, "finish_reason": "stop"}]
         )
