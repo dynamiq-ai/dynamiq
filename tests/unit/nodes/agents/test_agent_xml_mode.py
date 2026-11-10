@@ -54,8 +54,25 @@ def test_an_answer_whose_thought_mentions_an_action_tag_is_still_the_answer():
     assert result.output["content"] == "It costs $5."
 
 
-def test_answer_tags_inside_a_tool_input_reach_the_tool_intact():
-    query = "Reply only inside <answer></answer> tags."
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "<output><thought>I know it.</thought><action>None</action><answer>It costs $5.</answer></output>",
+        "<output><thought>I know it.</thought><action>\n</action><action_input>\n</action_input>"
+        "<answer>It costs $5.</answer></output>",
+        "No <action> is needed here.\n<output><thought>I know it.</thought><answer>It costs $5.</answer></output>",
+    ],
+    ids=["none", "empty_template_tags", "tag_mentioned_in_prose"],
+)
+def test_an_answer_next_to_an_action_that_names_no_tool_is_still_the_answer(reply):
+    result = run_xml([reply])
+
+    assert TOOL_CALLS == []
+    assert result.output["content"] == "It costs $5."
+
+
+@pytest.mark.parametrize("query", ["Reply only inside <answer></answer> tags.", "Format: <answer>4</answer>"])
+def test_answer_tags_inside_a_tool_input_reach_the_tool_intact(query):
     action = (
         "<output><thought>Ask the search tool.</thought><action>search</action>"
         f'<action_input>{{"query": "{query}"}}</action_input></output>'

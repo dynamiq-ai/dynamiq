@@ -39,11 +39,50 @@ def test_an_action_whose_input_contains_answer_is_run_as_an_action():
     assert result.output["content"] == "Refunds take 30 days."
 
 
-def test_an_action_line_with_no_input_before_the_answer_is_still_the_answer():
-    result, _ = run_default(["Thought: I know this.\nAction: None\nAnswer: 42"])
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "Thought: I know this.\nAction: None\nAnswer: 42",
+        "Thought: I know this.\nAction: None\nAction Input: None\nAnswer: 42",
+        "Thought: I know this.\nAction: N/A\nAction Input: {}\nAnswer: 42",
+        "**Thought:** I know this.\n**Action:** Final Answer\n**Action Input:** N/A\n**Answer:** 42",
+    ],
+    ids=["no_input", "input_none", "empty_input", "bold_labels"],
+)
+def test_an_action_line_that_names_no_tool_before_the_answer_is_still_the_answer(reply):
+    result, _ = run_default([reply])
 
     assert TOOL_CALLS == []
     assert result.output["content"] == "42"
+
+
+def test_a_recap_under_decorated_labels_in_the_thought_does_not_hide_the_action():
+    action = (
+        'Thought: Previous attempt:\n**Action:** search "price"\n**Observation:** no results\nI will try again.\n'
+        'Action: search\nAction Input: {"query": "cost"}'
+    )
+
+    run_default([action, "Thought: Done.\nAnswer: ok"])
+
+    assert TOOL_CALLS == [("search", {"query": "cost", "mode": "slow"})]
+
+
+@pytest.mark.parametrize("label", ["Answer", "Final Answer"])
+def test_a_tool_call_quoted_in_the_answer_is_not_run_and_the_answer_is_kept_whole(label):
+    example = 'Call it like this:\nAction: search\nAction Input: {"query": "x"}\nObservation: result\nThen repeat.'
+
+    result, _ = run_default([f"Thought: I know.\n{label}: {example}"])
+
+    assert TOOL_CALLS == []
+    assert result.output["content"] == example
+
+
+def test_an_answer_line_quoted_in_the_thought_is_not_where_the_answer_starts():
+    reply = "Thought: Trivia.\nquestion: capital of France?\nanswer: Paris\nAnswer: The capital of France is Paris."
+
+    result, _ = run_default([reply])
+
+    assert result.output["content"] == "The capital of France is Paris."
 
 
 def test_answer_text_inside_an_action_input_is_never_streamed_as_the_answer():
@@ -192,3 +231,64 @@ def test_an_observation_the_model_wrote_itself_is_never_streamed():
     answer = "".join(str(content) for step, content in streamed if step == "answer")
     assert "$5" not in answer
     assert "$7" in answer
+
+
+def run_default_streamed(replies: list[str], chunk_size: int):
+    """Run with every reply streamed in chunks; return the result, the requests and the answer text streamed."""
+    agent = build_agent(
+        tools=[SearchTool()],
+        inference_mode=InferenceMode.DEFAULT,
+        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL),
+    )
+    requests: list[list] = []
+    streamed: list[str] = []
+
+    def run(**kwargs):
+        requests.append(list(kwargs["prompt"].messages))
+        reply = replies[min(len(requests) - 1, len(replies) - 1)]
+        serialized = {"group": "llms", "id": agent.llm.id}
+        for callback in kwargs["config"].callbacks:
+            if hasattr(callback, "accumulated_content"):
+                for start in range(0, len(reply), chunk_size):
+                    delta = {"content": reply[start : start + chunk_size]}
+                    callback.on_node_execute_stream(serialized, chunk={"choices": [{"delta": delta}]})
+                callback.on_node_execute_end(serialized, {})
+        result = MagicMock(spec=RunnableResult)
+        result.status = RunnableStatus.SUCCESS
+        result.output = {"content": reply}
+        return result
+
+    def record(self, content, source, step, config=None, **kwargs):
+        if self is agent and step == "answer":
+            streamed.append(str(content))
+        return content
+
+    TOOL_CALLS.clear()
+    with patch.object(agent.llm, "run", side_effect=run), patch.object(Agent, "stream_content", record):
+        result = agent.run(input_data={"input": "What does it cost?"})
+    return result, requests, "".join(streamed)
+
+
+def test_an_answer_under_a_label_the_stream_does_not_read_is_still_streamed():
+    result, _, streamed = run_default_streamed(["### Thought\nDone.\n### Answer\nIt costs $7."], chunk_size=7)
+
+    assert result.output["content"] == "It costs $7."
+    assert streamed == "It costs $7."
+
+
+def test_what_is_kept_of_a_reply_cut_at_an_invented_observation_does_not_depend_on_the_chunks():
+    action = 'Thought: I will search.\nAction: search\nAction Input: {"query": "price"}'
+    invented = "\nObservation: the price is $5\nThought: Done.\nAnswer: $5"
+
+    _, requests, _ = run_default_streamed([action + invented, "Thought: Done.\nAnswer: It costs $7."], chunk_size=7)
+
+    assert [m.content for m in requests[1] if m.role == MessageRole.ASSISTANT] == [action]
+
+
+def test_thought_and_answer_labels_inside_an_action_input_are_not_streamed():
+    action = 'Thought: Save it.\nAction: search\nAction Input: {"query": "Thought: I know.\nAnswer: 42"}'
+
+    result, _, streamed = run_default_streamed([action, "Thought: Done.\nAnswer: Saved."], chunk_size=1)
+
+    assert TOOL_CALLS == [("search", {"query": "Thought: I know.\nAnswer: 42", "mode": "slow"})]
+    assert streamed == "Saved."

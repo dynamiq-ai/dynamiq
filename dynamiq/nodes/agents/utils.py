@@ -3,6 +3,7 @@ import html
 import io
 import json
 import re
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Sequence
 
@@ -119,7 +120,7 @@ def first_xml_output_block(text: str) -> str:
     return text
 
 
-_XML_ACTION_TAG_RE = re.compile(r"<action>")
+_XML_ACTION_RE = re.compile(r"<action>(.*?)(?=</action>|<answer>|</output>|$)", re.DOTALL)
 _XML_ANSWER_ELEMENT_RE = re.compile(r"<answer>.*?(?:</answer>|$)", re.DOTALL)
 _XML_FREE_TEXT_ELEMENT_RE = re.compile(r"<(thought|action_input)>.*?(?:</\1>|$)", re.DOTALL)
 
@@ -133,20 +134,34 @@ def _xml_reply_structure(text: str) -> str:
     return _XML_FREE_TEXT_ELEMENT_RE.sub(lambda match: " " * len(match.group(0)), text)
 
 
-def xml_reply_has_action(text: str) -> bool:
+def _xml_tool_action(structure: str, is_tool: Callable[[str], bool]) -> re.Match | None:
+    """The first ``<action>`` in a reply's structure that names a tool.
+
+    Models fill in ``<action>None</action>``, or leave the template's empty tags, next to their answer, and
+    prose can mention the tag. None of those makes the reply a tool call.
+    """
+    return next((action for action in _XML_ACTION_RE.finditer(structure) if is_tool(action.group(1))), None)
+
+
+def xml_reply_has_action(text: str, is_tool: Callable[[str], bool]) -> bool:
     """Whether an XML reply calls a tool, ignoring tags mentioned inside its thought or tool input."""
-    return bool(_XML_ACTION_TAG_RE.search(_xml_reply_structure(text)))
+    return _xml_tool_action(_xml_reply_structure(text), is_tool) is not None
 
 
-def drop_answer_after_xml_action(text: str) -> str:
-    """The reply without an ``<answer>`` written after its ``<action>`` in the same block.
+def xml_reply_has_answer(text: str) -> bool:
+    """Whether an XML reply has an ``<answer>`` of its own, not one mentioned inside its thought or tool input."""
+    return bool(_XML_ANSWER_ELEMENT_RE.search(_xml_reply_structure(text)))
+
+
+def drop_answer_after_xml_action(text: str, is_tool: Callable[[str], bool]) -> str:
+    """The reply without an ``<answer>`` written after its tool call in the same block.
 
     Such an answer was written before the tool's result existed, so the action is what the step does.
-    A reply whose answer comes first, or that has no action, is returned unchanged, and so are tags
+    A reply whose answer comes first, or that calls no tool, is returned unchanged, and so are tags
     mentioned inside the thought or the tool input.
     """
     structure = _xml_reply_structure(text)
-    action = _XML_ACTION_TAG_RE.search(structure)
+    action = _xml_tool_action(structure, is_tool)
     answer = _XML_ANSWER_ELEMENT_RE.search(structure)
     if not action or not answer or answer.start() < action.start():
         return text

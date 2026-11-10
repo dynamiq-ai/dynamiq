@@ -2,13 +2,14 @@
 
 import json
 import re
+from collections.abc import Callable
 
 from dynamiq.nodes.agents.exceptions import ActionParsingException
 from dynamiq.utils.logger import logger
 
 _ACTION_LABEL_RE = re.compile(r"^[ \t]*Action:", re.MULTILINE)
 _ACTION_INPUT_LABEL_RE = re.compile(r"^[ \t]*Action Input:", re.MULTILINE)
-_ANSWER_LABEL_RE = re.compile(r"^[ \t]*Answer:", re.MULTILINE)
+_ANSWER_LABEL_RE = re.compile(r"^[ \t]*(?:Final )?Answer:", re.MULTILINE)
 _OBSERVATION_LABEL_RE = re.compile(r"^[ \t]*Observation:", re.MULTILINE)
 _LABELS = ("Thought", "Action Input", "Action", "Final Answer", "Answer", "Output Files", "Observation")
 _BODY_LABELS = ("Action Input", "Final Answer", "Answer")
@@ -21,13 +22,23 @@ _DECORATED_LABEL_RE = re.compile(
 )
 
 
-def normalize_default_labels(output: str) -> str:
+def _action_name(text: str) -> str:
+    """The action named by the text between an ``Action:`` label and its ``Action Input:``: its first line."""
+    return text.strip().split("\n", 1)[0].strip()
+
+
+def normalize_default_labels(output: str, is_tool: Callable[[str], bool]) -> str:
     """``output`` with its Thought/Action/Action Input/Answer labels in the plain form the parser reads.
 
-    Text after the first Action Input or Answer label is the tool's input or the answer, so labels in it are
-    left as written.
+    Text after the first Answer label, or after the Action Input of an action that names a tool, is the answer
+    or the tool's input, so labels in it are left as written. A reply that already has an action or an answer
+    under plain labels is returned as it is: a label written any other way in it is part of its reasoning,
+    such as a recap of an earlier step.
     """
+    if _default_action_label(output) or _ANSWER_LABEL_RE.search(output):
+        return output
     body_started = False
+    action_end: int | None = None
 
     def _has_later_action_input(start: int) -> bool:
         return any(
@@ -36,7 +47,7 @@ def normalize_default_labels(output: str) -> str:
         )
 
     def plain(match: re.Match) -> str:
-        nonlocal body_started
+        nonlocal body_started, action_end
         if body_started:
             return match.group(0)
         is_heading = match.group(2) is not None
@@ -47,54 +58,70 @@ def normalize_default_labels(output: str) -> str:
         # an answer only when no tool input follows it.
         if name in ("Answer", "Final Answer") and match.group(0) != written and _has_later_action_input(match.end()):
             return match.group(0)
-        body_started = name in _BODY_LABELS
+        if name == "Action":
+            action_end = match.end()
+        elif name == "Action Input":
+            # After "Action: None" the model goes on to its answer, so its labels are still read.
+            body_started = action_end is None or is_tool(_action_name(output[action_end : match.start()]))
+        else:
+            body_started = name in _BODY_LABELS
         return written
 
     return _DECORATED_LABEL_RE.sub(plain, output)
 
 
-def _default_action_label(output: str) -> re.Match | None:
-    """The reply's ``Action:`` label when an ``Action Input:`` follows it, which makes it a tool call.
+def _default_action_label(output: str, is_tool: Callable[[str], bool] | None = None) -> re.Match | None:
+    """The ``Action:`` label that the reply's first ``Action Input:`` belongs to, the last one before it.
 
-    Models write ``Action: None`` or ``Action: Final Answer`` before their answer; with no input to
-    run, that line does not make the reply an action.
+    Given ``is_tool``, the label counts only if it names a tool. Models write ``Action: None`` or
+    ``Action: Final Answer`` before their answer, with or without an input line, and such a line does not
+    make the reply a tool call.
     """
-    action = _ACTION_LABEL_RE.search(output)
-    return action if action and _ACTION_INPUT_LABEL_RE.search(output, action.end()) else None
+    action_input = _ACTION_INPUT_LABEL_RE.search(output)
+    actions = list(_ACTION_LABEL_RE.finditer(output, 0, action_input.start())) if action_input else []
+    if not actions:
+        return None
+    named = _action_name(output[actions[-1].end() : action_input.start()])
+    return actions[-1] if is_tool is None or is_tool(named) else None
 
 
-def has_default_action_input(output: str) -> bool:
-    """Whether a DEFAULT-mode reply has reached an ``Action Input:`` label, after which text is the tool's input."""
-    return _default_action_label(output) is not None
+def _default_tool_call(output: str, is_tool: Callable[[str], bool]) -> re.Match | None:
+    """The ``Action:`` label of a reply that calls a tool, which an answer written before it does not."""
+    action = _default_action_label(output, is_tool)
+    answer = _ANSWER_LABEL_RE.search(output)
+    return None if action and answer and answer.start() < action.start() else action
 
 
-def is_default_final_answer(output: str) -> bool:
+def has_default_action_input(output: str, is_tool: Callable[[str], bool]) -> bool:
+    """Whether a DEFAULT-mode reply has reached a tool call's ``Action Input:``, after which text is its input."""
+    return _default_tool_call(output, is_tool) is not None
+
+
+def is_default_final_answer(output: str, is_tool: Callable[[str], bool]) -> bool:
     """Whether a DEFAULT-mode reply is a final answer rather than an action.
 
-    An ``Answer:`` label counts only when no tool call (an ``Action:`` with an ``Action Input:``) comes
-    before it, so a tool input that contains the text "Answer:" (a FAQ, a test fixture) is still run as
-    an action. A reply with neither label at the start of a line falls back to looking for "Answer:"
-    anywhere, as before.
+    An ``Answer:`` label counts only when no tool call (an ``Action:`` that names a tool, with an
+    ``Action Input:``) comes before it, so a tool input that contains the text "Answer:" (a FAQ, a test
+    fixture) is still run as an action. A reply with neither an answer label nor an action falls back to
+    looking for "Answer:" anywhere, as before.
     """
-    answer = _ANSWER_LABEL_RE.search(output)
-    action = _default_action_label(output)
-    if answer and action:
-        return answer.start() < action.start()
-    if answer or action:
-        return bool(answer)
-    return "Answer:" in output
+    if _default_tool_call(output, is_tool):
+        return False
+    if _ANSWER_LABEL_RE.search(output):
+        return True
+    return not _default_action_label(output) and "Answer:" in output
 
 
-def cut_default_reply_at_observation(output: str) -> str:
-    """The reply up to an ``Observation:`` the model wrote after its action, which it must not write.
+def cut_default_reply_at_observation(output: str, is_tool: Callable[[str], bool]) -> str:
+    """The reply up to an ``Observation:`` the model wrote after its tool call, which it must not write.
 
     ``Observation:`` is the DEFAULT mode's stop sequence, but reasoning models ignore stop sequences and
     go on to invent the tool result and a final answer.
     """
-    action = _default_action_label(output)
+    action = _default_tool_call(output, is_tool)
     if not action:
         return output
-    observation = _OBSERVATION_LABEL_RE.search(output, action.end())
+    observation = _OBSERVATION_LABEL_RE.search(output, _ACTION_INPUT_LABEL_RE.search(output, action.end()).end())
     return output[: observation.start()].rstrip() if observation else output
 
 

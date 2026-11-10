@@ -586,9 +586,19 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             from dynamiq.nodes.agents.components.parser import cut_default_reply_at_observation
 
             candidate = self.accumulated_content + text_delta
-            cut = cut_default_reply_at_observation(candidate)
+            # Only this delta can complete the label, so only then is the whole reply read again.
+            label_window = candidate[max(0, len(self.accumulated_content) - len("Observation:")) :]
+            cut = candidate
+            if "Observation:" in label_window:
+                cut = cut_default_reply_at_observation(candidate, self.agent._is_tool_action)
             if cut != candidate:
                 self._default_turn_complete = True
+                # The start of the label, and the line break before it, arrived in earlier chunks.
+                already_taken = len(self.accumulated_content) - len(cut)
+                if already_taken > 0:
+                    self.accumulated_content = cut
+                    self._buffer = self._buffer[: max(0, len(self._buffer) - already_taken)]
+                    return
                 text_delta = cut[len(self.accumulated_content) :]
                 if not text_delta:
                     return
@@ -916,6 +926,10 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             **(self.kwargs | {"loop_num": self.loop_num}),
         )
 
+    def _reply_before(self, buffer_index: int) -> str:
+        """The reply up to an index of the buffer, which holds the end of the reply."""
+        return self.accumulated_content[: len(self.accumulated_content) - len(self._buffer) + buffer_index]
+
     def _process_default_mode(self, final_answer_only: bool) -> None:
         # Local import: dynamiq.nodes.agents imports this module.
         from dynamiq.nodes.agents.components.parser import has_default_action_input
@@ -924,9 +938,13 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             start = self._state_last_emit_index
             idx_thought = self._buffer.find(DefaultModeTag.THOUGHT, start) if not final_answer_only else -1
             idx_answer = self._buffer.find(DefaultModeTag.ANSWER, start)
-            if idx_answer != -1 and has_default_action_input(self._buffer[:idx_answer]):
-                # Past "Action Input:" the text is the tool's input (a FAQ, a fixture), not the answer.
-                idx_answer = -1
+            first_label = min((index for index in (idx_thought, idx_answer) if index != -1), default=-1)
+            if first_label != -1 and has_default_action_input(
+                self._reply_before(first_label), self.agent._is_tool_action
+            ):
+                # Past a tool call's "Action Input:" the text is the tool's input (a FAQ, a fixture), not a
+                # thought or the answer.
+                idx_thought = idx_answer = -1
 
             if not final_answer_only and idx_thought != -1 and (idx_answer == -1 or idx_thought < idx_answer):
                 self._current_state = StreamingState.REASONING
@@ -1022,11 +1040,11 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                 self._state_start_index = idx_action_input + len(XMLModeTag.OPEN_ACTION_INPUT)
                 self._state_last_emit_index = self._state_start_index
             elif idx_answer != -1 and not xml_reply_has_action(
-                self.accumulated_content[: len(self.accumulated_content) - len(self._buffer) + idx_answer]
+                self._reply_before(idx_answer), self.agent._is_tool_action
             ):
-                # An answer after an action in the same reply predates the tool's result and is dropped
+                # An answer after a tool call in the same reply predates the tool's result and is dropped
                 # (drop_answer_after_xml_action), so it is not streamed either. The answer's own text may mention
-                # <action>, so only the reply before it is checked: the buffer is the end of the reply.
+                # <action>, so only the reply before it is checked.
                 self._current_state = StreamingState.ANSWER
                 self._answer_started = True
                 self._state_start_index = idx_answer + len(XMLModeTag.OPEN_ANSWER)

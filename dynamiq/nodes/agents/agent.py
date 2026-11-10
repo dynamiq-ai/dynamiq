@@ -33,6 +33,8 @@ from dynamiq.nodes.agents.utils import (
     drop_answer_after_xml_action,
     extract_message_text,
     first_xml_output_block,
+    xml_reply_has_action,
+    xml_reply_has_answer,
 )
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.schema_utils import strip_inaccessible_fields
@@ -996,7 +998,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
             return None, None, None
 
-        if parser.is_default_final_answer(llm_generated_output):
+        if parser.is_default_final_answer(llm_generated_output, self._is_tool_action):
             thought, final_answer, output_files_raw = parser.extract_default_final_answer(llm_generated_output)
             self._requested_output_files = self._parse_output_files_csv(output_files_raw)
             self.log_final_output(thought, final_answer, loop_num)
@@ -1195,6 +1197,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
             return None, None, None
 
         try:
+            if xml_reply_has_action(llm_generated_output, self._is_tool_action) and not xml_reply_has_answer(
+                llm_generated_output
+            ):
+                # The only <answer> in a reply that calls a tool is text inside its thought or its tool input.
+                raise TagNotFoundError("The reply has no <answer> of its own.")
             parsed_data = XMLParser.parse(
                 llm_generated_output,
                 required_tags=["answer"],
@@ -1246,6 +1253,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 "The previous response was empty or invalid. " "Please provide the required XML tags.",
                 recoverable=True,
             )
+
+    def _is_tool_action(self, action: str) -> bool:
+        """Whether the action a reply names is one of the agent's tools, as its parsing resolves it."""
+        name = self._unnest_xml_action(action.strip(), None)[0]
+        return bool(self.tool_by_names.get(self.sanitize_tool_name(name)))
 
     def _unnest_xml_action(self, action: str, action_input: Any) -> tuple[str, Any]:
         """Read the tool from an action some models (e.g. Amazon Nova) wrap in extra elements.
@@ -1990,8 +2002,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
         else:
             llm_generated_output = llm_result.output.get("content", "")
         if self.inference_mode == InferenceMode.DEFAULT and llm_generated_output:
-            llm_generated_output = parser.normalize_default_labels(llm_generated_output)
-            cut = parser.cut_default_reply_at_observation(llm_generated_output)
+            llm_generated_output = parser.normalize_default_labels(llm_generated_output, self._is_tool_action)
+            cut = parser.cut_default_reply_at_observation(llm_generated_output, self._is_tool_action)
             if cut != llm_generated_output:
                 logger.warning(
                     f"Agent {self.name} - {self.id}: model wrote its own Observation after the action; "
@@ -2007,7 +2019,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     "keeping only the first block and dropping the rest."
                 )
                 llm_generated_output = first_block
-            without_answer = drop_answer_after_xml_action(llm_generated_output)
+            without_answer = drop_answer_after_xml_action(llm_generated_output, self._is_tool_action)
             if without_answer != llm_generated_output:
                 logger.warning(
                     f"Agent {self.name} - {self.id}: model wrote an <answer> after its <action>; running the action."
@@ -2052,6 +2064,23 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if result[1] == "final_answer":
             self._resolve_requested_output_files(strict=True)
             final_answer = result[2]
+            if (
+                self.inference_mode == InferenceMode.DEFAULT
+                and streaming_callback
+                and not streaming_callback._answer_started
+                and final_answer
+                and not self._buffers_final_answer()
+            ):
+                # The stream reads labels as the model wrote them, so it carried no answer written under a label
+                # that had to be normalized first, such as "### Answer" or "answer:".
+                live_filter = self._live_answer_filter()
+                self.stream_content(
+                    content=live_filter.mask_all(final_answer) if live_filter else final_answer,
+                    source=self.name,
+                    step="answer",
+                    config=config,
+                    **kwargs,
+                )
             if self.response_format is not None:
                 final_answer = self._coerce_to_response_format(final_answer)
             return ReactStep(kind="final_answer", final_answer=final_answer)
