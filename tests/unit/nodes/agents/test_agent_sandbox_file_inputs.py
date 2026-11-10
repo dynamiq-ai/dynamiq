@@ -73,15 +73,63 @@ def test_a_missing_file_is_reported_to_the_model_which_can_fix_the_path(mode):
     assert uploader.uploaded == ["report.csv"]
 
 
+class FileNotFoundException(Exception):
+    """Named as the error E2B raises for a path that does not exist."""
+
+
+class DaytonaError(Exception):
+    """Named as the one error Daytona raises for a download that failed, whatever the reason."""
+
+
+class SdkSandbox(FileSandbox):
+    """A sandbox whose reads fail with an SDK's error."""
+
+    error: Any = None
+
+    def retrieve(self, file_path: str) -> bytes:
+        if file_path not in self.files:
+            raise self.error
+        return self.files[file_path]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        FileNotFoundException("path '/home/user/reprot.csv' does not exist"),
+        DaytonaError('Failed to download file: {"statusCode":404,"message":"file not found","code":"FILE_NOT_FOUND"}'),
+    ],
+    ids=["e2b", "daytona"],
+)
+def test_a_missing_file_is_recognised_as_the_sandbox_sdks_report_it(error):
+    sandbox = SdkSandbox(files={"/home/user/report.csv": b"a,b\n"}, error=error)
+    uploader = Uploader()
+    agent = build_agent(tools=[uploader], sandbox=SandboxConfig(enabled=True, backend=sandbox))
+    steps = [
+        tool_step("uploader", files=["/home/user/reprot.csv"]),
+        tool_step("uploader", files=["/home/user/report.csv"]),
+        final_step("uploaded"),
+    ]
+
+    result, _ = run_scripted(agent, InferenceMode.FUNCTION_CALLING, steps)
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert uploader.uploaded == ["report.csv"]
+
+
 class ExpiredSandbox(FileSandbox):
     def retrieve(self, file_path: str) -> bytes:
         raise SandboxConnectionError("sbx-1")
 
 
-def test_a_sandbox_that_cannot_be_reached_ends_the_run_instead_of_blaming_the_path():
+@pytest.mark.parametrize(
+    "sandbox",
+    [ExpiredSandbox(), SdkSandbox(error=DaytonaError("Failed to download file: sandbox is not started"))],
+    ids=["expired", "daytona_other_error"],
+)
+def test_a_sandbox_that_cannot_be_reached_ends_the_run_instead_of_blaming_the_path(sandbox):
     # The model cannot fix an expired sandbox by passing another path; telling it to would only loop.
     uploader = Uploader()
-    agent = build_agent(tools=[uploader], sandbox=SandboxConfig(enabled=True, backend=ExpiredSandbox()))
+    agent = build_agent(tools=[uploader], sandbox=SandboxConfig(enabled=True, backend=sandbox))
     steps = [tool_step("uploader", files=["/home/user/report.csv"]), final_step("uploaded")]
 
     result, recorder = run_scripted(agent, InferenceMode.FUNCTION_CALLING, steps)

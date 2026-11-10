@@ -249,7 +249,11 @@ class StreamChunk(BaseModel):
 
 
 # Errors the sandbox SDKs raise for a path that does not exist, matched by name since the SDKs are optional.
-_MISSING_FILE_ERROR_NAMES = frozenset({"NotFoundException", "DaytonaNotFoundError"})
+# E2B raises FileNotFoundException, a NotFoundException. Its sibling SandboxNotFoundException is a sandbox
+# that is gone, so the family is not matched as a whole.
+_MISSING_FILE_ERROR_NAMES = frozenset({"FileNotFoundException", "NotFoundException", "DaytonaNotFoundError"})
+# Daytona raises its base DaytonaError for a failed download, with this code from the sandbox's daemon in it.
+_DAYTONA_MISSING_FILE_CODE = "FILE_NOT_FOUND"
 
 
 def _is_missing_file_error(error: BaseException) -> bool:
@@ -258,7 +262,12 @@ def _is_missing_file_error(error: BaseException) -> bool:
     The model can correct a wrong path; an expired sandbox or a network failure it cannot, so those
     still end the run instead of sending the model looking for another path.
     """
-    return isinstance(error, (FileNotFoundError, KeyError)) or type(error).__name__ in _MISSING_FILE_ERROR_NAMES
+    name = type(error).__name__
+    return (
+        isinstance(error, (FileNotFoundError, KeyError))
+        or name in _MISSING_FILE_ERROR_NAMES
+        or (name == "DaytonaError" and _DAYTONA_MISSING_FILE_CODE in str(error))
+    )
 
 
 class AgentStatus(str, Enum):
