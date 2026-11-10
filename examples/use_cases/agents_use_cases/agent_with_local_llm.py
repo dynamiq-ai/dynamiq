@@ -11,7 +11,7 @@ if __name__ == "__main__":
     ollama_endpoint = "http://localhost:11434"
 
     llm = OllamaLLM(
-        model="qwen2.5-coder:32b",
+        model="qwen3-coder:30b",
         connection=Ollama(url=ollama_endpoint),
         temperature=0.1,
         max_tokens=1000,

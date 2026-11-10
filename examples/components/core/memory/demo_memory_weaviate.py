@@ -9,7 +9,7 @@ from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
 from dynamiq.nodes.llms import OpenAI as OpenAI_LLM
 
-OPENAI_MODEL = "gpt-4o-mini"
+OPENAI_MODEL = "gpt-6-luna"
 OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
 
 WEAVIATE_INDEX_NAME = "default"

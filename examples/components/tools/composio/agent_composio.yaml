@@ -18,7 +18,7 @@ nodes:
       id: mailer-llm
       type: dynamiq.nodes.llms.OpenAI
       connection: openai-conn
-      model: gpt-4o-mini
+      model: gpt-6-luna
     tools:
       - id: composio-tool
         type: dynamiq.nodes.tools.composio.Composio

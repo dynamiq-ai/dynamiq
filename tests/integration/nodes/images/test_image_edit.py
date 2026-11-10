@@ -1,7 +1,11 @@
 import io
+import json
+import re
 import uuid
 
+import httpx
 import pytest
+from litellm.llms.custom_httpx.http_handler import HTTPHandler
 
 from dynamiq import Workflow, connections
 from dynamiq.callbacks import TracingCallbackHandler
@@ -453,3 +457,83 @@ def test_image_edit_default_model(mock_image_file, mock_image_edit_executor, moc
     assert response.status == RunnableStatus.SUCCESS
     call_kwargs = mock_image_edit_executor.call_args[1]
     assert call_kwargs["model"] == "gpt-image-2"
+
+
+OPENAI_IMAGE_EDIT_FIELDS = frozenset(
+    {
+        "background",
+        "image",
+        "image[]",
+        "input_fidelity",
+        "mask",
+        "model",
+        "n",
+        "output_compression",
+        "output_format",
+        "partial_images",
+        "prompt",
+        "quality",
+        "response_format",
+        "size",
+        "stream",
+        "user",
+    }
+)
+
+
+def _http_client(handler) -> HTTPHandler:
+    return HTTPHandler(client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+
+def test_image_edit_sends_only_fields_the_openai_api_accepts(mock_image_file, mock_image_b64):
+    """The OpenAI images/edits endpoint rejects any form field it does not know with a 400."""
+    requests = []
+
+    def openai_images_edits(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        fields = {name.decode() for name in re.findall(rb'\bname="([^"]+)"', request.read())}
+        unknown = sorted(fields - OPENAI_IMAGE_EDIT_FIELDS)
+        if unknown:
+            error = {
+                "message": f"Unknown parameter: '{unknown[0]}'.",
+                "type": "invalid_request_error",
+                "param": unknown[0],
+                "code": "unknown_parameter",
+            }
+            return httpx.Response(400, json={"error": error})
+        return httpx.Response(200, json={"created": CREATION_TIMESTAMP, "data": [{"b64_json": mock_image_b64}]})
+
+    node = ImageEdit(
+        connection=connections.OpenAI(api_key="test-key"),
+        client=_http_client(openai_images_edits),
+        model="gpt-image-2",
+    )
+
+    result = node.run(input_data={"prompt": "Add a red hat", "files": mock_image_file})
+
+    assert result.status == RunnableStatus.SUCCESS, result.error
+    assert len(result.output["files"]) == 1
+    assert [request.url.path for request in requests] == ["/v1/images/edits"]
+
+
+def test_image_edit_drops_a_mask_openrouter_does_not_support(mock_image_file, mock_mask_file, mock_image_b64):
+    bodies = []
+
+    def openrouter_chat_completions(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.read()))
+        image = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{mock_image_b64}"}}
+        return httpx.Response(200, json={"choices": [{"message": {"role": "assistant", "images": [image]}}]})
+
+    node = ImageEdit(
+        connection=connections.OpenRouter(api_key="test-key"),
+        client=_http_client(openrouter_chat_completions),
+        model="openrouter/google/gemini-3.1-flash-image",
+    )
+
+    result = node.run(input_data={"prompt": "Add a red hat", "files": mock_image_file, "mask": mock_mask_file})
+
+    assert result.status == RunnableStatus.SUCCESS, result.error
+    assert len(result.output["files"]) == 1
+    assert len(bodies) == 1
+    assert "mask" not in bodies[0]
+    assert "drop_params" not in bodies[0]

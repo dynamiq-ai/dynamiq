@@ -118,7 +118,7 @@ def build_workflow() -> Workflow:
     # (resolution races otherwise). See parallel_kg_extraction.py for fanning out multiple extractors.
     entity_extractor = KnowledgeGraphEntityExtractor(
         id="entity_extractor",
-        llm=OpenAI(connection=openai_connection, model="gpt-4o-mini", temperature=0.0, max_tokens=4000),
+        llm=OpenAI(connection=openai_connection, model="gpt-6-luna", temperature=0.0, max_tokens=4000),
         ontology=ONTOLOGY,
         input_transformer=InputTransformer(selector={"documents": "$.documents"}),
     )
@@ -161,7 +161,7 @@ def demonstrate_retrieval() -> None:
     )
     graph_retriever = KnowledgeGraphRetriever(
         connection=Neo4jConnection(),
-        llm=OpenAI(connection=openai_connection, model="gpt-4o-mini", temperature=0),
+        llm=OpenAI(connection=openai_connection, model="gpt-6-luna", temperature=0),
         ontology=ONTOLOGY,
         document_retriever=QdrantDocumentRetriever(vector_store=vector_store),  # grounds facts with source docs
         top_k=20,

@@ -16,11 +16,13 @@ def read_json_arg(value: str):
     """Accept inline JSON or @path/to/file.json."""
     try:
         if value.startswith("@"):
-            with open(value[1:]) as f:
+            with open(value[1:], encoding="utf-8") as f:
                 return json.load(f)
         return json.loads(value)
     except FileNotFoundError:
         raise click.ClickException(f"file not found: {value[1:]}")
+    except UnicodeDecodeError as e:
+        raise click.ClickException(f"file is not valid UTF-8: {value[1:]}: {e}")
     except json.JSONDecodeError as e:
         raise click.ClickException(f"invalid JSON in {value[:60]}: {e}")
 

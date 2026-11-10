@@ -66,7 +66,7 @@ def create_agent():
         Agent: A configured Dynamiq Agent ready to run.
     """
     tool = E2BInterpreterTool(connection=E2B())
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0.001)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-6-luna", temperature=0.001)
 
     agent_software = Agent(
         name="React Agent",

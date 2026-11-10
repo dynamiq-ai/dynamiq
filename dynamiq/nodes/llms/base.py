@@ -208,7 +208,9 @@ _SAMPLING_UNSUPPORTED_MIN_VERSION: dict[str, tuple[int, int]] = {
 }
 
 # Matches `claude-<family>[-<major>[-<minor>]]` anywhere in a model id
-_CLAUDE_MODEL_RE = re.compile(r"claude-(opus|sonnet|haiku|fable|mythos)(?:-(\d{1,2})(?!\d)(?:-(\d{1,2})(?!\d))?)?")
+# Dashed versions ("claude-sonnet-5-5") as Anthropic, Bedrock and Vertex name them, and dotted ones
+# ("claude-sonnet-5.5") as OpenRouter does.
+_CLAUDE_MODEL_RE = re.compile(r"claude-(opus|sonnet|haiku|fable|mythos)(?:-(\d{1,2})(?!\d)(?:[-.](\d{1,2})(?!\d))?)?")
 
 _SAMPLING_UNSUPPORTED_INDICATORS: tuple[str, ...] = (
     "not permitted",
@@ -226,6 +228,18 @@ _STOP_PARAM_RE = re.compile(r"(?<![a-z_])stop(?:[_ ]?sequences?)?(?![a-z])")
 
 # "only `"auto"` is supported for `tool_choice`": the provider naming the one value it accepts.
 _ONLY_AUTO_TOOL_CHOICE_RE = re.compile(r"only\W*auto\b")
+
+# How providers reject a forced tool call while thinking is on: Anthropic ("Thinking may not be enabled
+# when tool_choice forces tool use.") and Kimi ("tool_choice 'specified' is incompatible with thinking").
+_FORCED_TOOL_CHOICE_THINKING_INDICATORS: tuple[str, ...] = ("forces tool use", "incompatible with thinking")
+
+# Claude families that reject a forced tool_choice ("any" or a named tool) at or above a (major, minor) version.
+_FORCED_TOOL_CHOICE_UNSUPPORTED_MIN_VERSION: dict[str, tuple[int, int]] = {
+    "opus": (5, 5),
+    "sonnet": (5, 5),
+    "fable": (5, 1),
+    "mythos": (5, 1),
+}
 
 
 def _chunk_data(chunk: Any) -> dict:
@@ -636,6 +650,9 @@ class BaseLLM(ConnectionNode):
             total_tokens_cost_usd = prompt_tokens_cost_usd + completion_tokens_cost_usd
         except Exception:
             prompt_tokens_cost_usd, completion_tokens_cost_usd, total_tokens_cost_usd = None, None, None
+            # A model missing from litellm's price map, as most OpenRouter models are, may still have its cost
+            # reported by the provider.
+            total_tokens_cost_usd = cls._reported_cost(completion, usage)
 
         return BaseLLMUsageData(
             prompt_tokens=prompt_tokens,
@@ -647,6 +664,15 @@ class BaseLLM(ConnectionNode):
             cache_read_input_tokens=cache_read_input_tokens,
             cache_creation_input_tokens=cache_creation_input_tokens,
         )
+
+    @classmethod
+    def _reported_cost(cls, completion: "ModelResponse", usage: Any) -> float | None:
+        """The call's cost in USD as the provider reported it, or None when it reported none."""
+        hidden = getattr(completion, "_hidden_params", None) or {}
+        for cost in (cls._usage_value(usage, "cost", None), hidden.get("response_cost")):
+            if isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0:
+                return float(cost)
+        return None
 
     def _handle_completion_response(
         self,
@@ -681,6 +707,11 @@ class BaseLLM(ConnectionNode):
                     call["function"]["arguments"] = raw_args
                 tool_calls_parsed.append(call)
             result["tool_calls"] = tool_calls_parsed
+
+        # Only when the reply was cut off at max_tokens, so every other output keeps its shape. A caller
+        # must not act on a tool call cut short: its arguments may still parse as valid but partial JSON.
+        if response.choices[0].finish_reason == "length":
+            result["finish_reason"] = "length"
 
         usage_data = self.get_usage_data(model=self.model, completion=response).model_dump()
         self.run_on_node_execute_run(callbacks=config.callbacks, usage_data=usage_data, **kwargs)
@@ -882,6 +913,24 @@ class BaseLLM(ConnectionNode):
         if cutoff is None or major is None:
             return False
         return (int(major), int(minor or 0)) >= cutoff
+
+    def supports_forced_tool_choice(self) -> bool:
+        """Whether the model accepts a ``tool_choice`` that forces a call (``"required"`` or a named tool).
+
+        False for the Claude models that reject one (Opus and Sonnet from 5.5, Fable and Mythos from 5.1)
+        and for any Claude model with thinking enabled, where forcing a call fails or switches thinking
+        off. A model that rejects it without being recognized here is caught by ``_recover_completion_params``.
+        """
+        match = _CLAUDE_MODEL_RE.search(self.model.lower())
+        if not match:
+            return True
+        if self.thinking_enabled:
+            return False
+        family, major, minor = match.group(1), match.group(2), match.group(3)
+        cutoff = _FORCED_TOOL_CHOICE_UNSUPPORTED_MIN_VERSION.get(family)
+        if cutoff is None or major is None:
+            return True
+        return (int(major), int(minor or 0)) < cutoff
 
     def _tool_params_to_force(self) -> list[str]:
         """Params to push through litellm's per-model filter so ``tools`` is not dropped.
@@ -1183,7 +1232,11 @@ class BaseLLM(ConnectionNode):
         # "auto", and any other value is a misconfiguration that has to surface.
         tool_choice = common_params.get("tool_choice")
         forces_a_call = tool_choice == "required" or isinstance(tool_choice, dict)
-        rejects_forced_choice = looks_unsupported or bool(_ONLY_AUTO_TOOL_CHOICE_RE.search(msg))
+        rejects_forced_choice = (
+            looks_unsupported
+            or bool(_ONLY_AUTO_TOOL_CHOICE_RE.search(msg))
+            or any(ind in msg for ind in _FORCED_TOOL_CHOICE_THINKING_INDICATORS)
+        )
         if forces_a_call and "tool_choice" in msg and rejects_forced_choice:
             logger.warning(
                 "LLM '%s': model '%s' accepts only tool_choice='auto'; retrying with it.",

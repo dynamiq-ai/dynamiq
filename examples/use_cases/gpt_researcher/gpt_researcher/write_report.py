@@ -78,7 +78,7 @@ def run(input_data):
     generate_report_node = OpenAI(
         id="generate_report_node",
         name="Generate Research Report",
-        model="gpt-4o-mini",
+        model="gpt-6-luna",
         connection=OpenAIConnection(),
         prompt=Prompt(messages=[Message(role="user", content=get_research_report_prompt())]),
         temperature=0.35,
