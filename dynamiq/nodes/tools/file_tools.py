@@ -1,3 +1,4 @@
+import codecs
 import enum
 import hashlib
 import json
@@ -79,6 +80,10 @@ def decode_extracted_text(cache_content: bytes, source_content: bytes) -> str | 
     if not separator or header != expected:
         return None
     return text.decode("utf-8", errors="replace")
+
+
+class _TextNotExtracted(Exception):
+    """A file that is not text has no text to search until the read tool has extracted it from this version of it."""
 
 
 def _line_of(content: str, offset: int) -> int:
@@ -1673,6 +1678,7 @@ class FileSearchTool(Node):
             matches = []
             total_scanned = 0
             missing_files: list[str] = []
+            unread_files: list[str] = []
 
             if input_data.mode == "regex":
                 flags = 0 if input_data.case_sensitive else re.IGNORECASE
@@ -1704,16 +1710,20 @@ class FileSearchTool(Node):
                     missing_files.append(file_path)
                     continue
 
+                try:
+                    file_matches = self._search_file(
+                        file_path=file_path,
+                        query=query if pattern is None else None,
+                        pattern=pattern,
+                        case_sensitive=input_data.case_sensitive,
+                        max_matches=input_data.max_matches_per_file,
+                        context_chars=input_data.context_chars,
+                        max_bytes=input_data.max_file_bytes,
+                    )
+                except _TextNotExtracted as unread:
+                    unread_files.append(str(unread))
+                    continue
                 total_scanned += 1
-                file_matches = self._search_file(
-                    file_path=file_path,
-                    query=query if pattern is None else None,
-                    pattern=pattern,
-                    case_sensitive=input_data.case_sensitive,
-                    max_matches=input_data.max_matches_per_file,
-                    context_chars=input_data.context_chars,
-                    max_bytes=input_data.max_file_bytes,
-                )
                 if file_matches:
                     matches.extend(file_matches)
 
@@ -1724,6 +1734,7 @@ class FileSearchTool(Node):
                 missing_files=missing_files,
                 files_not_scanned=files_not_scanned,
                 max_files=input_data.max_files,
+                unread_files=unread_files,
             )
             result = {
                 "content": {
@@ -1772,6 +1783,7 @@ class FileSearchTool(Node):
         missing_files: list[str],
         files_not_scanned: int = 0,
         max_files: int | None = None,
+        unread_files: list[str] | None = None,
     ) -> str:
         """Build a concise agent-facing status message for search results."""
         parts = []
@@ -1781,8 +1793,16 @@ class FileSearchTool(Node):
             if len(missing_files) > 10:
                 suffix = f", ... and {len(missing_files) - 10} more"
             parts.append(f"File path(s) not found in the file store: {missing}{suffix}.")
+        if unread_files:
+            # Their bytes are not their text: searching them would report that the text is not there.
+            parts.append(
+                f"{len(unread_files)} file(s) are not text and were not searched: {', '.join(unread_files[:10])}"
+                f"{', ...' if len(unread_files) > 10 else ''}. To search one, read it with the file-read tool "
+                "first, giving only file_path, so that its text is extracted."
+            )
         if total_scanned == 0:
-            parts.append("No existing files were scanned.")
+            if not unread_files:
+                parts.append("No existing files were scanned.")
         elif total_matches == 0:
             parts.append(f"No matches found for '{query}' in {total_scanned} scanned file(s).")
         else:
@@ -1870,12 +1890,29 @@ class FileSearchTool(Node):
             logger.warning(f"Tool {self.name} - {self.id}: failed to read {cache_path} for search: {exc}")
         try:
             if self.file_store.exists(file_path):
-                text = self.file_store.retrieve(file_path)[:max_bytes].decode("utf-8", errors="ignore")
+                text = self._own_text(file_path, self.file_store.retrieve(file_path)[:max_bytes])
                 if text:
                     return text, file_path
+        except _TextNotExtracted:
+            raise
         except Exception as exc:
             logger.warning(f"Tool {self.name} - {self.id}: failed to read {file_path} for search: {exc}")
         return None, None
+
+    @staticmethod
+    def _own_text(file_path: str, content: bytes) -> str:
+        """The text of a file that is text itself, by the read tool's rule: valid UTF-8, or a plain-text type.
+
+        Raises:
+            _TextNotExtracted: For any other file, such as a PDF.
+        """
+        try:
+            # Incremental, so that a character cut off at the byte limit is not an error.
+            return codecs.getincrementaldecoder("utf-8")().decode(content)
+        except UnicodeDecodeError:
+            if detect_file_type(BytesIO(content), os.path.basename(file_path)) not in RAW_TEXT_FILE_TYPES:
+                raise _TextNotExtracted(file_path) from None
+            return content.decode("utf-8", errors="ignore")
 
     @staticmethod
     def _build_match_entry(
