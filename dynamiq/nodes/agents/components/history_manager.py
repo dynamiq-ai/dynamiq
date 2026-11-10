@@ -103,18 +103,22 @@ class HistoryManagerMixin:
             )
         return exceeded
 
+    def _fixed_context_tokens(self) -> int:
+        """Tokens of the system prompt and the tool and response schemas, which compaction cannot shorten."""
+        tokens = self.count_context_tokens()
+        system_tokens = token_counter(
+            model=self.llm.model,
+            messages=[m.model_dump(exclude={"metadata"}) for m in self._prompt.messages[: self._history_offset]],
+        )
+        return system_tokens + tokens["tools"] + tokens["response_format"]
+
     def is_fixed_context_over_limit(self) -> bool:
         """Whether the system prompt and the tool and response schemas alone exceed the summarization limit.
 
         Compaction only shortens the conversation, so it cannot get such a request under the limit, and it
         would summarize again on every loop.
         """
-        tokens = self.count_context_tokens()
-        system_tokens = token_counter(
-            model=self.llm.model,
-            messages=[m.model_dump(exclude={"metadata"}) for m in self._prompt.messages[: self._history_offset]],
-        )
-        return self._exceeds_compaction_limit(system_tokens + tokens["tools"] + tokens["response_format"])
+        return self._exceeds_compaction_limit(self._fixed_context_tokens())
 
     def _split_history(
         self,
@@ -141,12 +145,18 @@ class HistoryManagerMixin:
             preserve_count += 1
 
         # What came after the model's last reply (tool results, a new question) it has not read yet, so that is kept
-        # whole with the reply, past max_preserved_tokens if need be: a summary must not stand in for it.
+        # whole with the reply, past max_preserved_tokens if need be: a summary must not stand in for it. Only when
+        # the model's context window cannot hold it, as with several large results at once, is it summarized too.
         last_reply = max(
             (index for index, msg in enumerate(conversation_history) if msg.role == MessageRole.ASSISTANT), default=None
         )
         if last_reply is not None and last_reply < len(conversation_history) - 1:
-            preserve_count = max(preserve_count, len(conversation_history) - last_reply)
+            unread = conversation_history[last_reply:]
+            unread_tokens = token_counter(
+                model=self.llm.model, messages=[msg.model_dump(exclude={"metadata"}) for msg in unread]
+            )
+            if self._fixed_context_tokens() + unread_tokens <= self.llm.get_token_limit():
+                preserve_count = max(preserve_count, len(unread))
 
         if preserve_count > 0:
             to_summarize = conversation_history[:-preserve_count]

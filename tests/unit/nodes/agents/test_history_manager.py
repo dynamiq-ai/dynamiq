@@ -213,6 +213,25 @@ class TestSplitHistory:
         assert to_summarize == []
         assert [m.role for m in to_preserve] == [MessageRole.ASSISTANT, MessageRole.TOOL]
 
+    def test_results_the_models_context_window_cannot_hold_are_summarized(self):
+        """Kept whole, they would make a request the provider rejects."""
+        msgs = [
+            _system(),
+            _user("Find the totals."),
+            _assistant_tc(
+                "Calling: search",
+                tool_calls=[{"id": "c1", "type": "function", "function": {"name": "search", "arguments": "{}"}}],
+            ),
+            _tool_reply("result " * 400, "c1", "search"),
+        ]
+        agent = FakeAgent(messages=msgs, history_offset=2, max_preserved_tokens=50, max_token_context_length=60)
+        agent.llm = FakeLLM(token_limit=300)
+
+        to_summarize, to_preserve = agent._split_history()
+
+        assert [m.role for m in to_summarize] == [MessageRole.ASSISTANT, MessageRole.TOOL]
+        assert to_preserve == []
+
     def test_history_is_not_summarized_whole_when_the_fixed_prompt_alone_is_over_the_limit(self):
         """Summarizing everything cannot help then, and it would repeat on every loop."""
         msgs = [_system(), _user("Hello"), _assistant("Hi there"), _user("How are you?")]
