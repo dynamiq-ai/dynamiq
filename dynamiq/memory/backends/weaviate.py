@@ -313,8 +313,7 @@ class Weaviate(MemoryBackend):
 
         Returns:
             List of matching messages sorted by relevance (if query provided)
-            or potentially unsorted/timestamp-sorted (if only filters provided).
-            Note: Sorting for filter-only results happens in the Memory class if needed.
+            or the most recent matches, oldest first (if only filters provided).
         """
         if self._vector_store is None:
             raise WeaviateMemoryError("Weaviate vector store not initialized.")
@@ -350,8 +349,11 @@ class Weaviate(MemoryBackend):
                     filters=prepared_filters, content_key=self.content_property_name
                 )
                 retrieved_messages = [self._document_to_message(doc) for doc in documents]
+                # filter_documents has no ordering, so truncating it would keep an arbitrary
+                # subset. Keep the most recent messages, oldest first, like get_all and InMemory.search.
+                retrieved_messages.sort(key=lambda msg: msg.metadata.get("timestamp", 0))
                 if effective_limit > 0:
-                    retrieved_messages = retrieved_messages[:effective_limit]
+                    retrieved_messages = retrieved_messages[-effective_limit:]
 
             else:
                 logger.debug(
