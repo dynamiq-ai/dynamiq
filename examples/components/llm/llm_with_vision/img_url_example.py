@@ -32,7 +32,7 @@ def get_prompt():
 def run_openai_img_url(prompt):
     openai_node = llms.OpenAI(
         name="OpenAI Vision Answer Generation",
-        model="gpt-4o-mini",
+        model="gpt-6-luna",
         prompt=prompt,
         connection=OpenAIConnection(),
     )
@@ -51,7 +51,7 @@ def run_gemini(prompt):
 
     gemini_node = llms.Gemini(
         name="Gemini Vision Answer Generation",
-        model="gemini/gemini-1.5-flash",
+        model="gemini/gemini-3.8-flash",
         prompt=prompt,
         connection=GeminiConnection(),
     )
@@ -71,7 +71,7 @@ def run_anthropic_bedrock(prompt):
 
     anthropic_bedrock_node = llms.Bedrock(
         name="Bedrock Vision Answer Generation",
-        model="bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
+        model="bedrock/global.anthropic.claude-sonnet-5-5",
         prompt=prompt,
         connection=AWSConnection(),
     )
@@ -92,7 +92,7 @@ def run_openai_img_local(prompt, image_path):
 
     openai_node = llms.OpenAI(
         name="OpenAI Vision Answer Generation",
-        model="gpt-4o-mini",
+        model="gpt-6-luna",
         prompt=prompt,
         connection=OpenAIConnection(),
     )

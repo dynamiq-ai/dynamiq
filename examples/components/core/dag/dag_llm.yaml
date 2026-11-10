@@ -24,7 +24,7 @@ nodes:
   openai-1:  # id
     type: dynamiq.nodes.llms.OpenAI
     name: OpenAI-1
-    model: gpt-4o
+    model: gpt-6.1-sol
     connection: openai-conn
     prompt: openai-ai-prompt
     error_handling:

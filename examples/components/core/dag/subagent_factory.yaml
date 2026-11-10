@@ -12,7 +12,7 @@ nodes:
       type: dynamiq.nodes.llms.OpenAI
       connection:
         type: dynamiq.connections.OpenAI
-      model: gpt-4o
+      model: gpt-6.1-sol
       temperature: 0.1
       max_tokens: 4000
     tools:
@@ -26,7 +26,7 @@ nodes:
             type: dynamiq.nodes.llms.OpenAI
             connection:
               type: dynamiq.connections.OpenAI
-            model: gpt-4o
+            model: gpt-6.1-sol
             temperature: 0.1
             max_tokens: 4000
           tools:
