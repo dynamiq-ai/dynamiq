@@ -1,13 +1,18 @@
+import asyncio
+import functools
 import json
 from unittest.mock import MagicMock
 
+import httpx
+import litellm
 import pytest
+from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler, HTTPHandler
 
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.connections import Groq as GroqConnection
 from dynamiq.nodes.llms.groq import Groq
 from dynamiq.prompts import Prompt
-from dynamiq.runnables import RunnableConfig
+from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types.streaming import StreamingConfig
 
 
@@ -49,7 +54,8 @@ def test_a_reply_groq_rejects_reaches_the_caller_as_text(code):
     assert result["content"] == reply
 
 
-def test_a_streamed_reply_groq_rejects_is_requested_again_without_streaming():
+def test_a_streamed_request_groq_rejects_as_it_is_sent_is_sent_again_without_streaming():
+    """LiteLLM sends a streamed request that has a response format without streaming, so Groq rejects it up front."""
     reply = "Your locker code is 6360CF."
 
     def completion(**params):
@@ -69,3 +75,55 @@ def test_another_bad_request_still_fails():
 
     with pytest.raises(Exception, match="model_not_found"):
         _run(_node(), completion)
+
+
+def _text(content: str) -> dict:
+    delta = {"role": "assistant", "content": content}
+    return {"id": "chatcmpl-1", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": delta}]}
+
+
+def _run_stream(mode: str, events: list[dict]) -> RunnableResult:
+    """Run the node over ``events`` served as Groq's event stream, which LiteLLM's own Groq code reads."""
+    body = "".join(
+        ("event: error\n" if "error" in event else "") + f"data: {json.dumps(event)}\n\n" for event in events
+    )
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, headers={"content-type": "text/event-stream"}, content=body)
+    )
+    config = RunnableConfig(callbacks=[StreamingIteratorCallbackHandler()])
+    streaming = StreamingConfig(enabled=True)
+    if mode == "sync":
+        client = HTTPHandler(client=httpx.Client(transport=transport))
+        return _node(streaming=streaming, client=client).run(input_data={}, config=config)
+    client = AsyncHTTPHandler()
+    client.client = httpx.AsyncClient(transport=transport)
+    node = _node(streaming=streaming)
+    node._acompletion = functools.partial(litellm.acompletion, client=client)
+    return asyncio.run(node.run_async(input_data={}, config=config))
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+def test_a_reply_groq_rejects_while_streaming_it_reaches_the_caller_as_text(mode):
+    """Groq streams the reply's text, then rejects it in an error event that carries the tool call it held back."""
+    rejection = {
+        "message": "attempted to call tool 'get_weather' which was not in request.tools",
+        "type": "invalid_request_error",
+        "code": "tool_use_failed",
+        "failed_generation": '{"name": "get_weather", "arguments": {"city": "Paris"}}',
+        "status_code": 400,
+    }
+
+    result = _run_stream(mode, [_text("Checking the weather. "), {"error": rejection}])
+
+    assert result.status == RunnableStatus.SUCCESS, result.error
+    assert result.output["content"] == 'Checking the weather. {"name": "get_weather", "arguments": {"city": "Paris"}}'
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+def test_another_error_in_a_stream_still_fails(mode):
+    error = {"message": "Rate limit reached", "type": "tokens", "code": "rate_limit_exceeded"}
+
+    result = _run_stream(mode, [_text("Checking"), {"error": error}])
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "Rate limit reached" in result.error.message
