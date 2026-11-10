@@ -151,7 +151,10 @@ def function_tool(func: Callable[..., T]) -> type[FunctionTool[T]]:
         input_schema: ClassVar[type[BaseModel]] = create_input_schema(func)
 
         def run_func(self, input_data: BaseModel, **kwargs) -> T:
-            arguments = {**input_data.model_dump(), **kwargs}
+            # An argument the function declares is the model's to give, even when the run context has a keyword of
+            # the same name, such as run_id. Any other context keyword stands, whatever extra argument a model sends.
+            context = {name: value for name, value in kwargs.items() if name not in self.input_schema.model_fields}
+            arguments = {**input_data.model_dump(), **context}
             # The run context (config, run ids) and any extra argument a model sends reach only a function that takes
             # them: a plain function would fail on the first keyword it does not declare.
             if not takes_any_keyword:

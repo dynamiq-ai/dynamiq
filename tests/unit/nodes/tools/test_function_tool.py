@@ -34,3 +34,17 @@ def test_a_function_that_takes_keywords_still_gets_the_run_config():
 
     assert result.status == RunnableStatus.SUCCESS
     assert "config" in received
+
+
+def test_an_argument_named_like_a_run_keyword_is_the_models_to_give():
+    # The node passes its own run_id with every call.
+    @function_tool
+    def run_status(run_id: str = "latest") -> str:
+        """Return the status of a CI run."""
+        return f"run {run_id} passed"
+
+    named = run_status().run({"run_id": "ci-123"})
+    default = run_status().run({})
+
+    assert named.output["content"] == "run ci-123 passed"
+    assert default.output["content"] == "run latest passed"
