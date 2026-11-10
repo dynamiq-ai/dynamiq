@@ -473,6 +473,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     # Set when a run's uploads made this agent create its own in-memory file store.
     _file_store_auto_created: bool = PrivateAttr(default=False)
     _file_store_owner: tuple[str | None, str | None] | None = PrivateAttr(default=None)
+    _file_store_restored: bool = PrivateAttr(default=False)
     _run_artifacts: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
     _history_offset: int = PrivateAttr(
         default=DEFAULT_HISTORY_OFFSET,
@@ -2957,7 +2958,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         since its memory still names them. A resumed run keeps the files its checkpoint restored.
         """
         previous_owner, self._file_store_owner = self._file_store_owner, owner
-        if not self.is_resumed and previous_owner != owner:
+        restored, self._file_store_restored = self._file_store_restored, False
+        if previous_owner != owner and not restored:
             self._empty_auto_created_file_store()
 
     def _empty_auto_created_file_store(self) -> None:

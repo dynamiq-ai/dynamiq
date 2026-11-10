@@ -108,3 +108,17 @@ def test_restoring_a_checkpoint_replaces_the_files_an_earlier_run_uploaded():
     agent._restore_file_store_state(paused_run_files.to_checkpoint_state(max_bytes=1_000_000))
 
     assert [info.path for info in agent.file_store_backend.list_files(recursive=True)] == ["b.csv"]
+
+
+def test_a_resumed_run_does_not_see_the_files_an_earlier_conversation_uploaded():
+    # Its checkpoint holds no files, so restoring it leaves the store as the earlier run left it.
+    agent = build_agent(tools=[SearchTool()])
+    mode = InferenceMode.FUNCTION_CALLING
+    run_scripted(
+        agent, mode, [final_step("ok")], input_extra={"user_id": "alice", "files": [upload("salaries.csv", b"a,1\n")]}
+    )
+    agent.from_checkpoint_state(build_agent(tools=[SearchTool()]).to_checkpoint_state())
+
+    _, recorder = run_scripted(agent, mode, [tool_step("file-list"), final_step("ok")], input_extra={"user_id": "bob"})
+
+    assert "salaries.csv" not in recorder.sent_text(1)

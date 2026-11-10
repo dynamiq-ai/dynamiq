@@ -219,6 +219,7 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
         # paused run's, so it is emptied rather than merged into.
         self._empty_auto_created_file_store()
         store.from_checkpoint_state(file_store_state)
+        self._file_store_restored = True
 
     def set_pending_tool_call(
         self, action: str | None, action_input: Any, thought: str | None, tool_run_id: str | None = None
