@@ -1,6 +1,5 @@
 import shlex
 import threading
-import time
 from typing import Any, ClassVar
 
 from e2b.exceptions import RateLimitException as E2BRateLimitException
@@ -27,8 +26,6 @@ class E2BSandbox(Sandbox):
     """
 
     DEFAULT_E2B_DOMAIN: ClassVar[str] = "e2b.app"
-    # Seconds to wait for the sandbox to start a background command, the limit the SDK's default timeout set.
-    BACKGROUND_START_TIMEOUT: ClassVar[float] = 60
     model_config = ConfigDict(arbitrary_types_allowed=True)
     connection: E2B
     timeout: int = 3600
@@ -54,7 +51,6 @@ class E2BSandbox(Sandbox):
     )
     _sandbox: E2BCodeInterpreterSandbox | None = PrivateAttr(default=None)
     _sandbox_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
-    _timeout_renewed_at: float = PrivateAttr(default=0.0)
 
     @property
     def to_dict_exclude_params(self) -> dict[str, bool]:
@@ -196,7 +192,6 @@ class E2BSandbox(Sandbox):
         calls via ThreadPoolExecutor) never create duplicate sandboxes.
         """
         if self._sandbox is not None:
-            self._renew_timeout_when_half_spent()
             return self._sandbox
 
         with self._sandbox_lock:
@@ -212,7 +207,6 @@ class E2BSandbox(Sandbox):
                     # is set to the proper value after reconnect.
                     try:
                         self._sandbox.set_timeout(self.timeout)
-                        self._timeout_renewed_at = time.monotonic()
                     except Exception as e:
                         logger.debug("set_timeout after reconnect failed: %s", e)
                     self._ensure_directories()
@@ -221,22 +215,10 @@ class E2BSandbox(Sandbox):
                     raise SandboxConnectionError(self.sandbox_id, cause=e) from e
 
             self._sandbox = self._create_with_retry()
-            self._timeout_renewed_at = time.monotonic()
             self.sandbox_id = self._sandbox.sandbox_id
             logger.debug(f"E2B sandbox created: {self.sandbox_id}")
             self._ensure_directories()
             return self._sandbox
-
-    def _renew_timeout_when_half_spent(self) -> None:
-        """E2B kills a sandbox when its timeout runs out, even mid-run, so a sandbox in use is renewed in time."""
-        now = time.monotonic()
-        if now - self._timeout_renewed_at < self.timeout / 2:
-            return
-        self._timeout_renewed_at = now
-        try:
-            self._sandbox.set_timeout(self.timeout)
-        except Exception as e:
-            logger.warning(f"E2BSandbox failed to renew the timeout of sandbox {self.sandbox_id}: {e}")
 
     def _ensure_directories(self) -> None:
         """Create the base directory inside the sandbox if it does not exist."""
@@ -313,6 +295,40 @@ class E2BSandbox(Sandbox):
 
         return create()
 
+    # Seconds to wait for the sandbox to start a background command, the limit the SDK's default timeout set.
+    BACKGROUND_START_TIMEOUT: ClassVar[float] = 60
+
+    def _start_in_background(self, sandbox: E2BCodeInterpreterSandbox, command: str) -> None:
+        """Start a command that keeps running after this call returns.
+
+        Raises:
+            TimeoutError: If the sandbox has not reported the command started within BACKGROUND_START_TIMEOUT
+                seconds. The command may still start later.
+        """
+        outcome: list[Exception | None] = []
+
+        def start() -> None:
+            try:
+                # timeout=0: the SDK's default 60 s bounds the connection the background process lives on.
+                sandbox.commands.run(command, background=True, cwd=self.base_path, timeout=0)
+                outcome.append(None)
+            except Exception as e:
+                outcome.append(e)
+
+        # timeout=0 also lifts the SDK's only limit on opening the command's stream, so a hung envd would block
+        # the agent for good. The start is waited on for a bounded time, in a daemon thread so a stuck start does
+        # not hold up the interpreter's exit.
+        thread = threading.Thread(target=start, name="e2b-background-start", daemon=True)
+        thread.start()
+        thread.join(self.BACKGROUND_START_TIMEOUT)
+        if not outcome:
+            raise TimeoutError(
+                f"The sandbox did not report the command started within {self.BACKGROUND_START_TIMEOUT:g} seconds. "
+                "It may still start."
+            )
+        if outcome[0] is not None:
+            raise outcome[0]
+
     def run_command_shell(
         self,
         command: str,
@@ -353,37 +369,6 @@ class E2BSandbox(Sandbox):
         except Exception as e:
             logger.error(f"Command execution failed: {e}")
             return ShellCommandResult(error=str(e))
-
-    def _start_in_background(self, sandbox: E2BCodeInterpreterSandbox, command: str) -> None:
-        """Start a command that keeps running after this call returns.
-
-        Raises:
-            TimeoutError: If the sandbox has not reported the command started within BACKGROUND_START_TIMEOUT
-                seconds. The command may still start later.
-        """
-        outcome: list[Exception | None] = []
-
-        def start() -> None:
-            try:
-                # timeout=0: the SDK's default 60 s bounds the connection the background process lives on.
-                sandbox.commands.run(command, background=True, cwd=self.base_path, timeout=0)
-                outcome.append(None)
-            except Exception as e:
-                outcome.append(e)
-
-        # timeout=0 also lifts the SDK's only limit on opening the command's stream, so a hung envd would block
-        # the agent for good. The start is waited on for a bounded time, in a daemon thread so a stuck start does
-        # not hold up the interpreter's exit.
-        thread = threading.Thread(target=start, name="e2b-background-start", daemon=True)
-        thread.start()
-        thread.join(self.BACKGROUND_START_TIMEOUT)
-        if not outcome:
-            raise TimeoutError(
-                f"The sandbox did not report the command started within {self.BACKGROUND_START_TIMEOUT:g} seconds. "
-                "It may still start."
-            )
-        if outcome[0] is not None:
-            raise outcome[0]
 
     def upload_file(
         self,
