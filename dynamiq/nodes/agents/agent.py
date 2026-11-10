@@ -6,7 +6,7 @@ import types
 from concurrent.futures import as_completed
 from typing import Any, Callable, Literal, Mapping, Union, get_args, get_origin
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError, field_validator, model_validator
 from pydantic_core import from_json
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
@@ -1487,7 +1487,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     **kwargs,
                 )
             except (ValueError, RecoverableAgentException) as e:
-                if not isinstance(tool, ContextManagerTool):
+                # A call the tool rejects for its input is for the model to correct, with the history intact.
+                if not isinstance(tool, ContextManagerTool) or not self._accepts_input(tool, tool_input):
                     raise
                 run_tool_result = self._summary_failure_fallback(e, len(to_summarize), collect_dependency)
             if collect_dependency:
@@ -1596,6 +1597,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 **kwargs,
             )
             return error_message, [], False, False, None
+
+    @staticmethod
+    def _accepts_input(tool: Node, tool_input: Any) -> bool:
+        try:
+            tool.input_schema.model_validate(tool_input)
+        except ValidationError:
+            return False
+        return True
 
     def _summary_failure_fallback(self, error: Exception, dropped: int, collect_dependency: bool) -> tuple:
         """What compaction does when no summary could be generated: drop the messages instead of ending the run.

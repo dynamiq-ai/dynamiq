@@ -70,6 +70,18 @@ def test_a_model_called_compaction_keeps_the_call_its_result_answers(compaction_
     assert replies and all("summarized" in reply for reply in replies)
 
 
+def test_a_compaction_call_the_tool_rejects_goes_back_to_the_model_with_the_history_intact():
+    # "notes" must be a string. The model can correct the call; dropping the history instead loses what it found.
+    steps = [tool_step("search", query="x"), tool_step("context-manager", notes=["order 42"]), final_step("done")]
+
+    result, requests = run_function_calling(steps, max_preserved_tokens=0)
+
+    assert result.status == RunnableStatus.SUCCESS
+    replies = [str(message.content) for message in requests[2] if message.role == MessageRole.TOOL]
+    assert len(replies) == 2
+    assert "no summary could be generated" not in replies[1] and "notes" in replies[1]
+
+
 def run_with_summarizer(mode, steps, summary: str, **summarization):
     """Run with compaction enabled; return the result, the agent's requests and how often the summarizer ran."""
     agent = build_agent(
