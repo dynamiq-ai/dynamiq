@@ -51,7 +51,7 @@ def run_agent(request: str, input_queue: Queue, send_handler: AsyncStreamingIter
     Returns:
         dict: Agent final output.
     """
-    llm = setup_llm(model_name="gpt-5.1")
+    llm = setup_llm(model_name="gpt-6.1-sol")
 
     email_sender_tool = Python(
         name="EmailSenderTool",

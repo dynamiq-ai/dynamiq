@@ -17,7 +17,7 @@ nodes:
       id: registry-skills-agent-llm
       type: dynamiq.nodes.llms.Anthropic
       connection: anthropic-conn
-      model: claude-sonnet-4-6
+      model: claude-sonnet-5-5
       max_tokens: 32000
     tools: []
     role: |

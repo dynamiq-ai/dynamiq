@@ -16,7 +16,7 @@ nodes:
       id: chat-agent-llm
       type: dynamiq.nodes.llms.OpenAI
       connection: openai-conn
-      model: gpt-4o-mini
+      model: gpt-6-luna
     memory:
       backend:
         type: dynamiq.memory.backends.DynamoDB

@@ -6,7 +6,7 @@ nodes:
   openai-1: # id
     type: dynamiq.nodes.llms.OpenAI
     name: OpenAI-1
-    model: gpt-4o-mini
+    model: gpt-6-luna
     connection: openai-conn
     prompt:
       id: openai-ai-prompt
