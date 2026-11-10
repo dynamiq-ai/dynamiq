@@ -38,6 +38,8 @@ logger = logging.getLogger(__name__)
 
 EXTRACTED_TEXT_SUFFIX = ".extracted.txt"
 RESERVED_AGENT_PATH_PREFIX = "._agent"
+# Types read raw instead of through a converter: no extracted-text cache and no stripping, so line
+# ranges match the bytes on disk.
 RAW_TEXT_FILE_TYPES = {FileType.PLAIN_TEXT_DATA}
 # First line of an extracted-text cache: the sha256 of the source it was extracted from. It travels
 # with the text, so the check works on every file store, including ones that keep no metadata.
