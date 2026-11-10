@@ -7,7 +7,7 @@ from dynamiq.nodes.llms import OpenAI
 def main():
     load_dotenv(find_dotenv())
 
-    llm = OpenAI(model="gpt-4o-mini")
+    llm = OpenAI(model="gpt-6-luna")
 
     questions = ["Who was Albert Einstein and what is he best known for?", "Tell me about the Great Wall of China."]
     answers = [

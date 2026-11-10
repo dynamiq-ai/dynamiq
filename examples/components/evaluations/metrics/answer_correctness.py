@@ -6,7 +6,7 @@ from dynamiq.nodes.llms import OpenAI
 
 def main():
     load_dotenv(find_dotenv())
-    llm = OpenAI(model="gpt-4o-mini")
+    llm = OpenAI(model="gpt-6-luna")
 
     questions = ["What powers the sun and what is its primary function?", "What is the boiling point of water?"]
     answers = [
