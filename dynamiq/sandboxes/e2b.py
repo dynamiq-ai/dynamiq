@@ -30,6 +30,8 @@ class E2BSandbox(Sandbox):
     # E2B ends a sandbox a fixed time after it was created or last connected to, busy or not, so a sandbox in use
     # connects again at most this often, in seconds, to stay up.
     TIMEOUT_REFRESH_INTERVAL: ClassVar[int] = 60
+    # The longest, in seconds, a foreground command keeps its sandbox up, whatever timeout the agent gives it.
+    MAX_COMMAND_TIMEOUT: ClassVar[int] = 3600
     model_config = ConfigDict(arbitrary_types_allowed=True)
     connection: E2B
     timeout: int = 3600
@@ -339,7 +341,7 @@ class E2BSandbox(Sandbox):
         sandbox = self._ensure_sandbox()
         if not run_in_background_enabled:
             # The sandbox has to outlive a command allowed to run longer than its timeout.
-            self._extend_timeout(sandbox, timeout + self.TIMEOUT_REFRESH_INTERVAL)
+            self._extend_timeout(sandbox, min(timeout, self.MAX_COMMAND_TIMEOUT) + self.TIMEOUT_REFRESH_INTERVAL)
         logger.debug(f"E2BSandbox running command: {command[:100]}...")
 
         try:

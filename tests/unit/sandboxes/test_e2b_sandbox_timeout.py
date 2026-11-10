@@ -76,6 +76,14 @@ def test_a_long_command_outlasts_the_timeout_while_another_instance_uses_the_san
     assert e2b.expires_at - e2b.now >= TIMEOUT - 60
 
 
+def test_a_command_keeps_its_sandbox_up_for_at_most_an_hour(e2b):
+    sandbox = e2b_sandbox()
+
+    sandbox.run_command_shell("pip install x", timeout=86400)
+
+    assert e2b.expires_at - e2b.now <= E2BSandbox.MAX_COMMAND_TIMEOUT + E2BSandbox.TIMEOUT_REFRESH_INTERVAL
+
+
 def test_a_failed_renewal_is_retried(e2b):
     sandbox = e2b_sandbox()
     sandbox.run_command_shell("ls")
