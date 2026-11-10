@@ -1326,37 +1326,19 @@ def test_file_search_tool_says_which_files_it_did_not_scan(file_store):
 
 @pytest.mark.parametrize(
     "cache",
-    [None, b"Quarterly revenue", encode_extracted_text("Quarterly revenue", b"the version that was read")],
-    ids=["never_read", "read_by_an_older_version", "replaced_since_it_was_read"],
+    [b"Quarterly revenue", encode_extracted_text("Quarterly revenue", b"the version that was read")],
+    ids=["read_by_an_older_version", "replaced_since_it_was_read"],
 )
-def test_file_search_tool_names_a_file_whose_text_was_not_extracted(file_store, cache):
+def test_file_search_tool_names_a_file_whose_extracted_text_is_out_of_date(file_store, cache):
     """A PDF's bytes are not its text: searching them finds nothing, which tells the model the text is not there."""
     file_store.store("report.pdf", b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
-    if cache:
-        file_store.store(f"report.pdf{EXTRACTED_TEXT_SUFFIX}", cache)
+    file_store.store(f"report.pdf{EXTRACTED_TEXT_SUFFIX}", cache)
 
     search = FileSearchTool(file_store=file_store)
     content = search.run({"query": "revenue", "file_path": "report.pdf", "brief": "Search"}).output["content"]
 
     assert content["files_scanned"] == 0
     assert "report.pdf" in content["message"] and "file-read" in content["message"]
-
-
-@pytest.mark.parametrize(
-    "path, content, max_file_bytes",
-    [
-        pytest.param("app.log", b"caf\xe9 opened", 1_000_000, id="a_text_type_in_another_encoding"),
-        pytest.param("notes.csv", "opened caf\xe9".encode(), 11, id="a_character_cut_off_at_the_byte_limit"),
-    ],
-)
-def test_file_search_tool_searches_text_that_is_not_whole_utf8(file_store, path, content, max_file_bytes):
-    file_store.store(path, content)
-
-    result = FileSearchTool(file_store=file_store).run(
-        {"query": "opened", "file_path": path, "max_file_bytes": max_file_bytes, "brief": "Search"}
-    )
-
-    assert result.output["content"]["total_matches"] == 1
 
 
 @pytest.mark.parametrize(

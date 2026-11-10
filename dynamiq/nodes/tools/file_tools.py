@@ -1,4 +1,3 @@
-import codecs
 import enum
 import hashlib
 import json
@@ -82,8 +81,16 @@ def decode_extracted_text(cache_content: bytes, source_content: bytes) -> str | 
     return text.decode("utf-8", errors="replace")
 
 
-class _TextNotExtracted(Exception):
-    """A file that is not text has no text to search until the read tool has extracted it from this version of it."""
+class _StaleExtractedText(Exception):
+    """The text the read tool extracted from a file that is not text itself is not from the file's current version."""
+
+
+def _is_utf8(content: bytes) -> bool:
+    try:
+        content.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
 
 
 def _line_of(content: str, offset: int) -> int:
@@ -1678,7 +1685,7 @@ class FileSearchTool(Node):
             matches = []
             total_scanned = 0
             missing_files: list[str] = []
-            unread_files: list[str] = []
+            stale_files: list[str] = []
 
             if input_data.mode == "regex":
                 flags = 0 if input_data.case_sensitive else re.IGNORECASE
@@ -1720,8 +1727,8 @@ class FileSearchTool(Node):
                         context_chars=input_data.context_chars,
                         max_bytes=input_data.max_file_bytes,
                     )
-                except _TextNotExtracted as unread:
-                    unread_files.append(str(unread))
+                except _StaleExtractedText as stale:
+                    stale_files.append(str(stale))
                     continue
                 total_scanned += 1
                 if file_matches:
@@ -1734,7 +1741,7 @@ class FileSearchTool(Node):
                 missing_files=missing_files,
                 files_not_scanned=files_not_scanned,
                 max_files=input_data.max_files,
-                unread_files=unread_files,
+                stale_files=stale_files,
             )
             result = {
                 "content": {
@@ -1783,7 +1790,7 @@ class FileSearchTool(Node):
         missing_files: list[str],
         files_not_scanned: int = 0,
         max_files: int | None = None,
-        unread_files: list[str] | None = None,
+        stale_files: list[str] | None = None,
     ) -> str:
         """Build a concise agent-facing status message for search results."""
         parts = []
@@ -1793,15 +1800,14 @@ class FileSearchTool(Node):
             if len(missing_files) > 10:
                 suffix = f", ... and {len(missing_files) - 10} more"
             parts.append(f"File path(s) not found in the file store: {missing}{suffix}.")
-        if unread_files:
-            # Their bytes are not their text: searching them would report that the text is not there.
+        if stale_files:
             parts.append(
-                f"{len(unread_files)} file(s) are not text and were not searched: {', '.join(unread_files[:10])}"
-                f"{', ...' if len(unread_files) > 10 else ''}. To search one, read it with the file-read tool "
-                "first, giving only file_path, so that its text is extracted."
+                f"{len(stale_files)} file(s) were not searched because the text extracted from them is out of date: "
+                f"{', '.join(stale_files[:10])}{', ...' if len(stale_files) > 10 else ''}. Read each one again with "
+                "the file-read tool, giving only file_path, then search again."
             )
         if total_scanned == 0:
-            if not unread_files:
+            if not stale_files:
                 parts.append("No existing files were scanned.")
         elif total_matches == 0:
             parts.append(f"No matches found for '{query}' in {total_scanned} scanned file(s).")
@@ -1878,6 +1884,7 @@ class FileSearchTool(Node):
             file_path = source_path
 
         cache_path = f"{file_path}{EXTRACTED_TEXT_SUFFIX}"
+        stale_cache = False
         try:
             if self.file_store.exists(cache_path) and self.file_store.exists(file_path):
                 cached_text = decode_extracted_text(
@@ -1886,33 +1893,24 @@ class FileSearchTool(Node):
                 if cached_text:
                     logger.debug(f"Tool {self.name} - {self.id}: using cached extracted text for search: {cache_path}")
                     return cached_text.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore"), cache_path
+                stale_cache = cached_text is None
         except Exception as exc:
             logger.warning(f"Tool {self.name} - {self.id}: failed to read {cache_path} for search: {exc}")
         try:
             if self.file_store.exists(file_path):
-                text = self._own_text(file_path, self.file_store.retrieve(file_path)[:max_bytes])
+                content = self.file_store.retrieve(file_path)
+                # The file's own bytes stand in for its out-of-date extracted text only if they are text. A PDF's
+                # are not: searching them finds nothing, which tells the model that the text is not there.
+                if stale_cache and not _is_utf8(content):
+                    raise _StaleExtractedText(file_path)
+                text = content[:max_bytes].decode("utf-8", errors="ignore")
                 if text:
                     return text, file_path
-        except _TextNotExtracted:
+        except _StaleExtractedText:
             raise
         except Exception as exc:
             logger.warning(f"Tool {self.name} - {self.id}: failed to read {file_path} for search: {exc}")
         return None, None
-
-    @staticmethod
-    def _own_text(file_path: str, content: bytes) -> str:
-        """The text of a file that is text itself, by the read tool's rule: valid UTF-8, or a plain-text type.
-
-        Raises:
-            _TextNotExtracted: For any other file, such as a PDF.
-        """
-        try:
-            # Incremental, so that a character cut off at the byte limit is not an error.
-            return codecs.getincrementaldecoder("utf-8")().decode(content)
-        except UnicodeDecodeError:
-            if detect_file_type(BytesIO(content), os.path.basename(file_path)) not in RAW_TEXT_FILE_TYPES:
-                raise _TextNotExtracted(file_path) from None
-            return content.decode("utf-8", errors="ignore")
 
     @staticmethod
     def _build_match_entry(
