@@ -38,7 +38,7 @@ USER_COMPANY = "TechCorp"
 
 def main():
     openai_conn = connections.OpenAI()
-    llm = OpenAI(name="OpenAI", model="gpt-4o-mini", connection=openai_conn)
+    llm = OpenAI(name="OpenAI", model="gpt-6-luna", connection=openai_conn)
     run_config = RunnableConfig()
 
     dynamiq_conn = connections.Dynamiq(url=DYNAMIQ_URL, api_key=DYNAMIQ_API_KEY)

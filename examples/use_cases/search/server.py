@@ -83,7 +83,7 @@ Explain that you are not able to find the answer and provide some suggestions fo
 """  # noqa E501
 
 # Setup models
-llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", max_tokens=500, temperature=0.5)
+llm = setup_llm(model_provider="gpt", model_name="gpt-6-luna", max_tokens=500, temperature=0.5)
 
 # Define agents and search tool
 agent_query_rephraser = Agent(
@@ -107,7 +107,7 @@ agent_answer_synthesizer = OpenAI(
     id="agent_answer_synthesizer",
     name="agent_answer_synthesizer",
     connection=OpenAIConnection(),
-    model="gpt-4o-mini",
+    model="gpt-6-luna",
     prompt=Prompt(
         messages=[
             Message(

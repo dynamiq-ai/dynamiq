@@ -10,7 +10,7 @@ def main():
     # Initialize the LLM
     llm = llms.OpenAI(
         name="OpenAI Vision",
-        model="gpt-4o",
+        model="gpt-6.1-sol",
         postponned_init=True,
     )
 
