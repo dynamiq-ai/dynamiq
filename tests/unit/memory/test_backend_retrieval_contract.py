@@ -16,6 +16,7 @@ import pytest
 
 from dynamiq.memory.backends import InMemory, SQLite
 from dynamiq.prompts import Message, MessageRole
+from dynamiq.types import Document
 
 TOTAL = 10
 LIMIT = 3
@@ -179,3 +180,27 @@ def test_vector_backend_get_all_with_limit_returns_the_most_recent(vector_backen
 
 def test_vector_backend_get_all_without_limit_returns_everything_oldest_first(vector_backend):
     assert [m.content for m in vector_backend.get_all()] == [f"msg-{i}" for i in range(TOTAL)]
+
+
+def test_weaviate_filter_only_search_with_limit_returns_the_most_recent(mocker):
+    """filter_documents returns an unordered set; the limit must keep the newest, oldest first."""
+    from dynamiq.memory.backends.weaviate import Weaviate
+
+    mocker.patch.object(Weaviate, "model_post_init", lambda self, __context: None)
+    backend = Weaviate.model_construct(collection_name="c", content_property_name="message_content")
+    store = mocker.Mock()
+    # Stored out of order, as a vector DB is free to return them.
+    order = [5, 1, 9, 0, 7, 3, 8, 2, 6, 4]
+    store.filter_documents.return_value = [
+        Document(
+            id=str(i),
+            content=f"msg-{i}",
+            metadata={"message_role": "user", "message_timestamp": float(i), "message_id": str(i)},
+        )
+        for i in order
+    ]
+    backend._vector_store = store
+
+    result = backend.search(query=None, filters={"field": "user_id", "operator": "==", "value": "u"}, limit=LIMIT)
+
+    assert [m.content for m in result] == ["msg-7", "msg-8", "msg-9"]

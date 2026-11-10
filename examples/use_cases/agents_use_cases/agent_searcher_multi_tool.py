@@ -30,7 +30,7 @@ if __name__ == "__main__":
     tool_code = E2BInterpreterTool(connection=conn_code)
     tool_search = ExaTool(connection=conn_search)
 
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0.2)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-6-luna", temperature=0.2)
 
     agent = Agent(
         name="MultiToolAgent",

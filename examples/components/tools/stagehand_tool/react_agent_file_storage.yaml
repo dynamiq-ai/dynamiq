@@ -13,7 +13,7 @@ nodes:
       id: react-agent-llm
       type: dynamiq.nodes.llms.OpenAI
       connection: openai-conn
-      model: gpt-4o
+      model: gpt-6.1-sol
     tools:
       - id: 4bf85203-f37a-4517-9d48-e437472b8e8f
         name: stagehand

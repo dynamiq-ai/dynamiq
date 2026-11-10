@@ -59,7 +59,7 @@ def setup_agent() -> Agent:
 
     memory = Memory(backend=InMemory())
 
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=0.001)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-6.1-sol", temperature=0.001)
 
     return Agent(
         name="Assistant",
