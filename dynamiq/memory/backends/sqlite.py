@@ -50,14 +50,14 @@ class SQLite(MemoryBackend):
     ] = """
         SELECT id, role, content, metadata, timestamp
         FROM {index_name}
-        ORDER BY timestamp ASC
+        ORDER BY timestamp ASC, rowid ASC
     """
     SELECT_RECENT_MESSAGES_QUERY: ClassVar[
         str
     ] = """
         SELECT id, role, content, metadata, timestamp
         FROM {index_name}
-        ORDER BY timestamp DESC
+        ORDER BY timestamp DESC, rowid DESC
         LIMIT ?
     """
     CHECK_IF_EMPTY_QUERY: ClassVar[str] = "SELECT COUNT(*) FROM {index_name}"
@@ -249,7 +249,7 @@ class SQLite(MemoryBackend):
             # Order by timestamp, not id: `id` is a random uuid4 (see add()), so
             # "ORDER BY id DESC LIMIT n" returned an arbitrary n rows in arbitrary
             # order rather than the n most recent matches.
-            query_str += " ORDER BY timestamp DESC LIMIT ?"
+            query_str += " ORDER BY timestamp DESC, rowid DESC LIMIT ?"
             params.append(limit)
 
             with sqlite3.connect(self.db_path) as conn:

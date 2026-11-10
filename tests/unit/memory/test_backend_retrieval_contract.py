@@ -14,8 +14,10 @@ asserted separately below, since it cannot be exercised without a database.
 
 import pytest
 
+from dynamiq.memory import Memory
 from dynamiq.memory.backends import InMemory, SQLite
 from dynamiq.prompts import Message, MessageRole
+from dynamiq.types import Document
 
 TOTAL = 10
 LIMIT = 3
@@ -60,6 +62,31 @@ def test_get_all_limit_larger_than_stored_is_not_padded_or_truncated(backend):
         backend.add(message)
 
     assert [m.content for m in backend.get_all(limit=LIMIT)] == ["msg-0", "msg-1"]
+
+
+@pytest.mark.parametrize("timestamps", [(1, 1, 1, 1), (1, 2, 2, 3), (2, 1, 2, 1)])
+@pytest.mark.parametrize("limit", [2, 4, 10])
+def test_memory_retrieval_preserves_insertion_order_for_equal_timestamps(backend, timestamps, limit):
+    memory = Memory(backend=backend)
+    for i, timestamp in enumerate(timestamps):
+        memory.add(role=MessageRole.USER, content=f"msg-{i}", metadata={"timestamp": timestamp})
+
+    ordered = sorted(range(len(timestamps)), key=lambda i: timestamps[i])
+    assert [m.content for m in memory.get_all(limit=limit)] == [f"msg-{i}" for i in ordered[-limit:]]
+
+
+@pytest.mark.parametrize("limit", [2, 4])
+def test_sqlite_search_preserves_recency_for_equal_timestamps_after_reopen(tmp_path, limit):
+    db_path = str(tmp_path / "conv.db")
+    backend = SQLite(db_path=db_path)
+    for i in range(4):
+        backend.add(Message(role=MessageRole.USER, content=f"msg-{i}", metadata={"timestamp": 1}))
+
+    reopened = SQLite(db_path=db_path)
+    assert [m.content for m in reopened.get_all()] == [f"msg-{i}" for i in range(4)]
+    assert [m.content for m in reopened.search(query="msg", limit=limit)] == [
+        f"msg-{i}" for i in reversed(range(4 - limit, 4))
+    ]
 
 
 def test_sqlite_search_with_limit_returns_the_most_recent_matches(tmp_path):
@@ -148,3 +175,27 @@ def test_postgres_backends_of_one_process_create_their_table_once(mocker):
 
     assert executed.call_count == 4  # the lock, the table and its two indices
     assert "pg_advisory_xact_lock" in executed.call_args_list[0].args[0]
+
+
+def test_weaviate_filter_only_search_with_limit_returns_the_most_recent(mocker):
+    """filter_documents returns an unordered set; the limit must keep the newest, oldest first."""
+    from dynamiq.memory.backends.weaviate import Weaviate
+
+    mocker.patch.object(Weaviate, "model_post_init", lambda self, __context: None)
+    backend = Weaviate.model_construct(collection_name="c", content_property_name="message_content")
+    store = mocker.Mock()
+    # Stored out of order, as a vector DB is free to return them.
+    order = [5, 1, 9, 0, 7, 3, 8, 2, 6, 4]
+    store.filter_documents.return_value = [
+        Document(
+            id=str(i),
+            content=f"msg-{i}",
+            metadata={"message_role": "user", "message_timestamp": float(i), "message_id": str(i)},
+        )
+        for i in order
+    ]
+    backend._vector_store = store
+
+    result = backend.search(query=None, filters={"field": "user_id", "operator": "==", "value": "u"}, limit=LIMIT)
+
+    assert [m.content for m in result] == ["msg-7", "msg-8", "msg-9"]

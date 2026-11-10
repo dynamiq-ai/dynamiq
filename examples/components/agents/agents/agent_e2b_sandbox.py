@@ -51,7 +51,7 @@ def setup_agent(e2b_api_key: str = None) -> tuple[Agent, E2BSandbox]:
     if not api_key:
         raise ValueError("E2B API key is required. Set E2B_API_KEY environment variable or pass it directly.")
 
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=0.2)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-6.1-sol", temperature=0.2)
 
     e2b_connection = E2BConnection(api_key=api_key)
 
