@@ -25,7 +25,7 @@ nodes:
       id: research-llm
       type: dynamiq.nodes.llms.OpenAI
       connection: openai-conn
-      model: gpt-4o-mini
+      model: gpt-6-luna
     max_loops: 5
     tools:
       - id: fetch-page-tool

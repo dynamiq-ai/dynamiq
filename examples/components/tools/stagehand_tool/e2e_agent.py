@@ -65,7 +65,7 @@ def main() -> int:
         llm=Anthropic(
             id="anthropic-llm",
             connection=AnthropicConnection(),
-            model="claude-sonnet-5",
+            model="claude-sonnet-5-5",
             temperature=0.0,
             max_tokens=2000,
             is_postponed_component_init=True,

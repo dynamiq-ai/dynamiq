@@ -160,7 +160,7 @@ def build_flow(queue: Queue, backend: InMemory) -> tuple[flows.Flow, Agent]:
     agent = Agent(
         id=AGENT_ID,
         name="Book Recommender",
-        llm=OpenAI(connection=OpenAIConnection(api_key="not-used-scripted-llm"), model="gpt-4o"),
+        llm=OpenAI(connection=OpenAIConnection(api_key="not-used-scripted-llm"), model="gpt-6.1-sol"),
         tools=[tool],
         role="Ask the user clarifying questions before recommending a book.",
         inference_mode=InferenceMode.FUNCTION_CALLING,
