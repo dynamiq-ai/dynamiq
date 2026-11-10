@@ -1021,9 +1021,12 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                 self._state_has_emitted[StreamingState.TOOL_INPUT] = False
                 self._state_start_index = idx_action_input + len(XMLModeTag.OPEN_ACTION_INPUT)
                 self._state_last_emit_index = self._state_start_index
-            elif idx_answer != -1 and not xml_reply_has_action(self.accumulated_content):
+            elif idx_answer != -1 and not xml_reply_has_action(
+                self.accumulated_content[: len(self.accumulated_content) - len(self._buffer) + idx_answer]
+            ):
                 # An answer after an action in the same reply predates the tool's result and is dropped
-                # (drop_answer_after_xml_action), so it is not streamed either.
+                # (drop_answer_after_xml_action), so it is not streamed either. The answer's own text may mention
+                # <action>, so only the reply before it is checked: the buffer is the end of the reply.
                 self._current_state = StreamingState.ANSWER
                 self._answer_started = True
                 self._state_start_index = idx_answer + len(XMLModeTag.OPEN_ANSWER)

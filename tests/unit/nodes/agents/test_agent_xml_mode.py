@@ -108,21 +108,37 @@ def test_an_answer_written_after_an_action_is_never_streamed():
     assert "$5" not in answer and "$7" in answer
 
 
-def test_an_answer_whose_thought_mentions_an_action_tag_is_streamed():
+@pytest.mark.parametrize(
+    "reply, chunk_size",
+    [
+        pytest.param(
+            "<output><thought>No <action> is needed: I know it.</thought><answer>It costs $5.</answer></output>",
+            1,
+            id="in-its-thought",
+        ),
+        # One chunk brings the start of the answer together with the tag its text mentions.
+        pytest.param(
+            "<output><thought>I know it.</thought><answer>It costs $5. Tools go in an <action> tag.</answer></output>",
+            45,
+            id="in-its-text",
+        ),
+    ],
+)
+def test_an_answer_that_mentions_an_action_tag_is_streamed(reply, chunk_size):
     agent = build_agent(
         tools=[SearchTool()],
         inference_mode=InferenceMode.XML,
         streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL),
     )
-    reply = "<output><thought>No <action> is needed: I know it.</thought><answer>It costs $5.</answer></output>"
     streamed: list[tuple[str, object]] = []
 
     def run(**kwargs):
         serialized = {"group": "llms", "id": agent.llm.id}
         for callback in kwargs["config"].callbacks:
             if hasattr(callback, "accumulated_content"):
-                for char in reply:
-                    callback.on_node_execute_stream(serialized, chunk={"choices": [{"delta": {"content": char}}]})
+                for start in range(0, len(reply), chunk_size):
+                    delta = {"content": reply[start : start + chunk_size]}
+                    callback.on_node_execute_stream(serialized, chunk={"choices": [{"delta": delta}]})
                 callback.on_node_execute_end(serialized, {})
         result = MagicMock(spec=RunnableResult)
         result.status = RunnableStatus.SUCCESS
@@ -137,7 +153,7 @@ def test_an_answer_whose_thought_mentions_an_action_tag_is_streamed():
     with patch.object(agent.llm, "run", side_effect=run), patch.object(Agent, "stream_content", record):
         result = agent.run(input_data={"input": "What does it cost?"})
 
-    assert result.output["content"] == "It costs $5."
+    assert result.output["content"].startswith("It costs $5.")
     assert "$5" in "".join(str(content) for step, content in streamed if step == "answer")
 
 

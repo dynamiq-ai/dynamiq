@@ -1371,7 +1371,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         tool_run_id: str | None = None,
         **kwargs,
     ) -> tuple[Any, list, bool, bool, dict | None]:
-        """Execute a single tool with caching support.
+        """Execute a single tool.
 
         Args:
             update_run_depends: Whether to update self._run_depends. Set to False for parallel execution.
