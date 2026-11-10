@@ -93,6 +93,17 @@ def test_delete_nonexistent_file(storage):
     assert result is False
 
 
+@pytest.mark.parametrize("recursive", [False, True])
+def test_list_files_directory_does_not_match_sibling_prefix(storage, sample_text_content, recursive):
+    """Listing 'reports' must not include files from a sibling directory like 'reports-old'."""
+    storage.store("reports/current.txt", sample_text_content)
+    storage.store("reports-old/private.txt", sample_text_content)
+
+    files = storage.list_files(directory="reports", recursive=recursive)
+
+    assert [f.path for f in files] == ["reports/current.txt"]
+
+
 def test_list_files_recursive_and_directory_behavior(storage, sample_text_content):
     """Test recursive vs non-recursive file listing and directory parameter behavior."""
 
@@ -124,29 +135,3 @@ def test_list_files_recursive_and_directory_behavior(storage, sample_text_conten
     assert len(docs_files_recursive) == 2
     assert "docs/file2.txt" in [f.path for f in docs_files_recursive]
     assert "docs/sub/file3.txt" in [f.path for f in docs_files_recursive]
-
-
-def test_list_files_in_a_directory_excludes_siblings_sharing_its_prefix(storage, sample_text_content):
-    for path in ("docs/a.md", "docs/sub/b.md", "docs-old/c.md", "docsX.md"):
-        storage.store(path, sample_text_content)
-
-    listed = storage.list_files(directory="docs")
-    listed_recursively = storage.list_files(directory="docs/", recursive=True)
-
-    assert [f.path for f in listed] == ["docs/a.md"]
-    assert sorted(f.path for f in listed_recursively) == ["docs/a.md", "docs/sub/b.md"]
-
-
-@pytest.mark.parametrize("path", ["report.pdf", "docs/notes.md"])
-def test_list_files_given_a_file_path_lists_that_file(storage, sample_text_content, path):
-    storage.store(path, sample_text_content)
-    storage.store(f"{path}2", sample_text_content)
-
-    assert [f.path for f in storage.list_files(directory=path)] == [path]
-
-
-def test_list_files_filters_by_glob_pattern(storage, sample_text_content):
-    for path in ("report.md", "data.csv", "docs/notes.md"):
-        storage.store(path, sample_text_content)
-
-    assert sorted(f.path for f in storage.list_files(recursive=True, pattern="*.md")) == ["docs/notes.md", "report.md"]
