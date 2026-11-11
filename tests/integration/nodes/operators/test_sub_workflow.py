@@ -1,3 +1,4 @@
+import io
 import time
 from typing import ClassVar
 
@@ -24,6 +25,7 @@ from dynamiq.nodes.types import (
 )
 from dynamiq.nodes.utils import Input, Output
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types import Document
 from dynamiq.types.dry_run import DryRunConfig
 
 
@@ -137,6 +139,41 @@ def test_runs_the_flow_and_returns_its_output_node_result_traced_under_the_node(
     assert inner_flow_run.metadata["flow"]["id"] == "eligibility-flow"
     assert sorted(run.name for run in inner_node_runs) == ["eligibility", "end", "start"]
     assert len(check_run.executions) == 1
+
+
+class FileReader(Node):
+    group: NodeGroup = NodeGroup.UTILS
+    name: str = "reader"
+
+    def execute(self, input_data, config=None, **kwargs):
+        return {"contents": [file.getvalue() for file in input_data["files"]]}
+
+
+def test_files_reach_the_inner_flow_intact_and_models_as_dicts():
+    start = Input(id="start", name="start")
+    reader = FileReader(
+        id="reader",
+        depends=[NodeDependency(node=start)],
+        input_transformer=InputTransformer(selector={"files": "$.start.output.files"}),
+    )
+    end = Output(
+        id="end",
+        depends=[NodeDependency(node=reader)],
+        input_transformer=InputTransformer(
+            selector={"contents": "$.reader.output.contents", "first": "$.start.output.documents[0].content"}
+        ),
+    )
+    node = SubWorkflow(id="read", name="read", flow=Flow(id="read-flow", nodes=[start, reader, end]))
+    statement = io.BytesIO(b"%PDF-1.4 statement")
+    statement.name = "statement.pdf"
+
+    result = node.run(
+        input_data={"files": [statement], "documents": [Document(content="hello")]},
+        config=RunnableConfig(callbacks=[]),
+    )
+
+    assert result.status == RunnableStatus.SUCCESS, result.error
+    assert result.output == {"contents": [b"%PDF-1.4 statement"], "first": "hello"}
 
 
 def test_a_missing_required_input_fails_before_the_flow_runs():

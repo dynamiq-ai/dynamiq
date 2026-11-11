@@ -28,7 +28,7 @@ def search_with_scrape_example():
         is_optimized_for_agents=True,
         limit=3,
         sources=[SourceWeb(tbs="qdr:w"), SourceNews()],
-        categories=["github"],
+        categories=["developer"],
         country="US",
     )
 

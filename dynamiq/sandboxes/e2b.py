@@ -322,6 +322,40 @@ class E2BSandbox(Sandbox):
 
         return create()
 
+    # Seconds to wait for the sandbox to start a background command, the limit the SDK's default timeout set.
+    BACKGROUND_START_TIMEOUT: ClassVar[float] = 60
+
+    def _start_in_background(self, sandbox: E2BCodeInterpreterSandbox, command: str) -> None:
+        """Start a command that keeps running after this call returns.
+
+        Raises:
+            TimeoutError: If the sandbox has not reported the command started within BACKGROUND_START_TIMEOUT
+                seconds. The command may still start later.
+        """
+        outcome: list[Exception | None] = []
+
+        def start() -> None:
+            try:
+                # timeout=0: the SDK's default 60 s bounds the connection the background process lives on.
+                sandbox.commands.run(command, background=True, cwd=self.base_path, timeout=0)
+                outcome.append(None)
+            except Exception as e:
+                outcome.append(e)
+
+        # timeout=0 also lifts the SDK's only limit on opening the command's stream, so a hung envd would block
+        # the agent for good. The start is waited on for a bounded time, in a daemon thread so a stuck start does
+        # not hold up the interpreter's exit.
+        thread = threading.Thread(target=start, name="e2b-background-start", daemon=True)
+        thread.start()
+        thread.join(self.BACKGROUND_START_TIMEOUT)
+        if not outcome:
+            raise TimeoutError(
+                f"The sandbox did not report the command started within {self.BACKGROUND_START_TIMEOUT:g} seconds. "
+                "It may still start."
+            )
+        if outcome[0] is not None:
+            raise outcome[0]
+
     def run_command_shell(
         self,
         command: str,
@@ -346,7 +380,7 @@ class E2BSandbox(Sandbox):
 
         try:
             if run_in_background_enabled:
-                sandbox.commands.run(command, background=True, cwd=self.base_path)
+                self._start_in_background(sandbox, command)
                 return ShellCommandResult(background=True)
 
             result = sandbox.commands.run(command, timeout=timeout, cwd=self.base_path)

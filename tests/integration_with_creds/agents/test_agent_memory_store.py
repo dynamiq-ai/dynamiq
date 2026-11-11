@@ -1,11 +1,9 @@
-"""Integration tests for the agent memory store (OPENAI_API_KEY required).
+"""An agent records a user's preference in its memory store and applies it later (OPENAI_API_KEY required).
 
-``MemoryStoreAPISimulator`` stands in for the server, so everything above the socket is real: the
-same client, URLs, query strings and status codes. Each test gets a fresh one.
+``MemoryStoreAPISimulator`` stands in for the server, so everything above the socket is real. The tests of
+the store's HTTP contract alone, which need no model, are in tests/integration/memory_store.
 """
 
-import json as json_lib
-from datetime import datetime, timezone
 
 import pytest
 
@@ -16,15 +14,9 @@ from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file import FileStoreConfig, InMemoryFileStore
-from dynamiq.storages.memory import (
-    CompositeMemoryStore,
-    DynamiqMemoryStore,
-    MemoryNotFoundError,
-    MemoryStoreConfig,
-    MemoryStoreError,
-)
+from dynamiq.storages.memory import CompositeMemoryStore, DynamiqMemoryStore, MemoryStoreConfig
+from tests.helpers.memory_store_api import MemoryStoreAPISimulator
 
-# Arbitrary on purpose: a model writes docstrings unaided, so only this proves memory reached it.
 USER_MARKER = "# owner: qplum"
 CODE_TASK = (
     "Write me a merge sort in Python and save it to sort.py. "
@@ -44,111 +36,6 @@ USER_ID = "u-test"
 MODEL = "gpt-5.4"
 
 TEAM_CONVENTION = "Every function name must start with the prefix `zx_`, e.g. `zx_parse_config`."
-
-
-class _Response:
-    """The subset of a `requests` response that DynamiqFileStore reads."""
-
-    def __init__(self, status_code: int, payload=None):
-        self.status_code = status_code
-        self._payload = payload
-        self.text = json_lib.dumps(payload) if payload is not None else ""
-        self.content = self.text.encode()
-
-    def json(self):
-        if self._payload is None:
-            raise ValueError("response has no JSON body")
-        return self._payload
-
-
-class MemoryStoreAPISimulator:
-    """In-process implementation of the Memory Store API (docs/memory_store_api.md).
-
-    Stands in for the server so the agent tests can run before it exists. Deliberately strict — it
-    enforces the parts a real implementation is most likely to skip, so a client change that
-    violates the spec fails here rather than in production.
-    """
-
-    def __init__(self):
-        # Keyed by (store_id, user_id, path) - the three things the real API scopes by. Dropping
-        # either of the first two would let genuinely separate memories share one keyspace, which
-        # is exactly the collision the composite exists to prevent.
-        self.memories: dict[tuple[str, str, str], str] = {}
-        self.calls: list[tuple[str, str]] = []
-
-    def request(self, verb, url, headers=None, params=None, json=None, timeout=None):
-        self.calls.append((verb, url))
-
-        if not (headers or {}).get("Authorization"):
-            return _Response(401, {"message": "missing bearer token"})
-
-        params, body = params or {}, json or {}
-        source = body if verb == "PUT" else params
-
-        # Required on every call: the client must never omit it.
-        if not source.get("user_id"):
-            return _Response(400, {"message": "user_id is required"})
-
-        path = source.get("path")
-        if path is not None and not self._path_is_safe(path):
-            return _Response(400, {"message": f"illegal path: {path!r}"})
-
-        scope = (url.split("/memory-stores/")[1].split("/")[0], source["user_id"])
-        if url.endswith("/files/content"):
-            return self._read(scope, path)
-        if verb == "PUT":
-            return self._write(scope, body)
-        if verb == "DELETE":
-            return self._delete(scope, path)
-        return self._list(scope, params.get("path") or "")
-
-    def _read(self, scope, path):
-        if (*scope, path) not in self.memories:
-            return _Response(404, {"message": f"no such memory: {path}"})
-        return _Response(200, {"data": self._as_json(scope, path, include_content=True)})
-
-    def _write(self, scope, body):
-        path, content = body["path"], body["content"]
-        if len(content) > 1_000_000:
-            return _Response(413, {"message": "memory too large"})
-        self.memories[(*scope, path)] = content  # upsert: no overwrite flag, no 409
-        return _Response(200, {"data": self._as_json(scope, path)})
-
-    def _delete(self, scope, path):
-        if (*scope, path) not in self.memories:
-            return _Response(404, {"message": f"no such memory: {path}"})
-        del self.memories[(*scope, path)]
-        return _Response(200, {"data": {"deleted": True}})
-
-    def _list(self, scope, prefix):
-        return _Response(
-            200,
-            {
-                "data": [
-                    self._as_json(scope, path)
-                    for store_id, user_id, path in self.memories
-                    if (store_id, user_id) == tuple(scope) and path.startswith(prefix)
-                ]
-            },
-        )
-
-    @staticmethod
-    def _path_is_safe(path: str) -> bool:
-        if not path:
-            return True
-        if path.startswith("/") or ".." in path.split("/"):
-            return False
-        return "%2e" not in path.lower()
-
-    def _as_json(self, scope, path, include_content=False):
-        payload = {
-            "path": path,
-            "size": len(self.memories[(*scope, path)]),
-            "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        }
-        if include_content:
-            payload["content"] = self.memories[(*scope, path)]
-        return payload
 
 
 @pytest.fixture(scope="module")
@@ -192,45 +79,6 @@ def _assert_memory_holds_only_the_preference(store):
     # Loose on the way in - the agent may paraphrase when recording. Applying it is what is exact.
     assert "owner" in stored.lower(), f"Preference not recorded. Store holds: {stored[:500]}"
     assert "def " not in stored, f"Code leaked into memory: {paths}"
-
-
-@pytest.mark.integration
-def test_store_crud_against_the_api(memory_store):
-    """Every endpoint of the contract, without a model in the loop.
-
-    Run this first when bringing a server up: it isolates the HTTP contract from agent behaviour,
-    so a failure here is the server's, not the model's.
-    """
-    store = memory_store
-    path = "probe.md"
-
-    entry = store.write(path, "probe body", user_id=USER_ID)
-    assert entry.path == path, f"Server returned a different path: {entry.path}"
-
-    assert store.read(path, user_id=USER_ID) == "probe body"
-    assert path in [e.path for e in store.list(user_id=USER_ID)]
-
-    store.write(path, "updated body", user_id=USER_ID)  # upsert: no overwrite flag, no 409
-    assert store.read(path, user_id=USER_ID) == "updated body"
-
-    assert store.delete(path, user_id=USER_ID) is True
-    assert store.delete(path, user_id=USER_ID) is False, "Deleting a missing memory must return False, not raise."
-
-
-@pytest.mark.integration
-def test_store_error_branches(memory_store):
-    """The parts of the contract a server is most likely to leave out."""
-    store = memory_store
-
-    with pytest.raises(MemoryNotFoundError):
-        store.read("never-written.md", user_id=USER_ID)
-
-    assert store.list("empty/", user_id=USER_ID) == []
-
-    # Mounted behind a prefix, a path outside every route is refused by name.
-    with pytest.raises(MemoryStoreError) as excinfo:
-        CompositeMemoryStore(routes={"user/": store}).write("outside.md", "x", user_id=USER_ID)
-    assert "user/" in str(excinfo.value)
 
 
 @pytest.mark.flaky(reruns=2)

@@ -112,6 +112,10 @@ class CompositeMemoryStore(MemoryStore):
                 described[f"{prefix}{sub_prefix}"] = text
         return described
 
+    def content_limit(self) -> int | None:
+        """The tightest of the routes' limits, since a memory may be written to any of them."""
+        return min((limit for store in self.routes.values() if (limit := store.content_limit())), default=None)
+
     def identity(self):
         """A composite is distinct from its routes, and from any other set of routes."""
         return (self.type, tuple(sorted((prefix, store.identity()) for prefix, store in self.routes.items())))
