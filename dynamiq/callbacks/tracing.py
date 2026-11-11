@@ -1,4 +1,5 @@
 import json
+import threading
 import traceback
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -8,7 +9,7 @@ from importlib.metadata import PackageNotFoundError, distribution
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.callbacks.base import get_execution_run_id, get_parent_run_id, get_run_id
@@ -16,6 +17,11 @@ from dynamiq.clients import BaseTracingClient, DynamiqTracingClient
 from dynamiq.utils import JsonWorkflowEncoder, format_value, generate_uuid
 
 UTC = timezone.utc
+
+PROMPT_MESSAGES_BASE_KEY = "messages_base"
+
+# Module level because a handler is pickled by the process executor, and a lock cannot be.
+_LAST_PROMPTS_LOCK = threading.Lock()
 
 
 class RunStatus(str, Enum):
@@ -132,6 +138,8 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         runs (dict[UUID, Run]): Dictionary of runs.
         tags (list[str]): List of tags.
         installed_pkgs (list[str]): List of installed packages.
+        compact_llm_prompts_enabled (bool): Whether an LLM run that repeats the start of the prompt of the previous
+            run of the same LLM under the same parent stores only the messages that follow that shared start.
     """
     source_id: str | None = Field(default_factory=generate_uuid)
     trace_id: str | None = Field(default_factory=generate_uuid)
@@ -145,6 +153,19 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         ["dynamiq"],
         description="List of installed packages to include in the host information.",
     )
+
+    compact_llm_prompts_enabled: bool = Field(
+        default=False,
+        description=(
+            "Store only the new prompt messages of an LLM run that continues the prompt of the previous run of the "
+            "same LLM under the same parent, such as the iterations of an agent. Such a run gets "
+            "'metadata.node.prompt.messages_base' = {'run_id': <previous run>, 'count': <shared messages>}, and its "
+            "full prompt is the first 'count' messages of that run's full prompt followed by its own messages. "
+            "A run under a parent that lists its whole prompt has 'messages_base' = None."
+        ),
+    )
+
+    _last_prompts: dict[tuple[Any, Any], tuple] = PrivateAttr(default_factory=dict)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -509,13 +530,59 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             run.metadata["usage"] = usage
 
         if prompt_messages := kwargs.get("prompt_messages"):
-            run.metadata["node"]["prompt"]["messages"] = prompt_messages
+            run.metadata["node"]["prompt"]["messages"] = self._compact_prompt_messages(run, prompt_messages)
 
         if tool_data := kwargs.get("tool_data"):
             run.metadata["tool_data"] = tool_data
 
         if hook_events := kwargs.get("hook_events"):
             run.metadata.setdefault("hooks", []).extend(hook_events)
+
+    def _compact_prompt_messages(self, run: Run, messages: list) -> list:
+        """Return the prompt messages to store on an LLM run.
+
+        With compaction enabled, the messages the run shares at the start of its prompt with the previous run of the
+        same LLM under the same parent are left out, and the run records where to find them under
+        PROMPT_MESSAGES_BASE_KEY. A run with no parent, the first run of an LLM under a parent, and a run that shares
+        no message with the previous one keep every message; the last two record None as their base.
+
+        Args:
+            run (Run): The LLM run.
+            messages (list): Every message of the run's prompt.
+
+        Returns:
+            list: The messages to store on the run.
+        """
+        if not self.compact_llm_prompts_enabled or run.parent_run_id is None or not isinstance(messages, list):
+            return messages
+
+        prompt = run.metadata["node"]["prompt"]
+        # A retried run reports the same prompt again. Keeping what it first stored matters: a later run may already
+        # use it as a base, and giving it a new base could make the two runs point at each other.
+        if PROMPT_MESSAGES_BASE_KEY in prompt:
+            return prompt["messages"]
+
+        prompt[PROMPT_MESSAGES_BASE_KEY] = None
+        key = (run.parent_run_id, run.metadata["node"].get("id"))
+        with _LAST_PROMPTS_LOCK:
+            previous = self._last_prompts.get(key)
+            self._last_prompts[key] = (run.id, list(messages))
+
+        if previous is None:
+            return messages
+
+        previous_run_id, previous_messages = previous
+        shared = 0
+        for previous_message, message in zip(previous_messages, messages):
+            if previous_message != message:
+                break
+            shared += 1
+
+        if shared == 0:
+            return messages
+
+        prompt[PROMPT_MESSAGES_BASE_KEY] = {"run_id": previous_run_id, "count": shared}
+        return messages[shared:]
 
     @staticmethod
     def _canceled_message(kind: str, serialized: dict[str, Any]) -> str:
