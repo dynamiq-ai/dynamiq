@@ -2,10 +2,12 @@ import click
 
 from dynamiq.cli.client import ApiClient, ok
 from dynamiq.cli.commands.context import with_api_and_settings
+from dynamiq.cli.commands.memory_evaluation import memory_evaluation
 from dynamiq.cli.commands.workflow import echo_list, echo_response, pagination_options, read_json_arg, require_project
 from dynamiq.cli.config import Settings
 
 evaluation = click.Group(name="evaluation", help="Run and inspect evaluations and metrics")
+evaluation.add_command(memory_evaluation)
 
 
 @evaluation.command("metrics")
