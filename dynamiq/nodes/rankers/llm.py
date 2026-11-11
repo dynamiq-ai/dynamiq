@@ -220,7 +220,7 @@ class LLMDocumentRanker(Node):
         logger.debug(
             f"Node {self.name} - {self.id}: LLM selected {len(selected_documents)} documents for context"
         )
-        return selected_documents
+        return selected_documents[: self.top_k]
 
     def call_llm(self, input_data, prompt, config, **run_kwargs):
         """
