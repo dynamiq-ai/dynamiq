@@ -1,3 +1,4 @@
+import io
 import json
 
 import pytest
@@ -7,6 +8,23 @@ from dynamiq.flows import Flow
 from dynamiq.nodes.tools import HttpApiCall, ResponseType
 from dynamiq.nodes.tools.http_api_call import HttpApiCallInputSchema
 from dynamiq.runnables import RunnableResult, RunnableStatus
+
+
+@pytest.mark.parametrize("named", [True, False])
+def test_http_upload_preserves_filename(requests_mock, named):
+    file = io.BytesIO(b"uploaded content")
+    if named:
+        file.name = "report.pdf"
+    url = "https://api.example.com/upload"
+    upload = requests_mock.post(url, text="ok")
+    tool = HttpApiCall(connection=connections.Http(url=url, method=connections.HTTPMethod.POST))
+
+    tool.execute(HttpApiCallInputSchema(files={"document": file}))
+
+    body = upload.last_request.body
+    filename = "report.pdf" if named else "document"
+    assert f'name="document"; filename="{filename}"'.encode() in body
+    assert b"uploaded content" in body
 
 
 @pytest.mark.parametrize(
