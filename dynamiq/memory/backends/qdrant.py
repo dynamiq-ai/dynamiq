@@ -136,7 +136,10 @@ class Qdrant(MemoryBackend):
         try:
             documents = self.vector_store.list_documents(include_embeddings=False)
             messages = [self._document_to_message(doc) for doc in documents]
-            return sorted(messages, key=lambda msg: msg.metadata.get("timestamp", 0))
+            messages = sorted(messages, key=lambda msg: msg.metadata.get("timestamp", 0))
+            if limit and len(messages) > limit:
+                return messages[-limit:]
+            return messages
         except Exception as e:
             raise QdrantError(f"Failed to retrieve messages from Qdrant: {e}") from e
 
