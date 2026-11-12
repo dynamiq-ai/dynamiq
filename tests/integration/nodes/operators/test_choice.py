@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 from unittest.mock import ANY
 
 import pytest
@@ -795,6 +796,8 @@ def test_workflow_with_string_operator_edge_cases(
         (operators.ConditionOperator.NUMERIC_LESS_THAN_PATH, {"a": 4, "b": 4}, False),
         (operators.ConditionOperator.NUMERIC_LESS_THAN_OR_EQUALS_PATH, {"a": 4, "b": 4}, True),
         (operators.ConditionOperator.NUMERIC_LESS_THAN_OR_EQUALS_PATH, {"a": 5, "b": 4}, False),
+        (operators.ConditionOperator.NUMERIC_LESS_THAN_OR_EQUALS_PATH, {"a": Decimal("0.36"), "b": 0.36}, True),
+        (operators.ConditionOperator.NUMERIC_EQUALS_PATH, {"a": 0.36, "b": Decimal("0.3600")}, True),
         (operators.ConditionOperator.STRING_EQUALS_PATH, {"a": "x", "b": "x"}, True),
         (operators.ConditionOperator.STRING_EQUALS_PATH, {"a": "x", "b": "y"}, False),
         (operators.ConditionOperator.STRING_GREATER_THAN_PATH, {"a": "b", "b": "a"}, True),

@@ -41,6 +41,11 @@ Examples:
 - {"url": "https://api.com/users", "method": "POST", "body": {"name": "John"}}
 - {"url": "https://api.com/upload", "method": "PUT", "files": {"file1.txt": "content1", "file2.pdf": "content2"}}"""
 
+# The client errors a later attempt can get past: a timeout, a conflict with a request still in flight, a request
+# sent too early and a rate limit. Any other 4xx fails the same way on every attempt, so a declined card or a
+# rejected payment is not sent again.
+RETRYABLE_CLIENT_ERROR_CODES = frozenset({408, 409, 425, 429})
+
 
 class ResponseType(str, enum.Enum):
     TEXT = "text"
@@ -216,11 +221,15 @@ class HttpApiCall(ConnectionNode):
         """Validate status and shape the response per response_type."""
         if response.status_code not in self.success_codes:
             logger.error(f"Tool {self.name} - {self.id}: failed to get results.")
-            raise ToolExecutionException(
+            error = ToolExecutionException(
                 f"Request failed with unexpected status code: {response.status_code} and response: {response.text}. "
                 f"Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
+            error.retryable = (
+                not 400 <= response.status_code < 500 or response.status_code in RETRYABLE_CLIENT_ERROR_CODES
+            )
+            raise error
 
         response_type = self.response_type
         if "response_type" not in self.model_fields_set and response.headers.get("content-type") == "application/json":

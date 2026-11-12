@@ -594,7 +594,13 @@ def test_an_agent_hook_is_not_held_to_node_rules_but_its_detector_is():
 def test_node_settings_the_platform_refuses_are_caught_on_every_node():
     node = agent(
         streaming={"enabled": True, "event": "", "mode": "answer", "timeout": 0.5},
-        error_handling={"timeout_seconds": 0, "max_retries": -1, "backoff_rate": 0.5, "behavior": "ignore"},
+        error_handling={
+            "timeout_seconds": 0,
+            "max_retries": -1,
+            "backoff_rate": 0.5,
+            "max_retry_interval_seconds": 0,
+            "behavior": "ignore",
+        },
         max_loops=0,
         behaviour_on_max_loops="stop",
     )
@@ -616,6 +622,7 @@ def test_node_settings_the_platform_refuses_are_caught_on_every_node():
         "node 'helper': error_handling.timeout_seconds 0",
         "node 'helper': error_handling.max_retries -1",
         "node 'helper': error_handling.backoff_rate 0.5",
+        "node 'helper': error_handling.max_retry_interval_seconds 0",
         "node 'helper': error_handling.behavior 'ignore'",
         "node 'helper': max_loops 0",
         "node 'helper': behaviour_on_max_loops 'stop'",

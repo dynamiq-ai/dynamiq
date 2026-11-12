@@ -655,7 +655,7 @@ def check_node_settings(node: dict, where: str) -> list:
 
     handling = node.get("error_handling")
     if isinstance(handling, dict):
-        for key in ("timeout_seconds", "retry_interval_seconds", "backoff_rate"):
+        for key in ("timeout_seconds", "retry_interval_seconds", "backoff_rate", "max_retry_interval_seconds"):
             if _number_below(handling.get(key), 1):
                 errors.append(f"{where}: error_handling.{key} {handling.get(key)!r} must be at least 1.")
         if _number_below(handling.get("max_retries"), 0):

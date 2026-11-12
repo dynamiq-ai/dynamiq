@@ -16,6 +16,7 @@ from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
+from dynamiq.utils.utils import align_decimal_with_float
 
 # Operators whose value is a JSONPath into the input instead of a literal, so a variable can be
 # compared against another variable. Each maps to the literal operator that does the comparison.
@@ -188,6 +189,10 @@ class Choice(Node):
                     "expected exactly one."
                 )
             cond = cond.model_copy(update={"operator": PATH_OPERATORS[cond.operator], "value": matches[0]})
+
+        value, expected = align_decimal_with_float(value, cond.value)
+        if expected is not cond.value:
+            cond = cond.model_copy(update={"value": expected})
 
         if cond.operator == ConditionOperator.BOOLEAN_EQUALS:
             return (value == cond.value) == (not cond.is_not)

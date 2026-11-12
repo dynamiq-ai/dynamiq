@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import pytest
 
 from dynamiq.nodes.operators.decision_table import (
@@ -79,6 +81,9 @@ def test_empty_cell_and_star_match_anything(cell, value):
         ("1e-05", 0.0001, False),
         ("< 1e-3", 0.0001, True),
         (">= 1E6", 999999, False),
+        ("<= 0.36", Decimal("0.3600"), True),
+        (">= 20000", Decimal("25000.00"), True),
+        ("!= 0", Decimal("NaN"), False),
     ],
 )
 def test_comparisons(cell, value, expected):
@@ -99,6 +104,7 @@ def test_comparisons(cell, value, expected):
         ("[1..2]", True, False),
         ("[1e-5..1e-3]", 0.0001, True),
         ("[1e-5..1e-3]", 0.01, False),
+        ("[5000..20000)", Decimal("12000.00"), True),
     ],
 )
 def test_ranges(cell, value, expected):
@@ -134,6 +140,8 @@ def test_column_type_reads_the_value_and_the_cell():
     assert matches("1", 1.0, "float")
     assert matches("> 1e5", "1e6", "float")
     assert matches("1000000", "1E6", "int")
+    assert matches(">= 20000", Decimal("25000.00"), "float")
+    assert matches("700", Decimal("700"), "string")
 
 
 @pytest.mark.parametrize(

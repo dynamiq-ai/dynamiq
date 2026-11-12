@@ -4,6 +4,7 @@ import pytest
 
 from dynamiq import Workflow, connections
 from dynamiq.flows import Flow
+from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.tools import HttpApiCall, ResponseType
 from dynamiq.nodes.tools.http_api_call import HttpApiCallInputSchema
 from dynamiq.runnables import RunnableResult, RunnableStatus
@@ -65,6 +66,21 @@ def test_workflow_with_httpapicall(
     assert call_mock.last_request.url == url
     for header, value in expected_headers.items():
         assert call_mock.last_request.headers.get(header) == value
+
+
+@pytest.mark.parametrize(("status_code", "requests_sent"), [(402, 1), (422, 1), (409, 3), (429, 3), (503, 3)])
+def test_a_refused_request_is_not_sent_again(requests_mock, status_code, requests_sent):
+    url = "https://api.example.com/charges"
+    charge = requests_mock.post(url, status_code=status_code, json={"error": {"code": "card_declined"}})
+    node = HttpApiCall(
+        connection=connections.Http(method=connections.HTTPMethod.POST, url=url),
+        error_handling=ErrorHandling(max_retries=2, retry_interval_seconds=0.01),
+    )
+
+    result = node.run(input_data={"data": {"amount": "100.00", "currency": "EUR"}})
+
+    assert result.status == RunnableStatus.FAILURE
+    assert charge.call_count == requests_sent
 
 
 def test_an_agent_can_read_a_json_body_that_arrived_as_bytes(requests_mock):

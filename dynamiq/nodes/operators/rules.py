@@ -26,7 +26,7 @@ from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.types import DerivedValue, NamedField, Rule, RuleMissingPolicy
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
-from dynamiq.utils.utils import TRUNCATE_LIST_LIMIT, UntruncatedList
+from dynamiq.utils.utils import TRUNCATE_LIST_LIMIT, UntruncatedList, align_decimal_with_float
 
 STATUS_PASSED = "pass"
 STATUS_FAIL = "fail"
@@ -597,6 +597,48 @@ class RuleUndefined(QuotedUndefined, ChainableUndefined):
     __len__ = __iter__ = __contains__ = Undefined._fail_with_undefined_error
 
 
+# The comparisons by the names Jinja's parser gives them; `in` and `not in` stay Python's.
+_COMPARISONS: dict[str, Callable[[Any, Any], Any]] = {
+    "eq": lambda a, b: a == b,
+    "ne": lambda a, b: a != b,
+    "gt": lambda a, b: a > b,
+    "gteq": lambda a, b: a >= b,
+    "lt": lambda a, b: a < b,
+    "lteq": lambda a, b: a <= b,
+}
+
+
+def compare(left: Any, *links: Any) -> Any:
+    """`left op right ...` as Python chains it, each operator by its Jinja name and each right side a function, with
+    a Decimal beside a float compared as `align_decimal_with_float` reads them. A right side is evaluated only once
+    the comparisons before it hold."""
+    result = True
+    for index in range(0, len(links), 2):
+        if index and not result:
+            return result
+        right = links[index + 1]()
+        result = _COMPARISONS[links[index]](*align_decimal_with_float(left, right))
+        left = right
+    return result
+
+
+class RecordCodeGenerator(CodeGenerator):
+    """Jinja's code generator, compiling each comparison to a call of the environment's `compare`, its right sides as
+    functions, and one that holds an `in` or a `not in` as Python's."""
+
+    @optimizeconst
+    def visit_Compare(self, node: nodes.Compare, frame: Frame) -> None:
+        if any(operand.op not in _COMPARISONS for operand in node.ops):
+            super().visit_Compare(node, frame)
+            return
+        self.write("environment.compare(")
+        self.visit(node.expr, frame)
+        for operand in node.ops:
+            self.write(f", {operand.op!r}, lambda: ")
+            self.visit(operand.expr, frame)
+        self.write(")")
+
+
 class RecordSandbox(ImmutableSandboxedEnvironment):
     """The immutable sandbox with a record's keys read before an object's attributes.
 
@@ -609,6 +651,8 @@ class RecordSandbox(ImmutableSandboxedEnvironment):
     """
 
     blank: type[Undefined]
+    code_generator_class = RecordCodeGenerator
+    compare = staticmethod(compare)
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **{"undefined": QuotedUndefined, **kwargs})
@@ -705,7 +749,7 @@ def _deciding(operator: str, helper: str) -> Callable[[CodeGenerator, nodes.BinE
     return visitor
 
 
-class RuleCodeGenerator(CodeGenerator):
+class RuleCodeGenerator(RecordCodeGenerator):
     """Jinja's code generator, compiling each `and` and `or` whose truth alone a check uses (`_mark_deciding`) to a call
     of the environment's `rule_and` or `rule_or` with each side as a function (`_deciding`), which reads the names its
     frame resolved, as it would inline; a lambda cannot hold an `await`, so the sandbox must stay synchronous. It calls

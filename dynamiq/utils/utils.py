@@ -110,6 +110,21 @@ def generate_uuid() -> str:
     return str(uuid4())
 
 
+def align_decimal_with_float(a: Any, b: Any) -> tuple[Any, Any]:
+    """The two sides of a comparison, a finite Decimal beside a float read as its own float.
+
+    A SQL NUMERIC column arrives as a Decimal, which Python compares with a float exactly, while a float holds the
+    binary value nearest the number written: `Decimal('0.36') <= 0.36` is false. The Decimal's own float is the value
+    the same amount sent as JSON holds. Beside an int or another Decimal it stays exact, and a NaN is left to raise
+    when ordered.
+    """
+    if isinstance(a, Decimal) and isinstance(b, float) and a.is_finite():
+        return float(a), b
+    if isinstance(b, Decimal) and isinstance(a, float) and b.is_finite():
+        return a, float(b)
+    return a, b
+
+
 def serialize(obj: Any) -> dict[str, Any]:
     """
     Serialize an object to a JSON-compatible dictionary.

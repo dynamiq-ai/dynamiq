@@ -1494,3 +1494,17 @@ def test_the_readers_return_plain_values_a_workflow_can_serialise():
         "amount": 586764.0,
         "issued": "2026-10-01",
     }
+
+
+def test_a_sql_decimal_meets_a_threshold_written_as_a_float():
+    """A SQL NUMERIC column arrives as a Decimal, which Python compares with a float exactly: Decimal('0.36') is above
+    the float 0.36. Beside a float a Decimal compares as its own float, and beside another Decimal it stays exact."""
+    app = record(dti=Decimal("0.3600"), fee_a=Decimal("0.10"), fee_b=Decimal("0.20"), fee_total=Decimal("0.30"))
+    checks = rules(
+        Rule(id="DTI", check="app.dti <= 0.36"),
+        Rule(id="BAND", check="0.3 < app.dti <= 0.36"),
+        Rule(id="FEES", check="app.fee_a + app.fee_b == app.fee_total"),
+    )
+
+    assert statuses(run(checks, app)) == {"DTI": "pass", "BAND": "pass", "FEES": "pass"}
+    assert evaluate("'A' if rate <= 0.0725 else 'B'", rate=Decimal("0.0725")) == "A"
