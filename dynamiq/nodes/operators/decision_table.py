@@ -171,6 +171,31 @@ def _read_alternatives(alternatives: list[str], column_type: str, where: str) ->
     return [read_literal(alternative, column_type, where) for alternative in alternatives]
 
 
+def _matching_numbers_as_text(
+    alternatives: list[str], literals: list[CellLiteral], column_type: str, negated: bool
+) -> Condition | None:
+    """The condition of an Any column's equality cell, with each number in it also matched by the text it is written
+    as; None for a typed column or a cell that holds no number.
+
+    An Any column reads an unquoted 05 as the number 5, while a response code such as "05" arrives as text.
+    """
+    if column_type != "Any":
+        return None
+    texts = [alternative.strip() for alternative, literal in zip(alternatives, literals) if _is_number(literal)]
+    if not texts:
+        return None
+    if len(literals) == 1:
+        literal, text = literals[0], texts[0]
+        if negated:
+            return lambda value: value is not None and not _equals(value, literal) and value != text
+        return lambda value: value is not None and (_equals(value, literal) or value == text)
+    if negated:
+        return lambda value: (
+            value is not None and not any(_equals(value, literal) for literal in literals) and value not in texts
+        )
+    return lambda value: value is not None and (any(_equals(value, literal) for literal in literals) or value in texts)
+
+
 def compile_condition(text: str, column_type: str, where: str) -> Condition:
     """Turns one condition cell into a predicate over the coerced input value.
 
@@ -212,13 +237,19 @@ def compile_condition(text: str, column_type: str, where: str) -> Condition:
             if symbol not in ("=", "==", "!="):
                 raise ValueError(f"{where}: {symbol} takes one value, not a list")
             literals = _read_alternatives(alternatives, column_type, where)
+            if condition := _matching_numbers_as_text(alternatives, literals, column_type, negated=symbol == "!="):
+                return condition
             if symbol == "!=":
                 return lambda value: value is not None and not any(_equals(value, literal) for literal in literals)
             return lambda value: value is not None and any(_equals(value, literal) for literal in literals)
         literal = read_literal(rest, column_type, where)
         if symbol in ("=", "=="):
+            if condition := _matching_numbers_as_text([rest], [literal], column_type, negated=False):
+                return condition
             return lambda value: value is not None and _equals(value, literal)
         if symbol == "!=":
+            if condition := _matching_numbers_as_text([rest], [literal], column_type, negated=True):
+                return condition
             return lambda value: value is not None and not _equals(value, literal)
         ordering = _ORDERINGS[symbol]
         return lambda value: _comparable(value, literal) and ordering(value, literal)
@@ -226,9 +257,13 @@ def compile_condition(text: str, column_type: str, where: str) -> Condition:
     alternatives = split_alternatives(text)
     if len(alternatives) > 1:
         literals = _read_alternatives(alternatives, column_type, where)
+        if condition := _matching_numbers_as_text(alternatives, literals, column_type, negated=False):
+            return condition
         return lambda value: value is not None and any(_equals(value, literal) for literal in literals)
 
     literal = read_literal(text, column_type, where)
+    if condition := _matching_numbers_as_text([text], [literal], column_type, negated=False):
+        return condition
     return lambda value: value is not None and _equals(value, literal)
 
 
@@ -370,6 +405,11 @@ class DecisionTable(Node):
         numbers = [value for value in outputs if _is_number(value)]
         if not numbers:
             return None
+        if self.aggregation == DecisionAggregation.SUM and any(isinstance(number, float) for number in numbers):
+            # A float cell holds the binary number nearest the decimal written in it, and adding the binaries drifts
+            # from the written sum: 0.2 + 0.1 gives 0.30000000000000004. Each float's shortest repr is the decimal
+            # written, so the sum adds those decimals; a sum of ints is exact as it is.
+            return float(sum(Decimal(repr(number)) for number in numbers))
         return _FOLDS[self.aggregation](numbers)
 
     def _folds_numbers(self, index: int, column: NamedField) -> bool:

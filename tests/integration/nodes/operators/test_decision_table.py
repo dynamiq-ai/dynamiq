@@ -67,6 +67,21 @@ def test_collect_aggregations(aggregation, llpa):
     assert result.output["llpa"] == llpa
 
 
+@pytest.mark.parametrize(("cells", "total"), [(["0.2", "0.1"], 0.3), (["0.7", "0.1"], 0.8), (["10", "1"], 11)])
+def test_collect_sum_adds_the_cells_as_written(cells, total):
+    table = DecisionTable(
+        hit_policy="collect",
+        aggregation="sum",
+        input_columns=[NamedField(name="channel", type="string")],
+        output_columns=[NamedField(name="fee", type="Any")],
+        rules=[DecisionRule(when=[""], then=[cell]) for cell in cells],
+    )
+
+    fee = run_node(table, {"channel": "ecom"}).output["fee"]
+
+    assert fee == total and type(fee) is type(total)
+
+
 def test_a_folded_any_column_reads_none_like_a_numeric_one_when_nothing_matches():
     def table(column_type: str) -> DecisionTable:
         return DecisionTable(

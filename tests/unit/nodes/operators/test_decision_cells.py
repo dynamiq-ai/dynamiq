@@ -53,7 +53,7 @@ def test_empty_cell_and_star_match_anything(cell, value):
     [
         ("700", 700, True),
         ("700", 700.0, True),
-        ("700", "700", False),
+        ("700", "700", True),
         ("FHA", "FHA", True),
         ("FHA", "fha", False),
         ("true", True, True),
@@ -83,6 +83,13 @@ def test_empty_cell_and_star_match_anything(cell, value):
         (">= 1E6", 999999, False),
         ("<= 0.36", Decimal("0.3600"), True),
         ("!= 0", Decimal("NaN"), False),
+        ("05", "05", True),
+        ("= 05", "05", True),
+        ("!= 05", "05", False),
+        ("!= 05", 5, False),
+        ("!= 05, 51", "51", False),
+        ("!= 05, 51", 51, False),
+        (">= 05", "05", False),
     ],
 )
 def test_comparisons(cell, value, expected):
@@ -118,6 +125,7 @@ def test_ranges(cell, value, expected):
         ('1, 2, "3"', 2, True),
         ('1, 2, "3"', "3", True),
         ('1, 2, "3"', 3, False),
+        ("05, 51", "51", True),
     ],
 )
 def test_lists(cell, value, expected):
