@@ -1496,15 +1496,31 @@ def test_the_readers_return_plain_values_a_workflow_can_serialise():
     }
 
 
-def test_a_sql_decimal_meets_a_threshold_written_as_a_float():
+@pytest.mark.parametrize(
+    ("check", "app", "status"),
+    [
+        ("app.dti <= 0.36", {"dti": Decimal("0.3600")}, "pass"),
+        ("0.3 < app.dti <= 0.36", {"dti": Decimal("0.3600")}, "pass"),
+        ("app.dti is le(0.36)", {"dti": Decimal("0.3600")}, "pass"),
+        (
+            "app.items | selectattr('rate', 'le', 0.0725) | list | length == 1",
+            {"items": [{"rate": Decimal("0.0725")}]},
+            "pass",
+        ),
+        ("app.wei > 1e18", {"wei": Decimal("1000000000000000001")}, "pass"),
+        (
+            "app.fee_a + app.fee_b == app.fee_total",
+            {"fee_a": Decimal("0.10"), "fee_b": Decimal("0.20"), "fee_total": Decimal("0.30")},
+            "pass",
+        ),
+        ("not (app.amount > app.limit)", {"amount": Decimal("100"), "limit": float("nan")}, "not_evaluated"),
+    ],
+)
+def test_a_sql_decimal_meets_a_threshold_written_as_a_float(check, app, status):
     """A SQL NUMERIC column arrives as a Decimal, which Python compares with a float exactly: Decimal('0.36') is above
-    the float 0.36. Beside a float a Decimal compares as its own float, and beside another Decimal it stays exact."""
-    app = record(dti=Decimal("0.3600"), fee_a=Decimal("0.10"), fee_b=Decimal("0.20"), fee_total=Decimal("0.30"))
-    checks = rules(
-        Rule(id="DTI", check="app.dti <= 0.36"),
-        Rule(id="BAND", check="0.3 < app.dti <= 0.36"),
-        Rule(id="FEES", check="app.fee_a + app.fee_b == app.fee_total"),
-    )
+    the float 0.36."""
+    assert statuses(run(rules(Rule(id="R", check=check)), record(**app))) == {"R": status}
 
-    assert statuses(run(checks, app)) == {"DTI": "pass", "BAND": "pass", "FEES": "pass"}
+
+def test_an_expression_decides_on_a_sql_decimal_as_a_rule_does():
     assert evaluate("'A' if rate <= 0.0725 else 'B'", rate=Decimal("0.0725")) == "A"

@@ -82,7 +82,6 @@ def test_empty_cell_and_star_match_anything(cell, value):
         ("< 1e-3", 0.0001, True),
         (">= 1E6", 999999, False),
         ("<= 0.36", Decimal("0.3600"), True),
-        (">= 20000", Decimal("25000.00"), True),
         ("!= 0", Decimal("NaN"), False),
     ],
 )

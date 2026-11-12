@@ -819,6 +819,27 @@ def test_evaluate_path_operators(operator, input_data, expected):
     assert operators.Choice.evaluate(negated, input_data) is (not expected)
 
 
+@pytest.mark.parametrize(
+    ("operator", "value", "data", "expected"),
+    [
+        (operators.ConditionOperator.NUMERIC_LESS_THAN_OR_EQUALS, 0.36, Decimal("0.3600"), True),
+        (operators.ConditionOperator.NUMERIC_GREATER_THAN, 1e18, Decimal("1000000000000000001"), True),
+        (operators.ConditionOperator.STRING_EQUALS, 0.36, Decimal("0.36"), False),
+    ],
+)
+def test_evaluate_compares_a_sql_decimal_with_a_float_threshold_as_written(operator, value, data, expected):
+    condition = operators.ChoiceCondition(operator=operator, variable="$.a", value=value)
+    assert operators.Choice.evaluate(condition, {"a": data}) is expected
+
+
+def test_evaluate_refuses_to_order_a_decimal_against_nan():
+    condition = operators.ChoiceCondition(
+        operator=operators.ConditionOperator.NUMERIC_GREATER_THAN_PATH, variable="$.a", value="$.b", is_not=True
+    )
+    with pytest.raises(ArithmeticError):
+        operators.Choice.evaluate(condition, {"a": Decimal("100"), "b": float("nan")})
+
+
 def test_every_path_operator_is_evaluable():
     path_operators = {operator for operator in operators.ConditionOperator if operator.value.endswith("-path")}
     assert path_operators == set(operators.PATH_OPERATORS)

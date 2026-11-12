@@ -34,6 +34,17 @@ PATH_OPERATORS: dict[ConditionOperator, ConditionOperator] = {
     ConditionOperator.STRING_LESS_THAN_OR_EQUALS_PATH: ConditionOperator.STRING_LESS_THAN_OR_EQUALS,
 }
 
+# The operators that compare numbers, where a Decimal beside a float compares as `align_decimal_with_float` reads them.
+NUMERIC_OPERATORS = frozenset(
+    {
+        ConditionOperator.NUMERIC_EQUALS,
+        ConditionOperator.NUMERIC_GREATER_THAN,
+        ConditionOperator.NUMERIC_GREATER_THAN_OR_EQUALS,
+        ConditionOperator.NUMERIC_LESS_THAN,
+        ConditionOperator.NUMERIC_LESS_THAN_OR_EQUALS,
+    }
+)
+
 
 class ChoiceOption(BaseModel):
     """Represents an option for a choice node."""
@@ -190,9 +201,10 @@ class Choice(Node):
                 )
             cond = cond.model_copy(update={"operator": PATH_OPERATORS[cond.operator], "value": matches[0]})
 
-        value, expected = align_decimal_with_float(value, cond.value)
-        if expected is not cond.value:
-            cond = cond.model_copy(update={"value": expected})
+        if cond.operator in NUMERIC_OPERATORS:
+            value, expected = align_decimal_with_float(value, cond.value)
+            if expected is not cond.value:
+                cond = cond.model_copy(update={"value": expected})
 
         if cond.operator == ConditionOperator.BOOLEAN_EQUALS:
             return (value == cond.value) == (not cond.is_not)

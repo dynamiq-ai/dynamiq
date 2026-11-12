@@ -41,10 +41,11 @@ Examples:
 - {"url": "https://api.com/users", "method": "POST", "body": {"name": "John"}}
 - {"url": "https://api.com/upload", "method": "PUT", "files": {"file1.txt": "content1", "file2.pdf": "content2"}}"""
 
-# The client errors a later attempt can get past: a timeout, a conflict with a request still in flight, a request
-# sent too early and a rate limit. Any other 4xx fails the same way on every attempt, so a declined card or a
-# rejected payment is not sent again.
-RETRYABLE_CLIENT_ERROR_CODES = frozenset({408, 409, 425, 429})
+# The answers a later attempt can get past, besides a server error and any answer that says when to try again: a
+# resource not there yet, a timeout, a conflict with a request still in flight, a request sent too early and a rate
+# limit. Any other answer comes back the same however often the request is sent, so a declined card or a rejected
+# payment is sent once, and so is a payment the server took under a success code the node does not expect.
+RETRYABLE_STATUS_CODES = frozenset({404, 408, 409, 425, 429})
 
 
 class ResponseType(str, enum.Enum):
@@ -227,7 +228,9 @@ class HttpApiCall(ConnectionNode):
                 recoverable=True,
             )
             error.retryable = (
-                not 400 <= response.status_code < 500 or response.status_code in RETRYABLE_CLIENT_ERROR_CODES
+                response.status_code >= 500
+                or response.status_code in RETRYABLE_STATUS_CODES
+                or "retry-after" in response.headers
             )
             raise error
 

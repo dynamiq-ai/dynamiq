@@ -103,10 +103,10 @@ def read_literal(text: str, column_type: str, where: str) -> CellLiteral:
 def coerce_value(value: Any, column_type: str) -> Any:
     """The incoming value read as the column type. None means it cannot be, and only an empty cell matches."""
     if isinstance(value, Decimal):
-        # A SQL NUMERIC column arrives as a Decimal, which no numeric cell would match: it reads as the number its
-        # text writes, as the same amount sent as JSON does, and NaN or Infinity as no number.
-        text = str(value)
-        value = _number(text) if _NUMBER.match(text) else None
+        # A SQL NUMERIC column arrives as a Decimal, which a numeric column read as no number and a range or an ordering
+        # never matched: it reads as the number its text writes, as the same amount sent as JSON does, and a NaN or an
+        # infinity as no number.
+        value = _number(str(value)) if value.is_finite() else None
     if value is None or column_type == "Any":
         return value
     if column_type in NUMERIC_TYPES:

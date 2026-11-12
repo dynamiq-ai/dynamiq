@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import inspect
+import math
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
@@ -111,17 +112,17 @@ def generate_uuid() -> str:
 
 
 def align_decimal_with_float(a: Any, b: Any) -> tuple[Any, Any]:
-    """The two sides of a comparison, a finite Decimal beside a float read as its own float.
+    """The two sides of a comparison, with a finite float beside a Decimal read as the decimal it writes.
 
     A SQL NUMERIC column arrives as a Decimal, which Python compares with a float exactly, while a float holds the
-    binary value nearest the number written: `Decimal('0.36') <= 0.36` is false. The Decimal's own float is the value
-    the same amount sent as JSON holds. Beside an int or another Decimal it stays exact, and a NaN is left to raise
-    when ordered.
+    binary value nearest the number written: `Decimal('0.36') <= 0.36` is false. Read through its shortest repr, the
+    float is the number its author wrote, `Decimal('0.36')`, and the Decimal keeps every digit it has. A NaN is left
+    as it is, so ordering one against a Decimal still raises.
     """
-    if isinstance(a, Decimal) and isinstance(b, float) and a.is_finite():
-        return float(a), b
-    if isinstance(b, Decimal) and isinstance(a, float) and b.is_finite():
-        return a, float(b)
+    if isinstance(a, Decimal) and isinstance(b, float) and math.isfinite(b):
+        return a, Decimal(float.__repr__(b))
+    if isinstance(b, Decimal) and isinstance(a, float) and math.isfinite(a):
+        return Decimal(float.__repr__(a)), b
     return a, b
 
 

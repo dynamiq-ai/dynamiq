@@ -68,19 +68,33 @@ def test_workflow_with_httpapicall(
         assert call_mock.last_request.headers.get(header) == value
 
 
-@pytest.mark.parametrize(("status_code", "requests_sent"), [(402, 1), (422, 1), (409, 3), (429, 3), (503, 3)])
-def test_a_refused_request_is_not_sent_again(requests_mock, status_code, requests_sent):
-    url = "https://api.example.com/charges"
-    charge = requests_mock.post(url, status_code=status_code, json={"error": {"code": "card_declined"}})
+@pytest.mark.parametrize(
+    ("status_code", "headers", "requests_sent"),
+    [
+        (201, {}, 1),
+        (402, {}, 1),
+        (422, {}, 1),
+        (403, {"Retry-After": "1"}, 3),
+        (404, {}, 3),
+        (409, {}, 3),
+        (429, {}, 3),
+        (503, {}, 3),
+    ],
+)
+def test_a_request_is_sent_again_only_where_a_later_attempt_can_pass(
+    requests_mock, status_code, headers, requests_sent
+):
+    url = "https://api.example.com/payments"
+    payment = requests_mock.post(url, status_code=status_code, headers=headers, json={})
     node = HttpApiCall(
         connection=connections.Http(method=connections.HTTPMethod.POST, url=url),
         error_handling=ErrorHandling(max_retries=2, retry_interval_seconds=0.01),
     )
 
-    result = node.run(input_data={"data": {"amount": "100.00", "currency": "EUR"}})
+    result = node.run(input_data={})
 
     assert result.status == RunnableStatus.FAILURE
-    assert charge.call_count == requests_sent
+    assert payment.call_count == requests_sent
 
 
 def test_an_agent_can_read_a_json_body_that_arrived_as_bytes(requests_mock):

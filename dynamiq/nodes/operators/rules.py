@@ -597,7 +597,8 @@ class RuleUndefined(QuotedUndefined, ChainableUndefined):
     __len__ = __iter__ = __contains__ = Undefined._fail_with_undefined_error
 
 
-# The comparisons by the names Jinja's parser gives them; `in` and `not in` stay Python's.
+# The comparisons by the names Jinja's parser gives them. Membership, `in` and `not in`, stays Python's: it compares a
+# value with the items of whatever holds them, text included, as their own `==` does.
 _COMPARISONS: dict[str, Callable[[Any, Any], Any]] = {
     "eq": lambda a, b: a == b,
     "ne": lambda a, b: a != b,
@@ -607,11 +608,14 @@ _COMPARISONS: dict[str, Callable[[Any, Any], Any]] = {
     "lteq": lambda a, b: a <= b,
 }
 
+# The tests that compare two values, which `select`, `reject`, `selectattr` and `rejectattr` also call by name.
+_COMPARISON_TESTS = "== eq equalto != ne < lt lessthan <= le > gt greaterthan >= ge".split()
+
 
 def compare(left: Any, *links: Any) -> Any:
     """`left op right ...` as Python chains it, each operator by its Jinja name and each right side a function, with
-    a Decimal beside a float compared as `align_decimal_with_float` reads them. A right side is evaluated only once
-    the comparisons before it hold."""
+    a Decimal beside a float compared as `align_decimal_with_float` reads them. Each right side is a function so that,
+    as in Python's chain, it is evaluated only once the comparisons before it hold."""
     result = True
     for index in range(0, len(links), 2):
         if index and not result:
@@ -622,13 +626,25 @@ def compare(left: Any, *links: Any) -> Any:
     return result
 
 
+def _aligning(test: Callable[..., Any]) -> Callable[..., Any]:
+    """A comparison test that reads a Decimal beside a float as `compare` does, so `x is le(0.36)` agrees with
+    `x <= 0.36`."""
+
+    @functools.wraps(test)
+    def align(value: Any, other: Any) -> Any:
+        return test(*align_decimal_with_float(value, other))
+
+    return align
+
+
 class RecordCodeGenerator(CodeGenerator):
-    """Jinja's code generator, compiling each comparison to a call of the environment's `compare`, its right sides as
-    functions, and one that holds an `in` or a `not in` as Python's."""
+    """Jinja's code generator, compiling each comparison to a call of the environment's `compare`, so that a SQL
+    Decimal meets a threshold written as a float. One that holds an `in` or a `not in` stays Python's, and so does
+    every comparison in an async environment, where a function cannot hold the `await` a right side may need."""
 
     @optimizeconst
     def visit_Compare(self, node: nodes.Compare, frame: Frame) -> None:
-        if any(operand.op not in _COMPARISONS for operand in node.ops):
+        if self.environment.is_async or any(operand.op not in _COMPARISONS for operand in node.ops):
             super().visit_Compare(node, frame)
             return
         self.write("environment.compare(")
@@ -660,6 +676,7 @@ class RecordSandbox(ImmutableSandboxedEnvironment):
         self.globals.update(HELPERS)
         self.tests.update(TESTS)
         self.tests.update({name: _refuses_unreadable(test) for name, test in self.tests.items()})
+        self.tests.update({name: _aligning(self.tests[name]) for name in _COMPARISON_TESTS})
         for name in _TEXT_FILTERS:
             self.filters[name] = _keeps_blank(self.filters[name])
 
