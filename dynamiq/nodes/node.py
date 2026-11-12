@@ -48,6 +48,7 @@ from dynamiq.nodes.schema_utils import apply_param_modes, strip_inaccessible_fie
 from dynamiq.nodes.types import ActionType, Behavior, ChoiceCondition, DependencyTrigger, InputParamMode, NodeGroup
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.storages.vector.base import BaseVectorStoreParams
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.dry_run import DryRunConfig
@@ -246,6 +247,26 @@ def share_input_queues(nodes: Iterable["Node"], config: RunnableConfig) -> Itera
                 shared.maps -= 1
                 if not shared.maps:
                     del _shared_input_queues[key]
+
+
+# The copies made on this thread while isolated_in_memory_file_stores runs, by the id of the store copied.
+_in_memory_file_store_copies = threading.local()
+
+
+@contextmanager
+def isolated_in_memory_file_stores() -> Iterator[None]:
+    """Make the nodes cloned on this thread while the block runs copy the in-memory file stores they hold.
+
+    Node.clone() shares a file store, so that the copy of a tool run in parallel writes where its agent reads. In the
+    block each store is copied once, with the files it holds, and every node cloned there holds that copy in its place,
+    so an agent and its file tools still share one store. A store that keeps its files elsewhere stays shared.
+    """
+    previous = getattr(_in_memory_file_store_copies, "copies", None)
+    _in_memory_file_store_copies.copies = {}
+    try:
+        yield
+    finally:
+        _in_memory_file_store_copies.copies = previous
 
 
 class ErrorHandling(BaseModel):
@@ -892,10 +913,15 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
     def clone(self) -> "Node":
         """Create a safe clone of the node."""
         cloned_node = self.model_copy(deep=False)
+        file_store_copies = getattr(_in_memory_file_store_copies, "copies", None)
 
         def _clone_nested(value: Any) -> Any:
             if isinstance(value, (ModuleType, FunctionType)) or isinstance(value, type) or callable(value):
                 return value
+            if file_store_copies is not None and isinstance(value, InMemoryFileStore):
+                if id(value) not in file_store_copies:
+                    file_store_copies[id(value)] = value.model_copy(deep=True)
+                return file_store_copies[id(value)]
             if getattr(value, "_clone_shared", False):
                 return value
             if isinstance(value, Node):

@@ -8,7 +8,7 @@ import dynamiq.utils.jsonpath as jsonpath
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes import Behavior, Node, NodeGroup
 from dynamiq.nodes.cloning import carry_mock_exclusions, regenerate_node_ids, reply_waiting_nodes
-from dynamiq.nodes.node import Transformer, ensure_config, share_input_queues
+from dynamiq.nodes.node import Transformer, ensure_config, isolated_in_memory_file_stores, share_input_queues
 from dynamiq.nodes.tools.mcp import resolve_mcp_node
 from dynamiq.nodes.types import ChoiceCondition, ChoiceHitPolicy, ConditionOperator
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
@@ -298,7 +298,9 @@ class Map(Node):
     def execute_workflow(self, index, data, config, merged_kwargs, node, keep_ids: frozenset[str] = frozenset()):
         """Execute a single workflow and handle errors."""
         id_map: dict[str, set[str]] = {}
-        node_copy = regenerate_node_ids(node.clone(), id_map, keep_ids=keep_ids)
+        # A file store shared by the items' copies would show the agent of each item the files uploaded for the others.
+        with isolated_in_memory_file_stores():
+            node_copy = regenerate_node_ids(node.clone(), id_map, keep_ids=keep_ids)
         # Only a clone that overrides the base hook holds anything to clean; keeping the rest would
         # retain one node per item for a whole run, and a dry run is the default.
         if (
