@@ -9,7 +9,7 @@ from dynamiq.nodes.node import ConnectionNode, ErrorHandling, ensure_config
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig
 
-HUGGINGFACE_URL = "https://api-inference.huggingface.co/models/"
+HUGGINGFACE_URL = "https://router.huggingface.co/hf-inference/models/"
 
 
 class PIIDetectorInputSchema(BaseModel):
@@ -76,7 +76,7 @@ class PIIDetector(ConnectionNode):
         Args:
             message (str): The input message to analyze for prompt injection.
         """
-        api_url = urljoin(HUGGINGFACE_URL, self.model)
+        api_url = self.connection.url or urljoin(HUGGINGFACE_URL, self.model)
         headers = {"Authorization": f"Bearer {self.connection.api_key}"}
         payload = {
             "inputs": message,
@@ -84,7 +84,11 @@ class PIIDetector(ConnectionNode):
         response = requests.post(api_url, headers=headers, json=payload, timeout=self.timeout)
 
         if response.status_code == 200:
-            result = [item["entity_group"] for item in response.json()]
+            result = [item.get("entity_group", item.get("entity")) for item in response.json()]
+            if None in result:
+                # A text classifier, such as one endpoint shared with the prompt-injection detector, labels the whole
+                # text; read as entities, its labels would flag every message.
+                raise ValueError("The model returned no entities; the PII detector needs a token-classification model.")
             return {"is_detected": bool(result), "detected_pii": result}
         elif response.status_code in [400, 401]:
             raise ValueError("Request failed. Possible causes: bad request or invalid API key.")
@@ -98,17 +102,19 @@ class PIIDetector(ConnectionNode):
         Args:
             message (str): The input message to analyze for prompt injection.
         """
-        connection_url = urljoin(self.connection.url, "guard")
+        payload = {"messages": [{"content": message, "role": "user"}], "breakdown": True}
+        if self.connection.project_id:
+            payload["project_id"] = self.connection.project_id
         response = self.client.post(
-            connection_url,
-            headers=self.connection.conn_params,
-            json={"messages": [{"content": message, "role": "user"}], "breakdown": True},
-            timeout=self.timeout,
+            self.connection.guard_url, headers=self.connection.conn_params, json=payload, timeout=self.timeout
         )
 
         if response.status_code == 200:
+            # The breakdown lists every detector of the project's policy, prompt attacks and links included.
             result = [
-                item["detector_type"] for item in response.json().get("breakdown", []) if item["detected"] is True
+                item["detector_type"]
+                for item in response.json().get("breakdown", [])
+                if item["detected"] is True and item["detector_type"].startswith("pii/")
             ]
             return {"is_detected": bool(result), "detected_pii": result}
         elif response.status_code == 401:

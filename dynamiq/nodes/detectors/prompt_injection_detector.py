@@ -1,3 +1,5 @@
+import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, ClassVar, Literal
 from urllib.parse import urljoin
 
@@ -9,7 +11,26 @@ from dynamiq.nodes.node import ConnectionNode, ErrorHandling, ensure_config
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig
 
-HUGGINGFACE_URL = "https://api-inference.huggingface.co/models/"
+HUGGINGFACE_URL = "https://router.huggingface.co/hf-inference/models/"
+
+# Labels of the prompt-injection classifiers on the Hugging Face Hub: protectai (SAFE, INJECTION), deepset (LEGIT,
+# INJECTION), Prompt Guard v1 (BENIGN, INJECTION, JAILBREAK), Prompt Guard 2 (BENIGN, MALICIOUS) and configs that
+# keep the generic names (LABEL_0, LABEL_1).
+BENIGN_LABELS = frozenset({"SAFE", "LEGIT", "BENIGN", "LABEL_0"})
+ATTACK_LABELS = frozenset({"INJECTION", "JAILBREAK", "MALICIOUS", "LABEL_1"})
+
+# These classifiers read at most 512 tokens and their servers drop the rest silently, so longer text is scored in
+# overlapping windows, cut from the text folded with NFKC as their DeBERTa-v3 tokenizers fold it. Folded, any script
+# takes at most one token per character, so a window of 500 is read whole and the overlap holds an injection that the
+# edge of a window cuts. Unfolded, a character such as "\u3307" alone takes five tokens.
+WINDOW_CHARS = 500
+WINDOW_OVERLAP_CHARS = 100
+MAX_PARALLEL_REQUESTS = 4
+ATTACK_THRESHOLD = 0.5
+
+# Lakera detectors whose flags are no attack: personal data is the job of the pii hook, which masks it, and a link
+# alone is not an injection. Both are in Lakera's default policy.
+LAKERA_NON_ATTACK_DETECTORS = ("pii/", "unknown_links")
 
 
 class PromptInjDetectorInputSchema(BaseModel):
@@ -73,47 +94,92 @@ class PromptInjectionDetector(ConnectionNode):
 
     def huggingface_detect(self, message: str) -> dict[str, Any]:
         """
-        Detects prompt injection attempts in a given message using a Hugging Face model.
+        Detects prompt injection attempts in a given message using a Hugging Face text-classification model,
+        served by the Hugging Face router or by the connection's own endpoint.
 
         Args:
             message (str): The input message to analyze for prompt injection.
-        """
-        api_url = urljoin(HUGGINGFACE_URL, self.model)
-        headers = {"Authorization": f"Bearer {self.connection.api_key}"}
-        payload = {
-            "inputs": message,
-        }
-        response = requests.post(api_url, headers=headers, json=payload, timeout=self.timeout)
 
-        if response.status_code == 200:
-            try:
-                injection_score = next(item["score"] for item in response.json()[0] if item["label"] == "INJECTION")
-                safe_score = next(item["score"] for item in response.json()[0] if item["label"] == "SAFE")
-                return {"prompt_detected": injection_score > safe_score}
-            except Exception:
-                raise ValueError("Failed not determine prompt injection.")
-        elif response.status_code in [400, 401]:
-            raise ValueError("Request failed. Possible causes: bad request or invalid API key.")
-        else:
-            raise ValueError(f"Request failed with status code {response.status_code}")
+        Returns:
+            dict[str, Any]: ``prompt_detected`` and ``score``, the highest attack probability of any window.
+        """
+        api_url = self.connection.url or urljoin(HUGGINGFACE_URL, self.model)
+        headers = {"Authorization": f"Bearer {self.connection.api_key}"}
+        windows = split_windows(unicodedata.normalize("NFKC", message), WINDOW_CHARS, WINDOW_OVERLAP_CHARS)
+
+        def score(window: str) -> float:
+            response = requests.post(api_url, headers=headers, json={"inputs": window}, timeout=self.timeout)
+            if response.status_code in [400, 401]:
+                raise ValueError("Request failed. Possible causes: bad request or invalid API key.")
+            if response.status_code != 200:
+                raise ValueError(f"Request failed with status code {response.status_code}")
+            return attack_probability(response.json())
+
+        with ThreadPoolExecutor(max_workers=min(len(windows), MAX_PARALLEL_REQUESTS)) as pool:
+            highest = max(pool.map(score, windows))
+        return {"prompt_detected": highest > ATTACK_THRESHOLD, "score": highest}
 
     def lakera_detect(self, message: str) -> dict[str, Any]:
         """
         Detects prompt injection attempts in a given message using a Lakera endpoint.
 
+        Lakera flags a request when any detector of the project's policy fires. A flag that only the detectors of
+        ``LAKERA_NON_ATTACK_DETECTORS`` raised does not count; any other does, content moderation and custom detectors
+        included, and so does a flag the breakdown does not explain. A project in Lakera's Detect mode never flags, so
+        it never blocks here either.
+
         Args:
             message (str): The input message to analyze for prompt injection.
         """
-        connection_url = urljoin(self.connection.url, "guard")
+        payload = {"messages": [{"content": message, "role": "user"}], "breakdown": True}
+        if self.connection.project_id:
+            payload["project_id"] = self.connection.project_id
         response = self.client.post(
-            connection_url,
-            headers=self.connection.conn_params,
-            json={"messages": [{"content": message, "role": "user"}], "breakdown": False},
-            timeout=self.timeout,
+            self.connection.guard_url, headers=self.connection.conn_params, json=payload, timeout=self.timeout
         )
-        if response.status_code == 200:
-            return {"prompt_detected": response.json().get("flagged")}
-        elif response.status_code == 401:
+        if response.status_code == 401:
             raise ValueError("Invalid API key")
-        else:
+        if response.status_code != 200:
             raise ValueError(f"Request failed with status code {response.status_code}")
+
+        result = response.json()
+        if result.get("flagged") is None:
+            raise ValueError("Lakera returned no `flagged` verdict")
+        breakdown = result.get("breakdown") or []
+        detected = [str(item.get("detector_type", "")) for item in breakdown if item.get("detected")]
+        attack = not detected or any(not detector.startswith(LAKERA_NON_ATTACK_DETECTORS) for detector in detected)
+        return {"prompt_detected": bool(result["flagged"]) and attack}
+
+
+def split_windows(text: str, size: int, overlap: int) -> list[str]:
+    """``text`` in windows of at most ``size`` characters, each starting ``overlap`` characters before the previous one
+    ends."""
+    if len(text) <= size:
+        return [text]
+    return [text[start : start + size] for start in range(0, len(text) - overlap, size - overlap)]
+
+
+def attack_probability(predictions: list) -> float:
+    """The probability that a classified text is an attack, from a text-classification response.
+
+    The response lists ``{label, score}`` for every class or only for the top one, nested in a list per input by the
+    legacy Inference API.
+
+    Raises:
+        ValueError: The response is no list of labels, holds no label, or holds a label that is not one of
+            ``BENIGN_LABELS`` or ``ATTACK_LABELS``, so the model is not a prompt-injection classifier this node can
+            read.
+    """
+    if not isinstance(predictions, list):
+        raise ValueError(f"The classifier returned no list of labels: {predictions}")
+    if predictions and isinstance(predictions[0], list):
+        predictions = predictions[0]
+    scores = {str(item["label"]).upper(): float(item["score"]) for item in predictions}
+    if not scores:
+        raise ValueError("The classifier returned no label.")
+    if unknown := scores.keys() - BENIGN_LABELS - ATTACK_LABELS:
+        raise ValueError(f"Unrecognized classifier labels {sorted(unknown)}; not a prompt-injection classifier.")
+    attack = [score for label, score in scores.items() if label in ATTACK_LABELS]
+    if attack:
+        return sum(attack)
+    return 1 - sum(scores.values())

@@ -56,6 +56,7 @@ from dynamiq.nodes.agents.hooks import (
     current_hook_ctx,
     resolve_hook,
 )
+from dynamiq.nodes.agents.hooks.builtin import map_strings
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.agents.shared_session import (
@@ -1023,6 +1024,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             try:
                 try:
                     input_message = self._apply_input_hooks(input_message, config, **kwargs)
+                    self._apply_input_hooks_to_context(input_data, config, **kwargs)
                     result = self._run_agent(input_message, history_messages, config=config, **kwargs)
                     result = self._run_hooks(HookPoint.ON_OUTPUT, result, config, **kwargs).value
                 except HookAnswerException as blocked:
@@ -1266,8 +1268,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         if message.role == MessageRole.USER:
             return content.startswith("Observation:")
 
+        if message.role == MessageRole.TOOL:
+            return True
+
         if message.role == MessageRole.ASSISTANT:
-            if content.startswith("Thought:") or content.startswith("Function call:"):
+            # In function calling the final answer is itself a tool call, made before the on_output hooks ran.
+            if content.startswith("Thought:") or content.startswith("Function call:") or message.tool_calls:
                 return True
 
             if self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
@@ -1950,6 +1956,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             config=config,
             hooks=[*inherited, *self._own_hook_pairs()],
             trusted=dict(getattr(config, "trusted_context", None) or {}),
+            parent=parent,
         )
         if parent is not None:
             ctx.lock = parent.lock
@@ -2049,10 +2056,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         *,
         call: ToolCall | None = None,
         tool_call_id: str | None = None,
+        runner: HookRunner | None = None,
         **kwargs,
     ) -> HookRun:
-        """Run one hook point, record its events on this agent's run (trace) and stream a block if there is one."""
-        runner = self._hook_runner()
+        """Run one hook point, record its events on this agent's run (trace) and stream a block if there is one.
+        ``runner`` narrows the hooks to a subset of the run's."""
+        runner = runner or self._hook_runner()
         if not runner.has(point):
             return HookRun(value=value)
         ctx = current_hook_ctx.get() or HookContext(agent_name=self.name, agent_id=self.id)
@@ -2182,6 +2191,22 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             return message.model_copy(update={"content": hooked})
         media = [part for part in message.content if not isinstance(part, VisionMessageTextContent)]
         return message.model_copy(update={"content": [VisionMessageTextContent(text=hooked), *media]})
+
+    def _apply_input_hooks_to_context(self, input_data: AgentInputSchema, config, **kwargs) -> None:
+        """``on_input`` of the hooks that set ``screens_context`` on each text value of the run input's ``context``,
+        which the system prompt shows the model. A list or dict keeps its shape."""
+        context = (input_data.model_extra or {}).get("context")
+        runner = self._hook_runner()
+        pairs = [(key, hook) for key, hook in zip(runner.keys, runner.hooks) if hook.screens_context]
+        if context is None or not pairs:
+            return
+        screening = HookRunner([hook for _, hook in pairs], [key for key, _ in pairs])
+
+        def screen(text: str) -> str:
+            return self._run_hooks(HookPoint.ON_INPUT, text, config, runner=screening, **kwargs).value if text else text
+
+        if (hooked := map_strings(context, screen)) != context:
+            self.system_prompt_manager.update_variables({"context": hooked})
 
     def _run_tool(
         self,

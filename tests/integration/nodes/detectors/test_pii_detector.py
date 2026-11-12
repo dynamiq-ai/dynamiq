@@ -9,16 +9,13 @@ from dynamiq.nodes.detectors import PIIDetector
 
 
 @pytest.mark.parametrize(
-    ("connection", "url", "mock_request_data"),
+    ("connection", "url", "mock_request_data", "output"),
     [
         (
             HuggingFace(),
-            "https://api-inference.huggingface.co/models/iiiorg/piiranha-v1-detect-personal-information",
-            [
-                {"entity_group": "pii/us_social_security_number"},
-                {"entity_group": "prompt_attack"},
-                {"entity_group": "unknown_links"},
-            ],
+            "https://router.huggingface.co/hf-inference/models/iiiorg/piiranha-v1-detect-personal-information",
+            [{"entity_group": "SOCIALNUM"}, {"entity_group": "CREDITCARDNUMBER"}],
+            ["SOCIALNUM", "CREDITCARDNUMBER"],
         ),
         (
             Lakera(),
@@ -30,10 +27,11 @@ from dynamiq.nodes.detectors import PIIDetector
                     {"detector_type": "unknown_links", "detected": True},
                 ]
             },
+            ["pii/us_social_security_number"],
         ),
     ],
 )
-def test_workflow_with_piidetector(requests_mock, connection, url, mock_request_data):
+def test_workflow_with_piidetector(requests_mock, connection, url, mock_request_data, output):
     wf_piidetector = Workflow(
         flow=Flow(
             nodes=[
@@ -46,7 +44,6 @@ def test_workflow_with_piidetector(requests_mock, connection, url, mock_request_
     )
 
     input_data = {"message": "123 Main Street, Springfield, IL 62704. My credit card number is 4111 1111 1111 1111."}
-    output = ["pii/us_social_security_number", "prompt_attack", "unknown_links"]
     call_mock = requests_mock.post(url=url, json=mock_request_data)
     response = wf_piidetector.run(input_data=input_data)
 
@@ -65,3 +62,13 @@ def test_workflow_with_piidetector(requests_mock, connection, url, mock_request_
 
     assert call_mock.called_once
     assert call_mock.last_request.url == url
+
+
+def test_huggingface_pii_detector_fails_on_a_text_classifier(requests_mock):
+    requests_mock.post("http://tei.internal:8080/predict", json=[{"label": "SAFE", "score": 0.99}])
+    detector = PIIDetector(connection=HuggingFace(api_key="k", url="http://tei.internal:8080/predict"))
+
+    result = detector.run(input_data={"message": "My card is 4111 1111 1111 1111."})
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "needs a token-classification model" in result.error.message

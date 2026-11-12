@@ -7,7 +7,9 @@ and ``Skip`` end the evaluation, and an ``Ask`` (``before_tool``) is answered on
 ==============  ==========================================  ===============================================
 Point           When                                        Value (what ``Modify`` replaces)
 ==============  ==========================================  ===============================================
-on_input        once per run                                ``str``, the user's message text
+on_input        once per run; hooks that set                ``str``, the message text, or one text value
+                ``screens_context`` also run on each        of ``context``
+                text value of the run input's ``context``
 before_model    every LLM call                              ``list[Message]``, what is sent
 after_model     every LLM call that succeeded               ``dict``, ``{"content", "tool_calls"}``
 before_tool     every tool call (sub-agents included)       the tool input, after ``tool_params`` merging
@@ -188,6 +190,7 @@ class HookContext:
     pending_calls: dict[str, tuple["HookContext", ToolCall]] = field(default_factory=dict)
     approver: Any = None  # the agent whose input stream carries this run's approval requests
     trusted: dict[str, Any] = field(default_factory=dict)
+    parent: "HookContext | None" = None  # the run of the agent that called this one as a tool
 
     def for_call(self, **changes) -> "HookContext":
         """A view for one call that shares ``state`` and ``lock`` with the run context."""
@@ -267,6 +270,9 @@ class Hook(BaseModel):
             example a PII mapping stays consistent across agents.
         on_error: What to do if the hook itself raises or times out.
         timeout_seconds: Per-call budget; a hook that overruns counts as failed. The worker thread cannot be killed.
+        screens_context: Class attribute. ``on_input`` also runs on each text value of the run input's ``context``,
+            which the system prompt shows the model, so the hook cannot tell it from the message. Off unless a
+            hook class opts in, as the built-in text guards do.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -278,6 +284,7 @@ class Hook(BaseModel):
     timeout_seconds: float | None = Field(default=None, gt=0)
 
     hook_type: ClassVar[str | None] = None
+    screens_context: ClassVar[bool] = False
 
     @model_serializer(mode="wrap")
     def _serialize_with_type(self, handler):
