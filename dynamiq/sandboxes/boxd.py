@@ -49,10 +49,15 @@ def create_boxd_machine(
     labels: dict[str, str] | None = None,
     vcpu: int | None = None,
     memory: str | None = None,
-    auto_suspend_timeout: int | None = None,
+    auto_suspend_timeout: int | None = 0,
+    delete_after: int | None = None,
     ready_timeout: float = 120,
 ) -> Machine:
-    """Create an isolated machine, wait until it accepts commands and prepare its Python environment."""
+    """Create an isolated machine, wait until it accepts commands and prepare its Python environment.
+
+    ``delete_after`` is the number of seconds after which boxd deletes the machine and its disk. None or 0 sets no
+    timer.
+    """
     client: BoxdClient = connection.get_client()
     machine = client.machines.create(
         f"{name_prefix}{uuid.uuid4().hex[:8]}",
@@ -64,6 +69,7 @@ def create_boxd_machine(
         vcpu=vcpu,
         memory=memory,
         auto_suspend_timeout=auto_suspend_timeout,
+        delete_after=delete_after or None,
     )
     try:
         machine = client.machines.wait_until_ready(machine.id, timeout=ready_timeout)
@@ -108,8 +114,9 @@ class BoxdSandbox(Sandbox):
     """boxd sandbox implementation.
 
     Runs commands and stores files in an isolated boxd machine: a full Ubuntu VM with a persistent disk.
-    Files persist until the machine is deleted with ``close(kill=True)``. ``auto_suspend_timeout`` sets when an
-    idle machine goes to standby; a reconnect starts or wakes the machine before the first command.
+    Files persist until the machine is deleted with ``close(kill=True)``, or by boxd once ``delete_after`` seconds
+    have passed. ``auto_suspend_timeout`` sets when an idle machine goes to standby; a reconnect starts or wakes the
+    machine before the first command.
 
     Supports reconnecting to existing machines by providing sandbox_id.
     """
@@ -144,8 +151,18 @@ class BoxdSandbox(Sandbox):
         default=None, description="Memory of a new machine, for example '8G'. If None, the org default is used."
     )
     auto_suspend_timeout: int | None = Field(
+        default=0,
+        description=(
+            "Seconds without network traffic before the machine goes to standby. 0 (the default) disables it. "
+            "If None, the org default is used."
+        ),
+    )
+    delete_after: int | None = Field(
         default=None,
-        description="Seconds without network traffic before the machine goes to standby. 0 disables it.",
+        description=(
+            "Seconds after creation when boxd deletes the machine and its disk, even while it is in use. "
+            "None or 0 keeps the machine until close(kill=True)."
+        ),
     )
     creation_error_handling: SandboxCreationErrorHandling = Field(
         default_factory=SandboxCreationErrorHandling,
@@ -196,6 +213,7 @@ class BoxdSandbox(Sandbox):
             vcpu=self.vcpu,
             memory=self.memory,
             auto_suspend_timeout=self.auto_suspend_timeout,
+            delete_after=self.delete_after,
             creation_error_handling=self.creation_error_handling,
         )
 
@@ -237,6 +255,7 @@ class BoxdSandbox(Sandbox):
                     vcpu=self.vcpu,
                     memory=self.memory,
                     auto_suspend_timeout=self.auto_suspend_timeout,
+                    delete_after=self.delete_after,
                     ready_timeout=self.timeout,
                 )
             )
@@ -396,8 +415,8 @@ class BoxdSandbox(Sandbox):
         """Return the public HTTPS host that forwards to a port inside the machine.
 
         Creates a named proxy ``p<port>`` on the machine the first time a port is asked for. The URL is public:
-        anyone who has it can reach the service. The first HTTPS request to a new URL can take up to a minute to
-        succeed.
+        anyone who has it can reach the service. A new URL can take up to a minute before it answers, so retry the
+        first request.
 
         Args:
             port: Port number the service listens on inside the machine (e.g. 3000, 5173).
@@ -407,9 +426,9 @@ class BoxdSandbox(Sandbox):
         """
         machine = self._ensure_sandbox()
         proxy_name = f"p{port}"
-        proxies = self._client.machines.proxies.list(machine.name)
+        proxies = self._client.machines.proxies.list(machine.id)
         if not any(p.name == proxy_name and p.port == port for p in proxies):
-            self._client.machines.proxies.create(machine.name, proxy_name, port)
+            self._client.machines.proxies.create(machine.id, proxy_name, port)
         machine_host = machine.access.url.split("://", 1)[-1].rstrip("/")
         return f"{proxy_name}.{machine_host}"
 
@@ -459,7 +478,10 @@ class BoxdSandbox(Sandbox):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
+        """Context manager exit. Disconnects and keeps the machine, like ``close()``.
+
+        Call ``close(kill=True)`` inside the block, or set ``delete_after``, to delete the machine.
+        """
         self.close()
 
     def __del__(self):

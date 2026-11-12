@@ -64,6 +64,13 @@ def test_the_machine_is_isolated(connection, sandbox):
     assert machine.networking.isolated is True
 
 
+def test_the_machine_never_goes_to_standby_and_has_no_delete_timer(connection, sandbox):
+    machine = connection.get_client().machines.get(sandbox.current_sandbox_id)
+
+    assert machine.idle.suspend_after == 0
+    assert machine.delete_at is None
+
+
 def test_pip_installs_into_the_python_env(sandbox):
     result = sandbox.run_command_shell("pip install -q six && python -c 'import six; print(six.__version__)'", 180)
 

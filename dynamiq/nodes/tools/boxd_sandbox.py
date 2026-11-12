@@ -24,6 +24,11 @@ from dynamiq.sandboxes.boxd import (
 )
 from dynamiq.utils.logger import logger
 
+# A machine created for a single call is deleted at the end of the call. This timer deletes it as well if the call
+# never gets there, for example when the process dies. It covers creation, package installs and the command.
+MIN_CALL_MACHINE_DELETE_AFTER = 3600
+CALL_MACHINE_DELETE_AFTER_TIMEOUTS = 4
+
 # Each Python execution runs in a new process, so the description does not promise variables that persist.
 _STATELESS_PYTHON_LINES = {
     "and persistent Python interpreter sessions for complex data analysis and system operations.": (
@@ -86,8 +91,19 @@ class BoxdInterpreterTool(BaseCodeInterpreterTool):
         default=None, description="Memory of new machines, for example '8G'. If None, the org default is used."
     )
     auto_suspend_timeout: int | None = Field(
+        default=0,
+        description=(
+            "Seconds without network traffic before a machine goes to standby. 0 (the default) disables it. "
+            "If None, the org default is used."
+        ),
+    )
+    delete_after: int | None = Field(
         default=None,
-        description="Seconds without network traffic before a machine goes to standby. 0 disables it.",
+        description=(
+            "Seconds after creation when boxd deletes a machine and its disk, even while it is in use. 0 sets no "
+            "timer. If None, a persistent machine has no timer, and a machine for a single call gets one hour or "
+            "four times timeout, whichever is longer."
+        ),
     )
     _sandbox: Machine | None = None
     _rate_limit_exception: ClassVar[type[Exception]] = RateLimitError
@@ -102,6 +118,13 @@ class BoxdInterpreterTool(BaseCodeInterpreterTool):
     def _client(self) -> Any:
         return self.connection.get_client()
 
+    def _resolve_delete_after(self) -> int | None:
+        if self.delete_after is not None:
+            return self.delete_after or None
+        if self.persistent_sandbox:
+            return None
+        return max(MIN_CALL_MACHINE_DELETE_AFTER, CALL_MACHINE_DELETE_AFTER_TIMEOUTS * self.timeout)
+
     def _create_sandbox(self) -> Machine:
         return create_boxd_machine(
             self.connection,
@@ -111,6 +134,7 @@ class BoxdInterpreterTool(BaseCodeInterpreterTool):
             vcpu=self.vcpu,
             memory=self.memory,
             auto_suspend_timeout=self.auto_suspend_timeout,
+            delete_after=self._resolve_delete_after(),
             ready_timeout=self.timeout,
         )
 
@@ -146,7 +170,8 @@ class BoxdInterpreterTool(BaseCodeInterpreterTool):
                 vars_code += f"{key} = {repr(resolved)}\n"
             code = vars_code + "\n" + code
 
-        script_path = f"/tmp/dynamiq-{uuid.uuid4().hex}.py"
+        # A path on the machine, not on this host, with a random name.
+        script_path = f"/tmp/dynamiq-{uuid.uuid4().hex}.py"  # nosec B108
         try:
             logger.debug(f"Executing Python code: {code}")
             self._client.machines.files.upload(sandbox.id, script_path, code)
