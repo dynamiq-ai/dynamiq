@@ -1023,6 +1023,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             try:
                 try:
                     input_message = self._apply_input_hooks(input_message, config, **kwargs)
+                    self._apply_input_hooks_to_context(input_data, config, **kwargs)
                     result = self._run_agent(input_message, history_messages, config=config, **kwargs)
                     result = self._run_hooks(HookPoint.ON_OUTPUT, result, config, **kwargs).value
                 except HookAnswerException as blocked:
@@ -1266,8 +1267,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         if message.role == MessageRole.USER:
             return content.startswith("Observation:")
 
+        if message.role == MessageRole.TOOL:
+            return True
+
         if message.role == MessageRole.ASSISTANT:
-            if content.startswith("Thought:") or content.startswith("Function call:"):
+            # In function calling the final answer is itself a tool call, made before the on_output hooks ran.
+            if content.startswith("Thought:") or content.startswith("Function call:") or message.tool_calls:
                 return True
 
             if self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
@@ -2182,6 +2187,17 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             return message.model_copy(update={"content": hooked})
         media = [part for part in message.content if not isinstance(part, VisionMessageTextContent)]
         return message.model_copy(update={"content": [VisionMessageTextContent(text=hooked), *media]})
+
+    def _apply_input_hooks_to_context(self, input_data: AgentInputSchema, config, **kwargs) -> None:
+        """``on_input`` on the run input's ``context``, which the system prompt shows the model, so it must not carry
+        what the message itself may not. A ``context`` that is not text is checked as the prompt renders it."""
+        context = (input_data.model_extra or {}).get("context")
+        text = context if isinstance(context, str) or context is None else str(context)
+        if not text or not self._hook_runner().has(HookPoint.ON_INPUT):
+            return
+        hooked = self._run_hooks(HookPoint.ON_INPUT, text, config, **kwargs).value
+        if hooked != text:
+            self.system_prompt_manager.update_variables({"context": hooked})
 
     def _run_tool(
         self,

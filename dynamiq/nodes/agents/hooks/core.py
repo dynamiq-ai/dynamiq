@@ -7,7 +7,8 @@ and ``Skip`` end the evaluation, and an ``Ask`` (``before_tool``) is answered on
 ==============  ==========================================  ===============================================
 Point           When                                        Value (what ``Modify`` replaces)
 ==============  ==========================================  ===============================================
-on_input        once per run                                ``str``, the user's message text
+on_input        once per run, and once on the run input's   ``str``, the message text, or the ``context``
+                ``context``, which the system prompt shows  as the prompt renders it
 before_model    every LLM call                              ``list[Message]``, what is sent
 after_model     every LLM call that succeeded               ``dict``, ``{"content", "tool_calls"}``
 before_tool     every tool call (sub-agents included)       the tool input, after ``tool_params`` merging

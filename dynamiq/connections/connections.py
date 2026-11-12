@@ -1412,6 +1412,14 @@ class Daytona(BaseApiKeyConnection):
 
 class HuggingFace(BaseApiKeyConnection):
     api_key: str = Field(default_factory=partial(get_env_var, "HUGGINGFACE_API_KEY"))
+    url: str | None = Field(
+        default=None,
+        description=(
+            "Endpoint of a dedicated or self-hosted model for the PII or prompt-injection detector, such as an "
+            "Inference Endpoint or Text Embeddings Inference. It serves one model, so each detector needs a connection "
+            "of its own. Left empty, the detectors call the Hugging Face router for their model."
+        ),
+    )
 
     def connect(self):
         pass
@@ -2217,8 +2225,15 @@ class TypeSafe(HttpApiKey):
 
 
 class Lakera(BaseApiKeyConnection):
-    url: Literal["https://api.lakera.ai/v2/"] = "https://api.lakera.ai/v2/"
+    url: str = Field(
+        default="https://api.lakera.ai/v2/",
+        description="Lakera Guard API root: the hosted API or a self-hosted deployment.",
+    )
     api_key: str = Field(default_factory=partial(get_env_var, "LAKERA_API_KEY"))
+    project_id: str | None = Field(
+        default=None,
+        description="Lakera project whose policy screens the requests. Left empty, Lakera applies its default policy.",
+    )
 
     def connect(self):
         """Connects to the Lakera API.
@@ -2238,6 +2253,10 @@ class Lakera(BaseApiKeyConnection):
             dict: A dictionary containing the headers for authorization.
         """
         return {"Authorization": f"Bearer {self.api_key}"}
+
+    @property
+    def guard_url(self) -> str:
+        return f"{self.url.rstrip('/')}/guard"
 
 
 class MistralOCR(Mistral):
