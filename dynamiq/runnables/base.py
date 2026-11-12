@@ -12,6 +12,7 @@ from dynamiq.types.cancellation import CancellationConfig
 from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.types.mocking import RunMockConfig
 from dynamiq.types.streaming import StreamingConfig
+from dynamiq.types.telemetry import TracingConfig
 from dynamiq.utils import format_value, generate_uuid, is_called_from_async_context
 
 
@@ -60,13 +61,21 @@ class RunnableConfig(BaseModel):
             "`approval_unless`) from here. Never saved in a checkpoint: pass it again when resuming."
         ),
     )
+    tracing: TracingConfig | None = Field(
+        default=None,
+        description=(
+            "Settings of the OpenTelemetry spans emitted for the run. None uses the global TracerProvider and the "
+            "environment. Never saved in a checkpoint: pass it again when resuming."
+        ),
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def to_checkpoint_dict(self) -> dict:
         """Serialize config for checkpoint storage, excluding non-serializable runtime fields."""
         return self.model_dump(
-            mode="json", exclude={"callbacks", "checkpoint", "cancellation", "trusted_context", "nodes_override"}
+            mode="json",
+            exclude={"callbacks", "checkpoint", "cancellation", "trusted_context", "nodes_override", "tracing"},
         )
 
 

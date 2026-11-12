@@ -1,0 +1,224 @@
+[
+  {
+    "id": "46ec955c-17ff-47a6-b421-ebda571613ce",
+    "name": "Workflow",
+    "type": "workflow",
+    "trace_id": "e6ae2552-85c2-45d1-9bf8-0beb73841116",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.904775+00:00",
+    "end_time": "2026-11-12T15:08:29.906805+00:00",
+    "parent_run_id": null,
+    "status": "succeeded",
+    "input": {
+      "value": 1
+    },
+    "output": {
+      "detached": {
+        "status": "success",
+        "input": {
+          "value": 1
+        },
+        "output": {
+          "value": 1
+        }
+      }
+    },
+    "metadata": {
+      "workflow": {
+        "id": "workflow",
+        "version": null
+      }
+    },
+    "error": null,
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "ec854bbc-0d53-406b-9f1e-b2fa6d4be319",
+    "name": "Flow",
+    "type": "flow",
+    "trace_id": "e6ae2552-85c2-45d1-9bf8-0beb73841116",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.904830+00:00",
+    "end_time": "2026-11-12T15:08:29.906712+00:00",
+    "parent_run_id": "46ec955c-17ff-47a6-b421-ebda571613ce",
+    "status": "succeeded",
+    "input": {
+      "value": 1
+    },
+    "output": {
+      "detached": {
+        "status": "success",
+        "input": {
+          "value": 1
+        },
+        "output": {
+          "value": 1
+        }
+      }
+    },
+    "metadata": {
+      "flow": {
+        "id": "flow"
+      }
+    },
+    "error": null,
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "dbab61ca-8f8a-4f26-ad22-709958b7b3bb",
+    "name": "detached",
+    "type": "node",
+    "trace_id": "e6ae2552-85c2-45d1-9bf8-0beb73841116",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.904974+00:00",
+    "end_time": "2026-11-12T15:08:29.905325+00:00",
+    "parent_run_id": "ec854bbc-0d53-406b-9f1e-b2fa6d4be319",
+    "status": "succeeded",
+    "input": {
+      "value": 1
+    },
+    "output": {
+      "value": 1
+    },
+    "metadata": {
+      "node": {
+        "id": "detached",
+        "name": "detached",
+        "group": "utils",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "type": "tests.integration.telemetry.Detached",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {}
+      },
+      "run_depends": [],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "172b038a-2d78-4b37-87e1-c4e005b6a57d",
+        "start_time": "2026-11-12T15:08:29.905000+00:00",
+        "end_time": "2026-11-12T15:08:29.905299+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "2345115c-2186-4065-ab64-5bf236d8e6fe",
+    "name": "inner",
+    "type": "node",
+    "trace_id": "e6ae2552-85c2-45d1-9bf8-0beb73841116",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.905144+00:00",
+    "end_time": "2026-11-12T15:08:29.905251+00:00",
+    "parent_run_id": null,
+    "status": "succeeded",
+    "input": {
+      "value": 1
+    },
+    "output": {
+      "value": 1
+    },
+    "metadata": {
+      "node": {
+        "id": "inner",
+        "name": "inner",
+        "group": "utils",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "transformers": [],
+        "type": "dynamiq.nodes.utils.Input",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {}
+      },
+      "run_depends": [],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "243b6bb4-ff51-4837-b5bb-89d827cc5d2a",
+        "start_time": "2026-11-12T15:08:29.905169+00:00",
+        "end_time": "2026-11-12T15:08:29.905224+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  }
+]

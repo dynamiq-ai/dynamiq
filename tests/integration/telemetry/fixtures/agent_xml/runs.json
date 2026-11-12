@@ -1,0 +1,554 @@
+[
+  {
+    "id": "961a892c-621b-446a-bc71-8b0442a4c406",
+    "name": "assistant",
+    "type": "node",
+    "trace_id": "70c2c0a1-ba26-424d-8d8b-d6ec7c12ed2b",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.839595+00:00",
+    "end_time": "2026-11-12T15:08:29.843313+00:00",
+    "parent_run_id": null,
+    "status": "succeeded",
+    "input": {
+      "input": "What is the answer?",
+      "images": null,
+      "videos": null,
+      "files": null,
+      "user_id": null,
+      "session_id": null,
+      "metadata": {},
+      "tool_params": {
+        "global_params": {},
+        "by_name_params": {},
+        "by_id_params": {}
+      }
+    },
+    "output": {
+      "content": "done",
+      "blocked": false
+    },
+    "metadata": {
+      "node": {
+        "id": "agent",
+        "name": "assistant",
+        "group": "agents",
+        "error_handling": {
+          "timeout_seconds": 3600.0,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": true,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "max_loops": 6,
+        "tool_output_max_length": 64000,
+        "tool_output_truncate_enabled": true,
+        "hooks": [],
+        "tool_output_sandbox_persistence": {
+          "enabled": true,
+          "dump_threshold_chars": 7000,
+          "preview_chars": 7000,
+          "sandbox_tool_output_dir": "/home/user/.tools"
+        },
+        "delegation_allowed": false,
+        "parallel_tool_calls_enabled": false,
+        "max_parallel_tool_calls": 8,
+        "memory_limit": 100,
+        "memory_retrieval_strategy": "all",
+        "verbose": false,
+        "share_sandbox_with_subagents": false,
+        "share_browser_session_with_subagents": false,
+        "sandbox_sharing_scope": "all",
+        "role": "help the user",
+        "inference_mode": "XML",
+        "behaviour_on_max_loops": "raise",
+        "direct_tool_output_enabled": false,
+        "format_schema": [],
+        "summarization_config": {
+          "enabled": false,
+          "max_token_context_length": null,
+          "context_usage_ratio": 0.8,
+          "max_preserved_tokens": 10000,
+          "token_budget_ratio": 0.75
+        },
+        "type": "dynamiq.nodes.agents.Agent",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {},
+        "llm": {
+          "id": "b029396f-504e-4448-9d5b-d2a9224cd7cc",
+          "name": "LLM",
+          "group": "llms",
+          "error_handling": {
+            "timeout_seconds": 600.0,
+            "retry_interval_seconds": 1,
+            "max_retries": 0,
+            "backoff_rate": 1,
+            "max_retry_interval_seconds": null,
+            "behavior": "raise"
+          },
+          "is_postponed_component_init": false,
+          "is_optimized_for_agents": false,
+          "is_files_allowed": false,
+          "is_parallel_execution_allowed": false,
+          "is_output_persisted_in_sandbox_allowed": false,
+          "input_param_modes": {},
+          "callbacks": [],
+          "model": "openai/gpt-4o",
+          "temperature": 0.0,
+          "max_tokens": 100,
+          "budget_tokens": 1024,
+          "inference_mode": "DEFAULT",
+          "strict_tools": false,
+          "reasoning_effort": "auto",
+          "verbosity": "medium",
+          "type": "dynamiq.nodes.llms.OpenAI",
+          "caching": {
+            "enabled": false
+          },
+          "streaming": {
+            "enabled": false
+          },
+          "approval": {
+            "enabled": false
+          },
+          "mock": {
+            "enabled": false
+          },
+          "depends": [],
+          "input_mapping": {},
+          "connection": {
+            "id": "ab7be63b-1248-48c7-b94d-606bce86bcb0",
+            "type": "dynamiq.connections.OpenAI"
+          }
+        },
+        "tools": [
+          {
+            "id": "search",
+            "name": "search",
+            "description": "Searches the web.",
+            "group": "tools",
+            "error_handling": {
+              "timeout_seconds": null,
+              "retry_interval_seconds": 1,
+              "max_retries": 0,
+              "backoff_rate": 1,
+              "max_retry_interval_seconds": null,
+              "behavior": "raise"
+            },
+            "is_postponed_component_init": false,
+            "is_optimized_for_agents": true,
+            "is_files_allowed": false,
+            "is_parallel_execution_allowed": false,
+            "is_output_persisted_in_sandbox_allowed": false,
+            "input_param_modes": {},
+            "callbacks": [],
+            "type": "tests.helpers.SearchTool",
+            "caching": {
+              "enabled": false
+            },
+            "streaming": {
+              "enabled": false
+            },
+            "approval": {
+              "enabled": false
+            },
+            "mock": {
+              "enabled": false
+            },
+            "depends": [],
+            "input_mapping": {}
+          }
+        ],
+        "memory": null,
+        "long_term_memory": null,
+        "file_store": {
+          "enabled": false
+        },
+        "memory_store": null,
+        "artifacts": null,
+        "sandbox": null,
+        "skills": {
+          "enabled": false,
+          "source": null
+        }
+      },
+      "run_depends": [],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "905c19ac-0010-4df6-a119-4b25fed46642",
+        "start_time": "2026-11-12T15:08:29.839659+00:00",
+        "end_time": "2026-11-12T15:08:29.843222+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "e9a4a906-b5cb-4a18-a10d-13b27417c13c",
+    "name": "LLM",
+    "type": "node",
+    "trace_id": "70c2c0a1-ba26-424d-8d8b-d6ec7c12ed2b",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.840832+00:00",
+    "end_time": "2026-11-12T15:08:29.841277+00:00",
+    "parent_run_id": "961a892c-621b-446a-bc71-8b0442a4c406",
+    "status": "succeeded",
+    "input": {},
+    "output": {
+      "content": "<output><thought>t</thought><action>search</action><action_input>{\"query\": \"q1\"}</action_input></output>"
+    },
+    "metadata": {
+      "node": {
+        "id": "b029396f-504e-4448-9d5b-d2a9224cd7cc",
+        "name": "LLM",
+        "group": "llms",
+        "error_handling": {
+          "timeout_seconds": 600.0,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "model": "openai/gpt-4o",
+        "temperature": 0.0,
+        "max_tokens": 100,
+        "stop": [
+          "\nObservation:",
+          "Observation:",
+          "</output>\n<",
+          "</output><"
+        ],
+        "budget_tokens": 1024,
+        "inference_mode": "DEFAULT",
+        "strict_tools": false,
+        "reasoning_effort": "auto",
+        "verbosity": "medium",
+        "type": "dynamiq.nodes.llms.OpenAI",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {},
+        "connection": {
+          "id": "ab7be63b-1248-48c7-b94d-606bce86bcb0",
+          "type": "dynamiq.connections.OpenAI"
+        },
+        "prompt": {
+          "id": "0abda557-9bb0-404d-bbbc-9625b55569ac",
+          "version": null,
+          "messages": [
+            {
+              "content": "You are AI powered assistant.\n---\n# PRIMARY INSTRUCTIONS\nAlways use this exact XML format in your responses:\n\n<output>\n    <thought>\n        [A brief note on what you will do next]\n    </thought>\n    <action>\n        [Tool name from ONLY [search]]\n    </action>\n    <action_input>\n        [JSON input for the tool - single line, properly escaped]\n    </action_input>\n</output>\n\nAfter each action, you'll receive:\nObservation: [Result from the tool]\n\nWhen you have enough information to provide a final answer:\n<output>\n    <thought>\n        [A brief note on the answer]\n    </thought>\n    <answer>\n        [Your complete answer to the user's question]\n    </answer>\n    <output_files>[Optional: comma-separated absolute file paths to return]</output_files>\n</output>\n\nFor questions that don't require tools:\n<output>\n    <thought>\n        [A brief note on the question]\n    </thought>\n    <answer>\n        [Your direct response]\n    </answer>\n    <output_files>[Optional: comma-separated absolute file paths to return]</output_files>\n</output>\n\n## Critical XML Format Rules\n- ALWAYS include a short <thought> note (one or two sentences)\n- ALWAYS place <thought> BEFORE <action>/<action_input> (or before <answer>)\n- Start the text immediately after each opening tag; do not add leading newlines or indentation inside the tags\n- Write thoughts in the first person (e.g., \"I will...\", \"I should...\")\n- Explain why this specific tool is the right choice\n- For tool use, always include action and action_input tags\n- For direct answers, include <thought> and <answer> tags\n- Tool names go as PLAIN TEXT inside <action> tags, NOT as XML tags.\n- JSON in <action_input> MUST be on single line with proper escaping\n- NO line breaks or control characters inside JSON strings\n- Use double quotes for JSON strings\n- Escape special characters in JSON (\\n for newlines, \\\" for quotes)\n- Properly close all XML tags\n- In <action_input> you may use normal symbols in JSON (e.g. Python \"a < 1\", shell \"cmd1 && cmd2\"); the parser accepts both plain and XML-escaped (&lt; &amp; etc.)\n- For all tags other than <answer>, text content should ideally be XML-escaped\n- Special characters like & should be escaped as &amp; in <thought> and other tags, but can be used directly in <answer>\n- Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.\n- You may receive \"Observation (shortened)\" indicating that tool output was truncated\n- Some tools are other agents. When you choose an agent tool, the <action_input> must match the agent's inputs; minimally include {\"input\": \"your subtask\"}. Keep only inputs inside <action_input>.\n- Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.\n- Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.\n- Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.\n\n## Single Action Per Turn\n- Emit EXACTLY ONE <output>...</output> block per response. Never write a second <output> block.\n- A response either takes an action (<action>/<action_input>) OR gives an <answer> — never both in the same response.\n- When you write an <action>, STOP immediately after </output>. Do NOT continue, do NOT write an \"Observation:\",\n  a tool result, or an <answer> — the Observation is given back to you by the system, not written by you.\n- NEVER predict, assume, or fabricate the tool's Observation/result. Wait for the real Observation to be returned,\n  then decide your next single action (or final answer) based on it in your NEXT response.\n\n## JSON Formatting Requirements\n- Put JSON on single line within tags\n- Use double quotes for all strings\n- Escape newlines as \\n, quotes as \\\"\n- NO multi-line JSON formatting\n- For tools that accept code (e.g. python), the code must be one JSON string with \\n for line breaks, not literal newlines\n\n## File Handling\n- Tools may generate or process files (images, CSVs, PDFs, reports, etc.)\n- If you want to return files, include an <output_files> tag after </answer> (but still inside <output>) listing absolute file paths (comma-separated). This tag is optional — omit it if there are no files to return.\n---\n# AVAILABLE TOOLS\n\nYou have access to a variety of tools,\nand you are responsible for using\nthem in any order you choose to complete the task:\n\n- search: Searches the web.\n\nInput formats for tools:\n - search\n \t* query (str): Search query.\n\t* mode (str): Search mode.\n\nNote: For tools not listed in the input formats section,\nrefer to their descriptions in the\nAVAILABLE TOOLS section for usage instructions.\n---\n# RESPONSE FORMAT\n\nIn your answers, adhere to the following formatting and stylistic guidelines:\n\n- Use GitHub-flavored Markdown as the default format for all responses and generated documents.\n- Write in a professional, academic tone using complete, well-structured paragraphs.\n- Avoid excessive bullet points; prioritize fully developed prose.\n- When appropriate, alternate between explanatory paragraphs and structured tables\n  to improve clarity, comparison, or organization of key information.\n- Use bold formatting to emphasize essential concepts, distinctions, terminology, or conclusions.\n- Use blockquotes to highlight formal definitions, cited statements, or especially important excerpts.\n- Include inline hyperlinks when referencing websites, platforms, or external resources.\n- When making factual claims, support them with inline numeric citations using Markdown reference-style links.\n- NEVER use emojis unless the user explicitly requests it.\n\nIMPORTANT:\n- Formatting must enhance readability and analytical clarity.\n- Tables should only be used when they materially improve organization or comparison.\n- Do not over-format; maintain a professional and academically consistent presentation style.\n- In your final answer:\n    - Avoid phrases like 'based on the information gathered or provided'.\n    - Clearly mention any files that were generated during the process\n    - Provide file names and brief descriptions of their contents.\n---\n# AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES\n(This section defines how the assistant presents information and behaves - its personality, tone, communication style,\nand additional behavioral guidelines.\nThese supplementary instructions enhance the agent's interactions but should never override or contradict\nthe PRIMARY INSTRUCTIONS above.)\nhelp the user\n- Current date: 12 November 2026",
+              "role": "system"
+            },
+            {
+              "content": "What is the answer?",
+              "role": "user"
+            }
+          ],
+          "tools": null,
+          "response_format": null
+        }
+      },
+      "run_depends": [],
+      "usage": {
+        "prompt_tokens": 11,
+        "prompt_tokens_cost_usd": 0.0000275,
+        "completion_tokens": 7,
+        "completion_tokens_cost_usd": 0.00007000000000000001,
+        "total_tokens": 18,
+        "total_tokens_cost_usd": 0.00009750000000000001,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": null
+      },
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "cb72d9c9-9f86-4149-843a-b058b8167bc3",
+        "start_time": "2026-11-12T15:08:29.840874+00:00",
+        "end_time": "2026-11-12T15:08:29.841198+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "78febadb-c979-4770-94ed-17d12f2d664e",
+    "name": "search",
+    "type": "node",
+    "trace_id": "70c2c0a1-ba26-424d-8d8b-d6ec7c12ed2b",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.842150+00:00",
+    "end_time": "2026-11-12T15:08:29.842253+00:00",
+    "parent_run_id": "961a892c-621b-446a-bc71-8b0442a4c406",
+    "status": "succeeded",
+    "input": {
+      "query": "q1",
+      "mode": "slow"
+    },
+    "output": {
+      "content": "results for q1"
+    },
+    "metadata": {
+      "node": {
+        "id": "search",
+        "name": "search",
+        "description": "Searches the web.",
+        "group": "tools",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": true,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "type": "tests.helpers.SearchTool",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {}
+      },
+      "run_depends": [
+        {
+          "node": {
+            "id": "b029396f-504e-4448-9d5b-d2a9224cd7cc",
+            "name": "LLM",
+            "type": "dynamiq.nodes.llms.OpenAI"
+          },
+          "option": null,
+          "condition": null,
+          "trigger": "success"
+        }
+      ],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "4af5ab08-408c-4e63-828c-fbf7c03831b4",
+        "start_time": "2026-11-12T15:08:29.842181+00:00",
+        "end_time": "2026-11-12T15:08:29.842224+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "480ce097-812e-4fab-b055-4aff11a71286",
+    "name": "LLM",
+    "type": "node",
+    "trace_id": "70c2c0a1-ba26-424d-8d8b-d6ec7c12ed2b",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.842462+00:00",
+    "end_time": "2026-11-12T15:08:29.842961+00:00",
+    "parent_run_id": "961a892c-621b-446a-bc71-8b0442a4c406",
+    "status": "succeeded",
+    "input": {},
+    "output": {
+      "content": "<output><thought>done</thought><answer>done</answer></output>"
+    },
+    "metadata": {
+      "node": {
+        "id": "b029396f-504e-4448-9d5b-d2a9224cd7cc",
+        "name": "LLM",
+        "group": "llms",
+        "error_handling": {
+          "timeout_seconds": 600.0,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "model": "openai/gpt-4o",
+        "temperature": 0.0,
+        "max_tokens": 100,
+        "stop": [
+          "\nObservation:",
+          "Observation:",
+          "</output>\n<",
+          "</output><"
+        ],
+        "budget_tokens": 1024,
+        "inference_mode": "DEFAULT",
+        "strict_tools": false,
+        "reasoning_effort": "auto",
+        "verbosity": "medium",
+        "type": "dynamiq.nodes.llms.OpenAI",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {},
+        "connection": {
+          "id": "ab7be63b-1248-48c7-b94d-606bce86bcb0",
+          "type": "dynamiq.connections.OpenAI"
+        },
+        "prompt": {
+          "id": "643ed868-7c85-405c-9a2d-b1a65b53301c",
+          "version": null,
+          "messages": [
+            {
+              "content": "You are AI powered assistant.\n---\n# PRIMARY INSTRUCTIONS\nAlways use this exact XML format in your responses:\n\n<output>\n    <thought>\n        [A brief note on what you will do next]\n    </thought>\n    <action>\n        [Tool name from ONLY [search]]\n    </action>\n    <action_input>\n        [JSON input for the tool - single line, properly escaped]\n    </action_input>\n</output>\n\nAfter each action, you'll receive:\nObservation: [Result from the tool]\n\nWhen you have enough information to provide a final answer:\n<output>\n    <thought>\n        [A brief note on the answer]\n    </thought>\n    <answer>\n        [Your complete answer to the user's question]\n    </answer>\n    <output_files>[Optional: comma-separated absolute file paths to return]</output_files>\n</output>\n\nFor questions that don't require tools:\n<output>\n    <thought>\n        [A brief note on the question]\n    </thought>\n    <answer>\n        [Your direct response]\n    </answer>\n    <output_files>[Optional: comma-separated absolute file paths to return]</output_files>\n</output>\n\n## Critical XML Format Rules\n- ALWAYS include a short <thought> note (one or two sentences)\n- ALWAYS place <thought> BEFORE <action>/<action_input> (or before <answer>)\n- Start the text immediately after each opening tag; do not add leading newlines or indentation inside the tags\n- Write thoughts in the first person (e.g., \"I will...\", \"I should...\")\n- Explain why this specific tool is the right choice\n- For tool use, always include action and action_input tags\n- For direct answers, include <thought> and <answer> tags\n- Tool names go as PLAIN TEXT inside <action> tags, NOT as XML tags.\n- JSON in <action_input> MUST be on single line with proper escaping\n- NO line breaks or control characters inside JSON strings\n- Use double quotes for JSON strings\n- Escape special characters in JSON (\\n for newlines, \\\" for quotes)\n- Properly close all XML tags\n- In <action_input> you may use normal symbols in JSON (e.g. Python \"a < 1\", shell \"cmd1 && cmd2\"); the parser accepts both plain and XML-escaped (&lt; &amp; etc.)\n- For all tags other than <answer>, text content should ideally be XML-escaped\n- Special characters like & should be escaped as &amp; in <thought> and other tags, but can be used directly in <answer>\n- Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.\n- You may receive \"Observation (shortened)\" indicating that tool output was truncated\n- Some tools are other agents. When you choose an agent tool, the <action_input> must match the agent's inputs; minimally include {\"input\": \"your subtask\"}. Keep only inputs inside <action_input>.\n- Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.\n- Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.\n- Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.\n\n## Single Action Per Turn\n- Emit EXACTLY ONE <output>...</output> block per response. Never write a second <output> block.\n- A response either takes an action (<action>/<action_input>) OR gives an <answer> — never both in the same response.\n- When you write an <action>, STOP immediately after </output>. Do NOT continue, do NOT write an \"Observation:\",\n  a tool result, or an <answer> — the Observation is given back to you by the system, not written by you.\n- NEVER predict, assume, or fabricate the tool's Observation/result. Wait for the real Observation to be returned,\n  then decide your next single action (or final answer) based on it in your NEXT response.\n\n## JSON Formatting Requirements\n- Put JSON on single line within tags\n- Use double quotes for all strings\n- Escape newlines as \\n, quotes as \\\"\n- NO multi-line JSON formatting\n- For tools that accept code (e.g. python), the code must be one JSON string with \\n for line breaks, not literal newlines\n\n## File Handling\n- Tools may generate or process files (images, CSVs, PDFs, reports, etc.)\n- If you want to return files, include an <output_files> tag after </answer> (but still inside <output>) listing absolute file paths (comma-separated). This tag is optional — omit it if there are no files to return.\n---\n# AVAILABLE TOOLS\n\nYou have access to a variety of tools,\nand you are responsible for using\nthem in any order you choose to complete the task:\n\n- search: Searches the web.\n\nInput formats for tools:\n - search\n \t* query (str): Search query.\n\t* mode (str): Search mode.\n\nNote: For tools not listed in the input formats section,\nrefer to their descriptions in the\nAVAILABLE TOOLS section for usage instructions.\n---\n# RESPONSE FORMAT\n\nIn your answers, adhere to the following formatting and stylistic guidelines:\n\n- Use GitHub-flavored Markdown as the default format for all responses and generated documents.\n- Write in a professional, academic tone using complete, well-structured paragraphs.\n- Avoid excessive bullet points; prioritize fully developed prose.\n- When appropriate, alternate between explanatory paragraphs and structured tables\n  to improve clarity, comparison, or organization of key information.\n- Use bold formatting to emphasize essential concepts, distinctions, terminology, or conclusions.\n- Use blockquotes to highlight formal definitions, cited statements, or especially important excerpts.\n- Include inline hyperlinks when referencing websites, platforms, or external resources.\n- When making factual claims, support them with inline numeric citations using Markdown reference-style links.\n- NEVER use emojis unless the user explicitly requests it.\n\nIMPORTANT:\n- Formatting must enhance readability and analytical clarity.\n- Tables should only be used when they materially improve organization or comparison.\n- Do not over-format; maintain a professional and academically consistent presentation style.\n- In your final answer:\n    - Avoid phrases like 'based on the information gathered or provided'.\n    - Clearly mention any files that were generated during the process\n    - Provide file names and brief descriptions of their contents.\n---\n# AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES\n(This section defines how the assistant presents information and behaves - its personality, tone, communication style,\nand additional behavioral guidelines.\nThese supplementary instructions enhance the agent's interactions but should never override or contradict\nthe PRIMARY INSTRUCTIONS above.)\nhelp the user\n- Current date: 12 November 2026",
+              "role": "system"
+            },
+            {
+              "content": "What is the answer?",
+              "role": "user"
+            },
+            {
+              "content": "<output><thought>t</thought><action>search</action><action_input>{\"query\": \"q1\"}</action_input></output>",
+              "role": "assistant"
+            },
+            {
+              "content": "Observation: results for q1\n",
+              "role": "user"
+            }
+          ],
+          "tools": null,
+          "response_format": null
+        }
+      },
+      "run_depends": [
+        {
+          "node": {
+            "id": "search",
+            "name": "search",
+            "type": "tests.helpers.SearchTool"
+          },
+          "option": null,
+          "condition": null,
+          "trigger": "success"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 11,
+        "prompt_tokens_cost_usd": 0.0000275,
+        "completion_tokens": 7,
+        "completion_tokens_cost_usd": 0.00007000000000000001,
+        "total_tokens": 18,
+        "total_tokens_cost_usd": 0.00009750000000000001,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": null
+      },
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "6ff531f0-bff3-484d-a5e7-d6f36aa3cfa5",
+        "start_time": "2026-11-12T15:08:29.842502+00:00",
+        "end_time": "2026-11-12T15:08:29.842883+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  }
+]

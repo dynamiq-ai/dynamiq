@@ -82,6 +82,7 @@ build-mkdocs:
 	uv run python scripts/generate_mkdocs.py
 	cp README.md mkdocs/index.md
 	cp -rf docs/tutorials/ mkdocs/tutorials/
+	cp -rf docs/reference/ mkdocs/reference/
 	uv run mkdocs build
 
 publish-mkdocs:

@@ -1,0 +1,302 @@
+[
+  {
+    "id": "d6e97541-7565-4f4c-aa49-4b8497cb45c8",
+    "name": "Workflow",
+    "type": "workflow",
+    "trace_id": "3f69be0f-b351-424e-ae4d-20b6739f5539",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.853008+00:00",
+    "end_time": "2026-11-12T15:08:29.869775+00:00",
+    "parent_run_id": null,
+    "status": "succeeded",
+    "input": {
+      "value": 1
+    },
+    "output": {
+      "flaky": {
+        "status": "success",
+        "input": {
+          "value": 1
+        },
+        "output": {
+          "attempts": 2
+        }
+      },
+      "after": {
+        "status": "success",
+        "input": {
+          "value": 1,
+          "flaky": {
+            "status": "success",
+            "output": {
+              "attempts": 2
+            }
+          }
+        },
+        "output": {
+          "value": 1,
+          "flaky": {
+            "status": "success",
+            "output": {
+              "attempts": 2
+            }
+          }
+        }
+      }
+    },
+    "metadata": {
+      "workflow": {
+        "id": "workflow",
+        "version": null
+      }
+    },
+    "error": null,
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "1075ed80-a8bf-4b3e-9d8a-09fe8a2225e4",
+    "name": "Flow",
+    "type": "flow",
+    "trace_id": "3f69be0f-b351-424e-ae4d-20b6739f5539",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.853073+00:00",
+    "end_time": "2026-11-12T15:08:29.869664+00:00",
+    "parent_run_id": "d6e97541-7565-4f4c-aa49-4b8497cb45c8",
+    "status": "succeeded",
+    "input": {
+      "value": 1
+    },
+    "output": {
+      "flaky": {
+        "status": "success",
+        "input": {
+          "value": 1
+        },
+        "output": {
+          "attempts": 2
+        }
+      },
+      "after": {
+        "status": "success",
+        "input": {
+          "value": 1,
+          "flaky": {
+            "status": "success",
+            "output": {
+              "attempts": 2
+            }
+          }
+        },
+        "output": {
+          "value": 1,
+          "flaky": {
+            "status": "success",
+            "output": {
+              "attempts": 2
+            }
+          }
+        }
+      }
+    },
+    "metadata": {
+      "flow": {
+        "id": "flow"
+      }
+    },
+    "error": null,
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "3c9ea1f7-023e-409b-94a3-c4edc88e7abe",
+    "name": "flaky",
+    "type": "node",
+    "trace_id": "3f69be0f-b351-424e-ae4d-20b6739f5539",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.853220+00:00",
+    "end_time": "2026-11-12T15:08:29.866655+00:00",
+    "parent_run_id": "1075ed80-a8bf-4b3e-9d8a-09fe8a2225e4",
+    "status": "succeeded",
+    "input": {
+      "value": 1
+    },
+    "output": {
+      "attempts": 2
+    },
+    "metadata": {
+      "node": {
+        "id": "flaky",
+        "name": "flaky",
+        "group": "utils",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 0.01,
+          "max_retries": 2,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "type": "tests.integration.telemetry.Flaky",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {}
+      },
+      "run_depends": [],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "511464a7-bacd-49ff-8294-0fc6ca17ff95",
+        "start_time": "2026-11-12T15:08:29.853247+00:00",
+        "end_time": "2026-11-12T15:08:29.853291+00:00",
+        "status": "failed",
+        "input": null,
+        "output": null,
+        "error": {
+          "message": "the first attempt fails",
+          "traceback": "Traceback (most recent call last):\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1807, in execute_with_retry\n    output = self.execute(input_data=input_data, config=config, **merged_kwargs)\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/tests/integration/telemetry/golden_scenarios.py\", line 165, in execute\n    raise ValueError(\"the first attempt fails\")\nValueError: the first attempt fails\n"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "2a45edc2-adfc-4063-b119-d304f429275f",
+        "start_time": "2026-11-12T15:08:29.866573+00:00",
+        "end_time": "2026-11-12T15:08:29.866626+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "ee93bd7d-259a-444c-8c0a-e2f5b72de055",
+    "name": "after",
+    "type": "node",
+    "trace_id": "3f69be0f-b351-424e-ae4d-20b6739f5539",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.868151+00:00",
+    "end_time": "2026-11-12T15:08:29.868270+00:00",
+    "parent_run_id": "1075ed80-a8bf-4b3e-9d8a-09fe8a2225e4",
+    "status": "succeeded",
+    "input": {
+      "value": 1,
+      "flaky": {
+        "status": "success",
+        "output": {
+          "attempts": 2
+        }
+      }
+    },
+    "output": {
+      "value": 1,
+      "flaky": {
+        "status": "success",
+        "output": {
+          "attempts": 2
+        }
+      }
+    },
+    "metadata": {
+      "node": {
+        "id": "after",
+        "name": "after",
+        "group": "operators",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "transformers": [],
+        "type": "dynamiq.nodes.operators.Pass",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [
+          {
+            "node": {
+              "id": "flaky",
+              "name": "flaky",
+              "type": "tests.integration.telemetry.Flaky"
+            },
+            "option": null,
+            "condition": null,
+            "trigger": "success"
+          }
+        ],
+        "input_mapping": {}
+      },
+      "run_depends": [],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "599a335e-9d3f-4bef-9273-adba3bf39496",
+        "start_time": "2026-11-12T15:08:29.868176+00:00",
+        "end_time": "2026-11-12T15:08:29.868239+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  }
+]

@@ -1,0 +1,1156 @@
+[
+  {
+    "id": "603e230b-8f6b-4a6d-99f5-3373c7625411",
+    "name": "Workflow",
+    "type": "workflow",
+    "trace_id": "ec1be27e-7e6d-460c-ba32-2005b1dd41fa",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.908392+00:00",
+    "end_time": "2026-11-12T15:08:29.914957+00:00",
+    "parent_run_id": null,
+    "status": "succeeded",
+    "input": {
+      "input": "What is the answer?"
+    },
+    "output": {
+      "agent": {
+        "status": "success",
+        "input": {
+          "input": "What is the answer?",
+          "images": null,
+          "videos": null,
+          "files": null,
+          "user_id": null,
+          "session_id": null,
+          "metadata": {},
+          "tool_params": {
+            "global_params": {},
+            "by_name_params": {},
+            "by_id_params": {}
+          }
+        },
+        "output": {
+          "content": "done",
+          "blocked": false
+        }
+      }
+    },
+    "metadata": {
+      "workflow": {
+        "id": "workflow",
+        "version": null
+      }
+    },
+    "error": null,
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "357cbb52-26db-41fd-963b-eaa2b445e8ff",
+    "name": "Flow",
+    "type": "flow",
+    "trace_id": "ec1be27e-7e6d-460c-ba32-2005b1dd41fa",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.908490+00:00",
+    "end_time": "2026-11-12T15:08:29.914840+00:00",
+    "parent_run_id": "603e230b-8f6b-4a6d-99f5-3373c7625411",
+    "status": "succeeded",
+    "input": {
+      "input": "What is the answer?"
+    },
+    "output": {
+      "agent": {
+        "status": "success",
+        "input": {
+          "input": "What is the answer?",
+          "images": null,
+          "videos": null,
+          "files": null,
+          "user_id": null,
+          "session_id": null,
+          "metadata": {},
+          "tool_params": {
+            "global_params": {},
+            "by_name_params": {},
+            "by_id_params": {}
+          }
+        },
+        "output": {
+          "content": "done",
+          "blocked": false
+        }
+      }
+    },
+    "metadata": {
+      "flow": {
+        "id": "flow"
+      }
+    },
+    "error": null,
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "9f8728ed-05fe-45a2-acef-a0f9fc027442",
+    "name": "assistant",
+    "type": "node",
+    "trace_id": "ec1be27e-7e6d-460c-ba32-2005b1dd41fa",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.908728+00:00",
+    "end_time": "2026-11-12T15:08:29.913395+00:00",
+    "parent_run_id": "357cbb52-26db-41fd-963b-eaa2b445e8ff",
+    "status": "succeeded",
+    "input": {
+      "input": "What is the answer?",
+      "images": null,
+      "videos": null,
+      "files": null,
+      "user_id": null,
+      "session_id": null,
+      "metadata": {},
+      "tool_params": {
+        "global_params": {},
+        "by_name_params": {},
+        "by_id_params": {}
+      }
+    },
+    "output": {
+      "content": "done",
+      "blocked": false
+    },
+    "metadata": {
+      "node": {
+        "id": "agent",
+        "name": "assistant",
+        "group": "agents",
+        "error_handling": {
+          "timeout_seconds": 3600.0,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": true,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "max_loops": 6,
+        "tool_output_max_length": 64000,
+        "tool_output_truncate_enabled": true,
+        "hooks": [],
+        "tool_output_sandbox_persistence": {
+          "enabled": true,
+          "dump_threshold_chars": 7000,
+          "preview_chars": 7000,
+          "sandbox_tool_output_dir": "/home/user/.tools"
+        },
+        "delegation_allowed": false,
+        "parallel_tool_calls_enabled": false,
+        "max_parallel_tool_calls": 8,
+        "memory_limit": 100,
+        "memory_retrieval_strategy": "all",
+        "verbose": false,
+        "share_sandbox_with_subagents": false,
+        "share_browser_session_with_subagents": false,
+        "sandbox_sharing_scope": "all",
+        "role": "help the user",
+        "inference_mode": "FUNCTION_CALLING",
+        "behaviour_on_max_loops": "raise",
+        "direct_tool_output_enabled": false,
+        "format_schema": [],
+        "summarization_config": {
+          "enabled": false,
+          "max_token_context_length": null,
+          "context_usage_ratio": 0.8,
+          "max_preserved_tokens": 10000,
+          "token_budget_ratio": 0.75
+        },
+        "type": "dynamiq.nodes.agents.Agent",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {},
+        "llm": {
+          "id": "91e385b1-e9b3-4ae8-86fa-3bd1b303688a",
+          "name": "LLM",
+          "group": "llms",
+          "error_handling": {
+            "timeout_seconds": 600.0,
+            "retry_interval_seconds": 1,
+            "max_retries": 0,
+            "backoff_rate": 1,
+            "max_retry_interval_seconds": null,
+            "behavior": "raise"
+          },
+          "is_postponed_component_init": false,
+          "is_optimized_for_agents": false,
+          "is_files_allowed": false,
+          "is_parallel_execution_allowed": false,
+          "is_output_persisted_in_sandbox_allowed": false,
+          "input_param_modes": {},
+          "callbacks": [],
+          "model": "openai/gpt-4o",
+          "temperature": 0.0,
+          "max_tokens": 100,
+          "budget_tokens": 1024,
+          "inference_mode": "DEFAULT",
+          "strict_tools": false,
+          "reasoning_effort": "auto",
+          "verbosity": "medium",
+          "type": "dynamiq.nodes.llms.OpenAI",
+          "caching": {
+            "enabled": false
+          },
+          "streaming": {
+            "enabled": false
+          },
+          "approval": {
+            "enabled": false
+          },
+          "mock": {
+            "enabled": false
+          },
+          "depends": [],
+          "input_mapping": {},
+          "connection": {
+            "id": "7f250936-99bb-4b9b-982e-e221da1950af",
+            "type": "dynamiq.connections.OpenAI"
+          }
+        },
+        "tools": [
+          {
+            "id": "search",
+            "name": "search",
+            "description": "Searches the web.",
+            "group": "tools",
+            "error_handling": {
+              "timeout_seconds": null,
+              "retry_interval_seconds": 1,
+              "max_retries": 0,
+              "backoff_rate": 1,
+              "max_retry_interval_seconds": null,
+              "behavior": "raise"
+            },
+            "is_postponed_component_init": false,
+            "is_optimized_for_agents": true,
+            "is_files_allowed": false,
+            "is_parallel_execution_allowed": false,
+            "is_output_persisted_in_sandbox_allowed": false,
+            "input_param_modes": {},
+            "callbacks": [],
+            "result": "forty-two",
+            "type": "tests.helpers.SearchTool",
+            "caching": {
+              "enabled": false
+            },
+            "streaming": {
+              "enabled": false
+            },
+            "approval": {
+              "enabled": false
+            },
+            "mock": {
+              "enabled": false
+            },
+            "depends": [],
+            "input_mapping": {}
+          }
+        ],
+        "memory": null,
+        "long_term_memory": null,
+        "file_store": {
+          "enabled": false
+        },
+        "memory_store": null,
+        "artifacts": null,
+        "sandbox": null,
+        "skills": {
+          "enabled": false,
+          "source": null
+        }
+      },
+      "run_depends": [],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "920c9e0a-0127-4125-8374-b7d0021b629c",
+        "start_time": "2026-11-12T15:08:29.908799+00:00",
+        "end_time": "2026-11-12T15:08:29.913309+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "7408333f-09e2-4e46-9c5f-37cbb155abd3",
+    "name": "LLM",
+    "type": "node",
+    "trace_id": "ec1be27e-7e6d-460c-ba32-2005b1dd41fa",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.909292+00:00",
+    "end_time": "2026-11-12T15:08:29.909848+00:00",
+    "parent_run_id": "9f8728ed-05fe-45a2-acef-a0f9fc027442",
+    "status": "succeeded",
+    "input": {},
+    "output": {
+      "content": "",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": {
+              "thought": "t",
+              "query": "q0"
+            },
+            "name": "search"
+          },
+          "id": "call_0_0",
+          "type": "function"
+        }
+      ]
+    },
+    "metadata": {
+      "node": {
+        "id": "91e385b1-e9b3-4ae8-86fa-3bd1b303688a",
+        "name": "LLM",
+        "group": "llms",
+        "error_handling": {
+          "timeout_seconds": 600.0,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "model": "openai/gpt-4o",
+        "temperature": 0.0,
+        "max_tokens": 100,
+        "stop": [],
+        "budget_tokens": 1024,
+        "inference_mode": "DEFAULT",
+        "strict_tools": false,
+        "reasoning_effort": "auto",
+        "verbosity": "medium",
+        "type": "dynamiq.nodes.llms.OpenAI",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {},
+        "connection": {
+          "id": "7f250936-99bb-4b9b-982e-e221da1950af",
+          "type": "dynamiq.connections.OpenAI"
+        },
+        "prompt": {
+          "id": "69beb8b9-3ed3-426a-9fbd-be9ad92a9393",
+          "version": null,
+          "messages": [
+            {
+              "content": "You are AI powered assistant.\n---\n# PRIMARY INSTRUCTIONS\n\nYou need to use the right functions based on what the user asks.\n\nUse the function `provide_final_answer` when you can give a clear answer to the user's first question,\nand no extra steps, tools, or work are needed.\nCall this function if the user's input is simple and doesn't require additional help or tools.\n\nIf the user's request requires the use of specific tools, such as [search],\n you must first call the appropriate function to invoke those tools.\nOnly after utilizing the necessary tools and gathering the required information should\nyou call `provide_final_answer` to deliver the final response.\n\n## Function Calling Guidelines\n- ALWAYS populate the \"thought\" field FIRST before any other field in your function calls\n- Write a concrete, first-person \"thought\" (1-3 sentences) on why this specific function/tool is right and what you expect it to return — no lazy filler like \"Calling X.\" and no starting with \"The user...\"\n- Pass tool parameters as top-level fields of the function arguments (alongside \"thought\"), not nested inside an \"action_input\" wrapper\n- Analyze the request carefully to determine if tools are needed\n- Call functions with properly formatted arguments\n- Handle tool responses appropriately before providing final answer\n- Chain multiple tool calls when necessary for complex tasks\n- If you want an agent tool's response returned verbatim as the final output, include \"delegate_final\": true at the top level of that tool's arguments. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.\n- Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.\n\n## File Handling\n- Tools may generate or process files (images, CSVs, PDFs, etc.)\n- When calling `provide_final_answer`, include an `output_files` argument with comma-separated file paths to return. Pass an empty string if there are no files to return.\n---\n# AVAILABLE TOOLS\n\nAvailable tools: [search]\nRefer to each tool's function schema for detailed usage.\n---\n# RESPONSE FORMAT\n\nIn your answers, adhere to the following formatting and stylistic guidelines:\n\n- Use GitHub-flavored Markdown as the default format for all responses and generated documents.\n- Write in a professional, academic tone using complete, well-structured paragraphs.\n- Avoid excessive bullet points; prioritize fully developed prose.\n- When appropriate, alternate between explanatory paragraphs and structured tables\n  to improve clarity, comparison, or organization of key information.\n- Use bold formatting to emphasize essential concepts, distinctions, terminology, or conclusions.\n- Use blockquotes to highlight formal definitions, cited statements, or especially important excerpts.\n- Include inline hyperlinks when referencing websites, platforms, or external resources.\n- When making factual claims, support them with inline numeric citations using Markdown reference-style links.\n- NEVER use emojis unless the user explicitly requests it.\n\nIMPORTANT:\n- Formatting must enhance readability and analytical clarity.\n- Tables should only be used when they materially improve organization or comparison.\n- Do not over-format; maintain a professional and academically consistent presentation style.\n- In your final answer:\n    - Avoid phrases like 'based on the information gathered or provided'.\n    - Clearly mention any files that were generated during the process\n    - Provide file names and brief descriptions of their contents.\n---\n# AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES\n(This section defines how the assistant presents information and behaves - its personality, tone, communication style,\nand additional behavioral guidelines.\nThese supplementary instructions enhance the agent's interactions but should never override or contradict\nthe PRIMARY INSTRUCTIONS above.)\nhelp the user\n- Current date: 12 November 2026",
+              "role": "system"
+            },
+            {
+              "content": "What is the answer?",
+              "role": "user"
+            }
+          ],
+          "tools": null,
+          "response_format": null,
+          "messages_base": null
+        }
+      },
+      "run_depends": [],
+      "usage": {
+        "prompt_tokens": 11,
+        "prompt_tokens_cost_usd": 0.0000275,
+        "completion_tokens": 7,
+        "completion_tokens_cost_usd": 0.00007000000000000001,
+        "total_tokens": 18,
+        "total_tokens_cost_usd": 0.00009750000000000001,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": null
+      },
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "42a5d8fd-089a-42ef-8e1b-101334e27d02",
+        "start_time": "2026-11-12T15:08:29.909339+00:00",
+        "end_time": "2026-11-12T15:08:29.909787+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "fbc35741-01e8-4b4b-9434-989ca4b00994",
+    "name": "search",
+    "type": "node",
+    "trace_id": "ec1be27e-7e6d-460c-ba32-2005b1dd41fa",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.910091+00:00",
+    "end_time": "2026-11-12T15:08:29.910186+00:00",
+    "parent_run_id": "9f8728ed-05fe-45a2-acef-a0f9fc027442",
+    "status": "succeeded",
+    "input": {
+      "query": "q0",
+      "mode": "slow"
+    },
+    "output": {
+      "content": "forty-two"
+    },
+    "metadata": {
+      "node": {
+        "id": "search",
+        "name": "search",
+        "description": "Searches the web.",
+        "group": "tools",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": true,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "result": "forty-two",
+        "type": "tests.helpers.SearchTool",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {}
+      },
+      "run_depends": [
+        {
+          "node": {
+            "id": "91e385b1-e9b3-4ae8-86fa-3bd1b303688a",
+            "name": "LLM",
+            "type": "dynamiq.nodes.llms.OpenAI"
+          },
+          "option": null,
+          "condition": null,
+          "trigger": "success"
+        }
+      ],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "f0c43fec-eb0a-4d9e-96d8-27672204fab7",
+        "start_time": "2026-11-12T15:08:29.910119+00:00",
+        "end_time": "2026-11-12T15:08:29.910158+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "189f2b81-dd9f-4461-84a3-aa9ba6afa111",
+    "name": "LLM",
+    "type": "node",
+    "trace_id": "ec1be27e-7e6d-460c-ba32-2005b1dd41fa",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.910424+00:00",
+    "end_time": "2026-11-12T15:08:29.910964+00:00",
+    "parent_run_id": "9f8728ed-05fe-45a2-acef-a0f9fc027442",
+    "status": "succeeded",
+    "input": {},
+    "output": {
+      "content": "",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": {
+              "thought": "t",
+              "query": "q1"
+            },
+            "name": "search"
+          },
+          "id": "call_1_0",
+          "type": "function"
+        }
+      ]
+    },
+    "metadata": {
+      "node": {
+        "id": "91e385b1-e9b3-4ae8-86fa-3bd1b303688a",
+        "name": "LLM",
+        "group": "llms",
+        "error_handling": {
+          "timeout_seconds": 600.0,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "model": "openai/gpt-4o",
+        "temperature": 0.0,
+        "max_tokens": 100,
+        "stop": [],
+        "budget_tokens": 1024,
+        "inference_mode": "DEFAULT",
+        "strict_tools": false,
+        "reasoning_effort": "auto",
+        "verbosity": "medium",
+        "type": "dynamiq.nodes.llms.OpenAI",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {},
+        "connection": {
+          "id": "7f250936-99bb-4b9b-982e-e221da1950af",
+          "type": "dynamiq.connections.OpenAI"
+        },
+        "prompt": {
+          "id": "fbd51548-5440-451c-a59a-f0230996fdd3",
+          "version": null,
+          "messages": [
+            {
+              "content": "Calling: search",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_0_0",
+                  "type": "function",
+                  "function": {
+                    "name": "search",
+                    "arguments": "{\"thought\": \"t\", \"query\": \"q0\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "content": "forty-two",
+              "role": "tool",
+              "tool_call_id": "call_0_0",
+              "name": "search"
+            }
+          ],
+          "tools": null,
+          "response_format": null,
+          "messages_base": {
+            "run_id": "7408333f-09e2-4e46-9c5f-37cbb155abd3",
+            "count": 2
+          }
+        }
+      },
+      "run_depends": [
+        {
+          "node": {
+            "id": "search",
+            "name": "search",
+            "type": "tests.helpers.SearchTool"
+          },
+          "option": null,
+          "condition": null,
+          "trigger": "success"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 11,
+        "prompt_tokens_cost_usd": 0.0000275,
+        "completion_tokens": 7,
+        "completion_tokens_cost_usd": 0.00007000000000000001,
+        "total_tokens": 18,
+        "total_tokens_cost_usd": 0.00009750000000000001,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": null
+      },
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "502c66a9-02e9-4f9b-b4e2-efa8a0d9ba7d",
+        "start_time": "2026-11-12T15:08:29.910466+00:00",
+        "end_time": "2026-11-12T15:08:29.910903+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "6353bc5d-100d-48b1-be0e-cc784394dd66",
+    "name": "search",
+    "type": "node",
+    "trace_id": "ec1be27e-7e6d-460c-ba32-2005b1dd41fa",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.911201+00:00",
+    "end_time": "2026-11-12T15:08:29.911293+00:00",
+    "parent_run_id": "9f8728ed-05fe-45a2-acef-a0f9fc027442",
+    "status": "succeeded",
+    "input": {
+      "query": "q1",
+      "mode": "slow"
+    },
+    "output": {
+      "content": "forty-two"
+    },
+    "metadata": {
+      "node": {
+        "id": "search",
+        "name": "search",
+        "description": "Searches the web.",
+        "group": "tools",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": true,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "result": "forty-two",
+        "type": "tests.helpers.SearchTool",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {}
+      },
+      "run_depends": [
+        {
+          "node": {
+            "id": "91e385b1-e9b3-4ae8-86fa-3bd1b303688a",
+            "name": "LLM",
+            "type": "dynamiq.nodes.llms.OpenAI"
+          },
+          "option": null,
+          "condition": null,
+          "trigger": "success"
+        }
+      ],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "7981c866-2cca-4ba1-affe-518759f446c9",
+        "start_time": "2026-11-12T15:08:29.911230+00:00",
+        "end_time": "2026-11-12T15:08:29.911266+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "692bce96-e7d4-48f1-a148-de44bde4be7d",
+    "name": "LLM",
+    "type": "node",
+    "trace_id": "ec1be27e-7e6d-460c-ba32-2005b1dd41fa",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.911528+00:00",
+    "end_time": "2026-11-12T15:08:29.912071+00:00",
+    "parent_run_id": "9f8728ed-05fe-45a2-acef-a0f9fc027442",
+    "status": "succeeded",
+    "input": {},
+    "output": {
+      "content": "",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": {
+              "thought": "t",
+              "query": "q2"
+            },
+            "name": "search"
+          },
+          "id": "call_2_0",
+          "type": "function"
+        }
+      ]
+    },
+    "metadata": {
+      "node": {
+        "id": "91e385b1-e9b3-4ae8-86fa-3bd1b303688a",
+        "name": "LLM",
+        "group": "llms",
+        "error_handling": {
+          "timeout_seconds": 600.0,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "model": "openai/gpt-4o",
+        "temperature": 0.0,
+        "max_tokens": 100,
+        "stop": [],
+        "budget_tokens": 1024,
+        "inference_mode": "DEFAULT",
+        "strict_tools": false,
+        "reasoning_effort": "auto",
+        "verbosity": "medium",
+        "type": "dynamiq.nodes.llms.OpenAI",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {},
+        "connection": {
+          "id": "7f250936-99bb-4b9b-982e-e221da1950af",
+          "type": "dynamiq.connections.OpenAI"
+        },
+        "prompt": {
+          "id": "9d3b6635-4da8-428f-95e0-f8c84aa973d3",
+          "version": null,
+          "messages": [
+            {
+              "content": "Calling: search",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_1_0",
+                  "type": "function",
+                  "function": {
+                    "name": "search",
+                    "arguments": "{\"thought\": \"t\", \"query\": \"q1\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "content": "forty-two",
+              "role": "tool",
+              "tool_call_id": "call_1_0",
+              "name": "search"
+            }
+          ],
+          "tools": null,
+          "response_format": null,
+          "messages_base": {
+            "run_id": "189f2b81-dd9f-4461-84a3-aa9ba6afa111",
+            "count": 4
+          }
+        }
+      },
+      "run_depends": [
+        {
+          "node": {
+            "id": "search",
+            "name": "search",
+            "type": "tests.helpers.SearchTool"
+          },
+          "option": null,
+          "condition": null,
+          "trigger": "success"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 11,
+        "prompt_tokens_cost_usd": 0.0000275,
+        "completion_tokens": 7,
+        "completion_tokens_cost_usd": 0.00007000000000000001,
+        "total_tokens": 18,
+        "total_tokens_cost_usd": 0.00009750000000000001,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": null
+      },
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "817c83c5-5efc-459a-834a-7348040875ff",
+        "start_time": "2026-11-12T15:08:29.911568+00:00",
+        "end_time": "2026-11-12T15:08:29.912009+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "a7def370-440a-43cb-ab5a-655dd9c9cac0",
+    "name": "search",
+    "type": "node",
+    "trace_id": "ec1be27e-7e6d-460c-ba32-2005b1dd41fa",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.912303+00:00",
+    "end_time": "2026-11-12T15:08:29.912393+00:00",
+    "parent_run_id": "9f8728ed-05fe-45a2-acef-a0f9fc027442",
+    "status": "succeeded",
+    "input": {
+      "query": "q2",
+      "mode": "slow"
+    },
+    "output": {
+      "content": "forty-two"
+    },
+    "metadata": {
+      "node": {
+        "id": "search",
+        "name": "search",
+        "description": "Searches the web.",
+        "group": "tools",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": true,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "result": "forty-two",
+        "type": "tests.helpers.SearchTool",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {}
+      },
+      "run_depends": [
+        {
+          "node": {
+            "id": "91e385b1-e9b3-4ae8-86fa-3bd1b303688a",
+            "name": "LLM",
+            "type": "dynamiq.nodes.llms.OpenAI"
+          },
+          "option": null,
+          "condition": null,
+          "trigger": "success"
+        }
+      ],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "6ab238ec-9588-4978-94a9-bf50727e4b6d",
+        "start_time": "2026-11-12T15:08:29.912330+00:00",
+        "end_time": "2026-11-12T15:08:29.912366+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "eef2109d-14b6-4226-832a-22e7477112ca",
+    "name": "LLM",
+    "type": "node",
+    "trace_id": "ec1be27e-7e6d-460c-ba32-2005b1dd41fa",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.912624+00:00",
+    "end_time": "2026-11-12T15:08:29.913133+00:00",
+    "parent_run_id": "9f8728ed-05fe-45a2-acef-a0f9fc027442",
+    "status": "succeeded",
+    "input": {},
+    "output": {
+      "content": "",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": {
+              "thought": "done",
+              "answer": "done"
+            },
+            "name": "provide_final_answer"
+          },
+          "id": "call_3",
+          "type": "function"
+        }
+      ]
+    },
+    "metadata": {
+      "node": {
+        "id": "91e385b1-e9b3-4ae8-86fa-3bd1b303688a",
+        "name": "LLM",
+        "group": "llms",
+        "error_handling": {
+          "timeout_seconds": 600.0,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "model": "openai/gpt-4o",
+        "temperature": 0.0,
+        "max_tokens": 100,
+        "stop": [],
+        "budget_tokens": 1024,
+        "inference_mode": "DEFAULT",
+        "strict_tools": false,
+        "reasoning_effort": "auto",
+        "verbosity": "medium",
+        "type": "dynamiq.nodes.llms.OpenAI",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {},
+        "connection": {
+          "id": "7f250936-99bb-4b9b-982e-e221da1950af",
+          "type": "dynamiq.connections.OpenAI"
+        },
+        "prompt": {
+          "id": "8daec038-ff35-4415-861c-6163cd9b2bcc",
+          "version": null,
+          "messages": [
+            {
+              "content": "Calling: search",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_2_0",
+                  "type": "function",
+                  "function": {
+                    "name": "search",
+                    "arguments": "{\"thought\": \"t\", \"query\": \"q2\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "content": "forty-two",
+              "role": "tool",
+              "tool_call_id": "call_2_0",
+              "name": "search"
+            }
+          ],
+          "tools": null,
+          "response_format": null,
+          "messages_base": {
+            "run_id": "692bce96-e7d4-48f1-a148-de44bde4be7d",
+            "count": 6
+          }
+        }
+      },
+      "run_depends": [
+        {
+          "node": {
+            "id": "search",
+            "name": "search",
+            "type": "tests.helpers.SearchTool"
+          },
+          "option": null,
+          "condition": null,
+          "trigger": "success"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 11,
+        "prompt_tokens_cost_usd": 0.0000275,
+        "completion_tokens": 7,
+        "completion_tokens_cost_usd": 0.00007000000000000001,
+        "total_tokens": 18,
+        "total_tokens_cost_usd": 0.00009750000000000001,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": null
+      },
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "54a29afe-4974-4554-88a2-4ebf2635b23f",
+        "start_time": "2026-11-12T15:08:29.912663+00:00",
+        "end_time": "2026-11-12T15:08:29.913074+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  }
+]

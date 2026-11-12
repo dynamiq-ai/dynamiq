@@ -1,0 +1,1585 @@
+{
+ "resourceSpans": [
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "dynamiq-golden-fixtures"
+      }
+     }
+    ]
+   },
+   "scopeSpans": [
+    {
+     "scope": {
+      "name": "dynamiq",
+      "version": "0.73.0",
+      "attributes": [
+       {
+        "key": "dynamiq.trace.shape_version",
+        "value": {
+         "intValue": "1"
+        }
+       }
+      ]
+     },
+     "spans": [
+      {
+       "traceId": "1b7fa75a8fbee1d21a5273e63e339511",
+       "spanId": "4acacd57490f96c2",
+       "parentSpanId": "5eb0838fd3c05243",
+       "name": "chat gpt-4o",
+       "kind": 3,
+       "startTimeUnixNano": "1794496109909177000",
+       "endTimeUnixNano": "1794496109909830000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "7408333f-09e2-4e46-9c5f-37cbb155abd3"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "91e385b1-e9b3-4ae8-86fa-3bd1b303688a"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "LLM"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.llms.OpenAI"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "llms"
+         }
+        },
+        {
+         "key": "dynamiq.node.model",
+         "value": {
+          "stringValue": "openai/gpt-4o"
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "chat"
+         }
+        },
+        {
+         "key": "gen_ai.provider.name",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.system",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.request.model",
+         "value": {
+          "stringValue": "gpt-4o"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.input",
+         "value": {
+          "stringValue": "{}"
+         }
+        },
+        {
+         "key": "gen_ai.request.temperature",
+         "value": {
+          "doubleValue": 0.0
+         }
+        },
+        {
+         "key": "gen_ai.request.max_tokens",
+         "value": {
+          "intValue": "100"
+         }
+        },
+        {
+         "key": "gen_ai.tool.definitions",
+         "value": {
+          "stringValue": "[{\"type\":\"function\",\"name\":\"provide_final_answer\",\"description\":\"Function should be called when if you can answer the initial request or if there is not request at all.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"thought\":{\"type\":\"string\",\"description\":\"A short first-person note (one or two sentences) on why you can answer now: which findings or tool results support the answer, not a restatement of the original task.\"},\"answer\":{\"type\":\"string\",\"description\":\"Answer on initial request.\"},\"output_files\":{\"type\":\"string\",\"description\":\"Optional comma-separated file paths to return.\"}},\"required\":[\"thought\",\"answer\"],\"additionalProperties\":false}},{\"type\":\"function\",\"name\":\"search\",\"description\":\"Searches the web.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"thought\":{\"type\":\"string\",\"description\":\"A short first-person note (one or two sentences) on why you are calling this tool and what you expect back, not a restatement of the original task.\"},\"query\":{\"description\":\"Search query.\",\"type\":\"string\"},\"mode\":{\"description\":\"Search mode. Defaults to: slow.\",\"type\":\"string\"}},\"additionalProperties\":false,\"required\":[\"thought\"]}}]"
+         }
+        },
+        {
+         "key": "gen_ai.input.messages",
+         "value": {
+          "stringValue": "[{\"role\":\"system\",\"parts\":[{\"type\":\"text\",\"content\":\"You are AI powered assistant.\\n---\\n# PRIMARY INSTRUCTIONS\\n\\nYou need to use the right functions based on what the user asks.\\n\\nUse the function `provide_final_answer` when you can give a clear answer to the user's first question,\\nand no extra steps, tools, or work are needed.\\nCall this function if the user's input is simple and doesn't require additional help or tools.\\n\\nIf the user's request requires the use of specific tools, such as [search],\\n you must first call the appropriate function to invoke those tools.\\nOnly after utilizing the necessary tools and gathering the required information should\\nyou call `provide_final_answer` to deliver the final response.\\n\\n## Function Calling Guidelines\\n- ALWAYS populate the \\\"thought\\\" field FIRST before any other field in your function calls\\n- Write a concrete, first-person \\\"thought\\\" (1-3 sentences) on why this specific function/tool is right and what you expect it to return \u2014 no lazy filler like \\\"Calling X.\\\" and no starting with \\\"The user...\\\"\\n- Pass tool parameters as top-level fields of the function arguments (alongside \\\"thought\\\"), not nested inside an \\\"action_input\\\" wrapper\\n- Analyze the request carefully to determine if tools are needed\\n- Call functions with properly formatted arguments\\n- Handle tool responses appropriately before providing final answer\\n- Chain multiple tool calls when necessary for complex tasks\\n- If you want an agent tool's response returned verbatim as the final output, include \\\"delegate_final\\\": true at the top level of that tool's arguments. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.\\n- Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.\\n\\n## File Handling\\n- Tools may generate or process files (images, CSVs, PDFs, etc.)\\n- When calling `provide_final_answer`, include an `output_files` argument with comma-separated file paths to return. Pass an empty string if there are no files to return.\\n---\\n# AVAILABLE TOOLS\\n\\nAvailable tools: [search]\\nRefer to each tool's function schema for detailed usage.\\n---\\n# RESPONSE FORMAT\\n\\nIn your answers, adhere to the following formatting and stylistic guidelines:\\n\\n- Use GitHub-flavored Markdown as the default format for all responses and generated documents.\\n- Write in a professional, academic tone using complete, well-structured paragraphs.\\n- Avoid excessive bullet points; prioritize fully developed prose.\\n- When appropriate, alternate between explanatory paragraphs and structured tables\\n  to improve clarity, comparison, or organization of key information.\\n- Use bold formatting to emphasize essential concepts, distinctions, terminology, or conclusions.\\n- Use blockquotes to highlight formal definitions, cited statements, or especially important excerpts.\\n- Include inline hyperlinks when referencing websites, platforms, or external resources.\\n- When making factual claims, support them with inline numeric citations using Markdown reference-style links.\\n- NEVER use emojis unless the user explicitly requests it.\\n\\nIMPORTANT:\\n- Formatting must enhance readability and analytical clarity.\\n- Tables should only be used when they materially improve organization or comparison.\\n- Do not over-format; maintain a professional and academically consistent presentation style.\\n- In your final answer:\\n    - Avoid phrases like 'based on the information gathered or provided'.\\n    - Clearly mention any files that were generated during the process\\n    - Provide file names and brief descriptions of their contents.\\n---\\n# AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES\\n(This section defines how the assistant presents information and behaves - its personality, tone, communication style,\\nand additional behavioral guidelines.\\nThese supplementary instructions enhance the agent's interactions but should never override or contradict\\nthe PRIMARY INSTRUCTIONS above.)\\nhelp the user\\n- Current date: 12 November 2026\"}]},{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"What is the answer?\"}]}]"
+         }
+        },
+        {
+         "key": "dynamiq.usage.total_tokens",
+         "value": {
+          "intValue": "18"
+         }
+        },
+        {
+         "key": "dynamiq.usage.input_cost_usd",
+         "value": {
+          "doubleValue": 2.75e-05
+         }
+        },
+        {
+         "key": "dynamiq.usage.output_cost_usd",
+         "value": {
+          "doubleValue": 7.000000000000001e-05
+         }
+        },
+        {
+         "key": "dynamiq.usage.total_cost_usd",
+         "value": {
+          "doubleValue": 9.750000000000001e-05
+         }
+        },
+        {
+         "key": "gen_ai.usage.input_tokens",
+         "value": {
+          "intValue": "11"
+         }
+        },
+        {
+         "key": "gen_ai.usage.output_tokens",
+         "value": {
+          "intValue": "7"
+         }
+        },
+        {
+         "key": "gen_ai.response.id",
+         "value": {
+          "stringValue": "chatcmpl-8af3c667-46e3-4c79-b194-d5e4a57d2462"
+         }
+        },
+        {
+         "key": "gen_ai.response.finish_reasons",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "tool_call"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.output.messages",
+         "value": {
+          "stringValue": "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"tool_call\",\"id\":\"call_0_0\",\"name\":\"search\",\"arguments\":{\"thought\":\"t\",\"query\":\"q0\"}}],\"finish_reason\":\"tool_call\"}]"
+         }
+        },
+        {
+         "key": "dynamiq.output",
+         "value": {
+          "stringValue": "{\"content\":\"\",\"tool_calls\":[{\"function\":{\"arguments\":{\"thought\":\"t\",\"query\":\"q0\"},\"name\":\"search\"},\"id\":\"call_0_0\",\"type\":\"function\"}]}"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "1b7fa75a8fbee1d21a5273e63e339511",
+       "spanId": "f900d49b6d14fa1e",
+       "parentSpanId": "5eb0838fd3c05243",
+       "name": "execute_tool search",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109910050000",
+       "endTimeUnixNano": "1794496109910173000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "fbc35741-01e8-4b4b-9434-989ca4b00994"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "search"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "search"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "tests.helpers.SearchTool"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "tools"
+         }
+        },
+        {
+         "key": "dynamiq.run.depends",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "91e385b1-e9b3-4ae8-86fa-3bd1b303688a"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "execute_tool"
+         }
+        },
+        {
+         "key": "gen_ai.tool.name",
+         "value": {
+          "stringValue": "search"
+         }
+        },
+        {
+         "key": "gen_ai.tool.type",
+         "value": {
+          "stringValue": "function"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.tool.call.arguments",
+         "value": {
+          "stringValue": "{\"query\":\"q0\",\"mode\":\"slow\"}"
+         }
+        },
+        {
+         "key": "gen_ai.tool.call.result",
+         "value": {
+          "stringValue": "{\"content\":\"forty-two\"}"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "1b7fa75a8fbee1d21a5273e63e339511",
+       "spanId": "7038b489410ec478",
+       "parentSpanId": "5eb0838fd3c05243",
+       "name": "chat gpt-4o",
+       "kind": 3,
+       "startTimeUnixNano": "1794496109910317000",
+       "endTimeUnixNano": "1794496109910945000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "189f2b81-dd9f-4461-84a3-aa9ba6afa111"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "91e385b1-e9b3-4ae8-86fa-3bd1b303688a"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "LLM"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.llms.OpenAI"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "llms"
+         }
+        },
+        {
+         "key": "dynamiq.node.model",
+         "value": {
+          "stringValue": "openai/gpt-4o"
+         }
+        },
+        {
+         "key": "dynamiq.run.depends",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "search"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "chat"
+         }
+        },
+        {
+         "key": "gen_ai.provider.name",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.system",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.request.model",
+         "value": {
+          "stringValue": "gpt-4o"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.input",
+         "value": {
+          "stringValue": "{}"
+         }
+        },
+        {
+         "key": "gen_ai.request.temperature",
+         "value": {
+          "doubleValue": 0.0
+         }
+        },
+        {
+         "key": "gen_ai.request.max_tokens",
+         "value": {
+          "intValue": "100"
+         }
+        },
+        {
+         "key": "gen_ai.tool.definitions",
+         "value": {
+          "stringValue": "[{\"type\":\"function\",\"name\":\"provide_final_answer\",\"description\":\"Function should be called when if you can answer the initial request or if there is not request at all.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"thought\":{\"type\":\"string\",\"description\":\"A short first-person note (one or two sentences) on why you can answer now: which findings or tool results support the answer, not a restatement of the original task.\"},\"answer\":{\"type\":\"string\",\"description\":\"Answer on initial request.\"},\"output_files\":{\"type\":\"string\",\"description\":\"Optional comma-separated file paths to return.\"}},\"required\":[\"thought\",\"answer\"],\"additionalProperties\":false}},{\"type\":\"function\",\"name\":\"search\",\"description\":\"Searches the web.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"thought\":{\"type\":\"string\",\"description\":\"A short first-person note (one or two sentences) on why you are calling this tool and what you expect back, not a restatement of the original task.\"},\"query\":{\"description\":\"Search query.\",\"type\":\"string\"},\"mode\":{\"description\":\"Search mode. Defaults to: slow.\",\"type\":\"string\"}},\"additionalProperties\":false,\"required\":[\"thought\"]}}]"
+         }
+        },
+        {
+         "key": "dynamiq.prompt.messages_base.span_id",
+         "value": {
+          "stringValue": "4acacd57490f96c2"
+         }
+        },
+        {
+         "key": "dynamiq.prompt.messages_base.count",
+         "value": {
+          "intValue": "2"
+         }
+        },
+        {
+         "key": "gen_ai.input.messages",
+         "value": {
+          "stringValue": "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"text\",\"content\":\"Calling: search\"},{\"type\":\"tool_call\",\"id\":\"call_0_0\",\"name\":\"search\",\"arguments\":{\"thought\":\"t\",\"query\":\"q0\"}}]},{\"role\":\"tool\",\"parts\":[{\"type\":\"tool_call_response\",\"id\":\"call_0_0\",\"response\":\"forty-two\"}],\"name\":\"search\"}]"
+         }
+        },
+        {
+         "key": "dynamiq.usage.total_tokens",
+         "value": {
+          "intValue": "18"
+         }
+        },
+        {
+         "key": "dynamiq.usage.input_cost_usd",
+         "value": {
+          "doubleValue": 2.75e-05
+         }
+        },
+        {
+         "key": "dynamiq.usage.output_cost_usd",
+         "value": {
+          "doubleValue": 7.000000000000001e-05
+         }
+        },
+        {
+         "key": "dynamiq.usage.total_cost_usd",
+         "value": {
+          "doubleValue": 9.750000000000001e-05
+         }
+        },
+        {
+         "key": "gen_ai.usage.input_tokens",
+         "value": {
+          "intValue": "11"
+         }
+        },
+        {
+         "key": "gen_ai.usage.output_tokens",
+         "value": {
+          "intValue": "7"
+         }
+        },
+        {
+         "key": "gen_ai.response.id",
+         "value": {
+          "stringValue": "chatcmpl-3a98c569-875f-49aa-b12c-47454dac6f15"
+         }
+        },
+        {
+         "key": "gen_ai.response.finish_reasons",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "tool_call"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.output.messages",
+         "value": {
+          "stringValue": "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"tool_call\",\"id\":\"call_1_0\",\"name\":\"search\",\"arguments\":{\"thought\":\"t\",\"query\":\"q1\"}}],\"finish_reason\":\"tool_call\"}]"
+         }
+        },
+        {
+         "key": "dynamiq.output",
+         "value": {
+          "stringValue": "{\"content\":\"\",\"tool_calls\":[{\"function\":{\"arguments\":{\"thought\":\"t\",\"query\":\"q1\"},\"name\":\"search\"},\"id\":\"call_1_0\",\"type\":\"function\"}]}"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "1b7fa75a8fbee1d21a5273e63e339511",
+       "spanId": "f5543b0ab71aec20",
+       "parentSpanId": "5eb0838fd3c05243",
+       "name": "execute_tool search",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109911161000",
+       "endTimeUnixNano": "1794496109911280000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "6353bc5d-100d-48b1-be0e-cc784394dd66"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "search"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "search"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "tests.helpers.SearchTool"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "tools"
+         }
+        },
+        {
+         "key": "dynamiq.run.depends",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "91e385b1-e9b3-4ae8-86fa-3bd1b303688a"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "execute_tool"
+         }
+        },
+        {
+         "key": "gen_ai.tool.name",
+         "value": {
+          "stringValue": "search"
+         }
+        },
+        {
+         "key": "gen_ai.tool.type",
+         "value": {
+          "stringValue": "function"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.tool.call.arguments",
+         "value": {
+          "stringValue": "{\"query\":\"q1\",\"mode\":\"slow\"}"
+         }
+        },
+        {
+         "key": "gen_ai.tool.call.result",
+         "value": {
+          "stringValue": "{\"content\":\"forty-two\"}"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "1b7fa75a8fbee1d21a5273e63e339511",
+       "spanId": "a363b961fea1db6e",
+       "parentSpanId": "5eb0838fd3c05243",
+       "name": "chat gpt-4o",
+       "kind": 3,
+       "startTimeUnixNano": "1794496109911421000",
+       "endTimeUnixNano": "1794496109912052000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "692bce96-e7d4-48f1-a148-de44bde4be7d"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "91e385b1-e9b3-4ae8-86fa-3bd1b303688a"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "LLM"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.llms.OpenAI"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "llms"
+         }
+        },
+        {
+         "key": "dynamiq.node.model",
+         "value": {
+          "stringValue": "openai/gpt-4o"
+         }
+        },
+        {
+         "key": "dynamiq.run.depends",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "search"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "chat"
+         }
+        },
+        {
+         "key": "gen_ai.provider.name",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.system",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.request.model",
+         "value": {
+          "stringValue": "gpt-4o"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.input",
+         "value": {
+          "stringValue": "{}"
+         }
+        },
+        {
+         "key": "gen_ai.request.temperature",
+         "value": {
+          "doubleValue": 0.0
+         }
+        },
+        {
+         "key": "gen_ai.request.max_tokens",
+         "value": {
+          "intValue": "100"
+         }
+        },
+        {
+         "key": "gen_ai.tool.definitions",
+         "value": {
+          "stringValue": "[{\"type\":\"function\",\"name\":\"provide_final_answer\",\"description\":\"Function should be called when if you can answer the initial request or if there is not request at all.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"thought\":{\"type\":\"string\",\"description\":\"A short first-person note (one or two sentences) on why you can answer now: which findings or tool results support the answer, not a restatement of the original task.\"},\"answer\":{\"type\":\"string\",\"description\":\"Answer on initial request.\"},\"output_files\":{\"type\":\"string\",\"description\":\"Optional comma-separated file paths to return.\"}},\"required\":[\"thought\",\"answer\"],\"additionalProperties\":false}},{\"type\":\"function\",\"name\":\"search\",\"description\":\"Searches the web.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"thought\":{\"type\":\"string\",\"description\":\"A short first-person note (one or two sentences) on why you are calling this tool and what you expect back, not a restatement of the original task.\"},\"query\":{\"description\":\"Search query.\",\"type\":\"string\"},\"mode\":{\"description\":\"Search mode. Defaults to: slow.\",\"type\":\"string\"}},\"additionalProperties\":false,\"required\":[\"thought\"]}}]"
+         }
+        },
+        {
+         "key": "dynamiq.prompt.messages_base.span_id",
+         "value": {
+          "stringValue": "7038b489410ec478"
+         }
+        },
+        {
+         "key": "dynamiq.prompt.messages_base.count",
+         "value": {
+          "intValue": "4"
+         }
+        },
+        {
+         "key": "gen_ai.input.messages",
+         "value": {
+          "stringValue": "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"text\",\"content\":\"Calling: search\"},{\"type\":\"tool_call\",\"id\":\"call_1_0\",\"name\":\"search\",\"arguments\":{\"thought\":\"t\",\"query\":\"q1\"}}]},{\"role\":\"tool\",\"parts\":[{\"type\":\"tool_call_response\",\"id\":\"call_1_0\",\"response\":\"forty-two\"}],\"name\":\"search\"}]"
+         }
+        },
+        {
+         "key": "dynamiq.usage.total_tokens",
+         "value": {
+          "intValue": "18"
+         }
+        },
+        {
+         "key": "dynamiq.usage.input_cost_usd",
+         "value": {
+          "doubleValue": 2.75e-05
+         }
+        },
+        {
+         "key": "dynamiq.usage.output_cost_usd",
+         "value": {
+          "doubleValue": 7.000000000000001e-05
+         }
+        },
+        {
+         "key": "dynamiq.usage.total_cost_usd",
+         "value": {
+          "doubleValue": 9.750000000000001e-05
+         }
+        },
+        {
+         "key": "gen_ai.usage.input_tokens",
+         "value": {
+          "intValue": "11"
+         }
+        },
+        {
+         "key": "gen_ai.usage.output_tokens",
+         "value": {
+          "intValue": "7"
+         }
+        },
+        {
+         "key": "gen_ai.response.id",
+         "value": {
+          "stringValue": "chatcmpl-4ad19d8a-9253-4d64-a7d2-87effa1169fa"
+         }
+        },
+        {
+         "key": "gen_ai.response.finish_reasons",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "tool_call"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.output.messages",
+         "value": {
+          "stringValue": "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"tool_call\",\"id\":\"call_2_0\",\"name\":\"search\",\"arguments\":{\"thought\":\"t\",\"query\":\"q2\"}}],\"finish_reason\":\"tool_call\"}]"
+         }
+        },
+        {
+         "key": "dynamiq.output",
+         "value": {
+          "stringValue": "{\"content\":\"\",\"tool_calls\":[{\"function\":{\"arguments\":{\"thought\":\"t\",\"query\":\"q2\"},\"name\":\"search\"},\"id\":\"call_2_0\",\"type\":\"function\"}]}"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "1b7fa75a8fbee1d21a5273e63e339511",
+       "spanId": "286d0d88897cd318",
+       "parentSpanId": "5eb0838fd3c05243",
+       "name": "execute_tool search",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109912264000",
+       "endTimeUnixNano": "1794496109912380000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "a7def370-440a-43cb-ab5a-655dd9c9cac0"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "search"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "search"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "tests.helpers.SearchTool"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "tools"
+         }
+        },
+        {
+         "key": "dynamiq.run.depends",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "91e385b1-e9b3-4ae8-86fa-3bd1b303688a"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "execute_tool"
+         }
+        },
+        {
+         "key": "gen_ai.tool.name",
+         "value": {
+          "stringValue": "search"
+         }
+        },
+        {
+         "key": "gen_ai.tool.type",
+         "value": {
+          "stringValue": "function"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.tool.call.arguments",
+         "value": {
+          "stringValue": "{\"query\":\"q2\",\"mode\":\"slow\"}"
+         }
+        },
+        {
+         "key": "gen_ai.tool.call.result",
+         "value": {
+          "stringValue": "{\"content\":\"forty-two\"}"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "1b7fa75a8fbee1d21a5273e63e339511",
+       "spanId": "44cc4897d1606b59",
+       "parentSpanId": "5eb0838fd3c05243",
+       "name": "chat gpt-4o",
+       "kind": 3,
+       "startTimeUnixNano": "1794496109912518000",
+       "endTimeUnixNano": "1794496109913114000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "eef2109d-14b6-4226-832a-22e7477112ca"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "91e385b1-e9b3-4ae8-86fa-3bd1b303688a"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "LLM"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.llms.OpenAI"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "llms"
+         }
+        },
+        {
+         "key": "dynamiq.node.model",
+         "value": {
+          "stringValue": "openai/gpt-4o"
+         }
+        },
+        {
+         "key": "dynamiq.run.depends",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "search"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "chat"
+         }
+        },
+        {
+         "key": "gen_ai.provider.name",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.system",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.request.model",
+         "value": {
+          "stringValue": "gpt-4o"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.input",
+         "value": {
+          "stringValue": "{}"
+         }
+        },
+        {
+         "key": "gen_ai.request.temperature",
+         "value": {
+          "doubleValue": 0.0
+         }
+        },
+        {
+         "key": "gen_ai.request.max_tokens",
+         "value": {
+          "intValue": "100"
+         }
+        },
+        {
+         "key": "gen_ai.tool.definitions",
+         "value": {
+          "stringValue": "[{\"type\":\"function\",\"name\":\"provide_final_answer\",\"description\":\"Function should be called when if you can answer the initial request or if there is not request at all.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"thought\":{\"type\":\"string\",\"description\":\"A short first-person note (one or two sentences) on why you can answer now: which findings or tool results support the answer, not a restatement of the original task.\"},\"answer\":{\"type\":\"string\",\"description\":\"Answer on initial request.\"},\"output_files\":{\"type\":\"string\",\"description\":\"Optional comma-separated file paths to return.\"}},\"required\":[\"thought\",\"answer\"],\"additionalProperties\":false}},{\"type\":\"function\",\"name\":\"search\",\"description\":\"Searches the web.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"thought\":{\"type\":\"string\",\"description\":\"A short first-person note (one or two sentences) on why you are calling this tool and what you expect back, not a restatement of the original task.\"},\"query\":{\"description\":\"Search query.\",\"type\":\"string\"},\"mode\":{\"description\":\"Search mode. Defaults to: slow.\",\"type\":\"string\"}},\"additionalProperties\":false,\"required\":[\"thought\"]}}]"
+         }
+        },
+        {
+         "key": "dynamiq.prompt.messages_base.span_id",
+         "value": {
+          "stringValue": "a363b961fea1db6e"
+         }
+        },
+        {
+         "key": "dynamiq.prompt.messages_base.count",
+         "value": {
+          "intValue": "6"
+         }
+        },
+        {
+         "key": "gen_ai.input.messages",
+         "value": {
+          "stringValue": "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"text\",\"content\":\"Calling: search\"},{\"type\":\"tool_call\",\"id\":\"call_2_0\",\"name\":\"search\",\"arguments\":{\"thought\":\"t\",\"query\":\"q2\"}}]},{\"role\":\"tool\",\"parts\":[{\"type\":\"tool_call_response\",\"id\":\"call_2_0\",\"response\":\"forty-two\"}],\"name\":\"search\"}]"
+         }
+        },
+        {
+         "key": "dynamiq.usage.total_tokens",
+         "value": {
+          "intValue": "18"
+         }
+        },
+        {
+         "key": "dynamiq.usage.input_cost_usd",
+         "value": {
+          "doubleValue": 2.75e-05
+         }
+        },
+        {
+         "key": "dynamiq.usage.output_cost_usd",
+         "value": {
+          "doubleValue": 7.000000000000001e-05
+         }
+        },
+        {
+         "key": "dynamiq.usage.total_cost_usd",
+         "value": {
+          "doubleValue": 9.750000000000001e-05
+         }
+        },
+        {
+         "key": "gen_ai.usage.input_tokens",
+         "value": {
+          "intValue": "11"
+         }
+        },
+        {
+         "key": "gen_ai.usage.output_tokens",
+         "value": {
+          "intValue": "7"
+         }
+        },
+        {
+         "key": "gen_ai.response.id",
+         "value": {
+          "stringValue": "chatcmpl-83cd300b-e1ea-4029-8b37-350ac758d3b0"
+         }
+        },
+        {
+         "key": "gen_ai.response.finish_reasons",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "tool_call"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.output.messages",
+         "value": {
+          "stringValue": "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"tool_call\",\"id\":\"call_3\",\"name\":\"provide_final_answer\",\"arguments\":{\"thought\":\"done\",\"answer\":\"done\"}}],\"finish_reason\":\"tool_call\"}]"
+         }
+        },
+        {
+         "key": "dynamiq.output",
+         "value": {
+          "stringValue": "{\"content\":\"\",\"tool_calls\":[{\"function\":{\"arguments\":{\"thought\":\"done\",\"answer\":\"done\"},\"name\":\"provide_final_answer\"},\"id\":\"call_3\",\"type\":\"function\"}]}"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "1b7fa75a8fbee1d21a5273e63e339511",
+       "spanId": "5eb0838fd3c05243",
+       "parentSpanId": "24df1d134ec1d806",
+       "name": "invoke_agent assistant",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109908598000",
+       "endTimeUnixNano": "1794496109913351000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "9f8728ed-05fe-45a2-acef-a0f9fc027442"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "agent"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "assistant"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.agents.Agent"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "agents"
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "invoke_agent"
+         }
+        },
+        {
+         "key": "gen_ai.agent.name",
+         "value": {
+          "stringValue": "assistant"
+         }
+        },
+        {
+         "key": "gen_ai.agent.id",
+         "value": {
+          "stringValue": "agent"
+         }
+        },
+        {
+         "key": "gen_ai.provider.name",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.request.model",
+         "value": {
+          "stringValue": "gpt-4o"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.input",
+         "value": {
+          "stringValue": "{\"input\":\"What is the answer?\",\"images\":null,\"videos\":null,\"files\":null,\"user_id\":null,\"session_id\":null,\"metadata\":{},\"tool_params\":{\"global_params\":{},\"by_name_params\":{},\"by_id_params\":{}}}"
+         }
+        },
+        {
+         "key": "gen_ai.input.messages",
+         "value": {
+          "stringValue": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"What is the answer?\"}]}]"
+         }
+        },
+        {
+         "key": "dynamiq.output",
+         "value": {
+          "stringValue": "{\"content\":\"done\",\"blocked\":false}"
+         }
+        },
+        {
+         "key": "gen_ai.output.messages",
+         "value": {
+          "stringValue": "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"text\",\"content\":\"done\"}],\"finish_reason\":\"stop\"}]"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "1b7fa75a8fbee1d21a5273e63e339511",
+       "spanId": "24df1d134ec1d806",
+       "name": "invoke_workflow Workflow",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109908293000",
+       "endTimeUnixNano": "1794496109914903000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "603e230b-8f6b-4a6d-99f5-3373c7625411"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "workflow"
+         }
+        },
+        {
+         "key": "dynamiq.run.is_root",
+         "value": {
+          "boolValue": true
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "invoke_workflow"
+         }
+        },
+        {
+         "key": "gen_ai.workflow.name",
+         "value": {
+          "stringValue": "Workflow"
+         }
+        },
+        {
+         "key": "dynamiq.flow.id",
+         "value": {
+          "stringValue": "flow"
+         }
+        },
+        {
+         "key": "dynamiq.config.run_id",
+         "value": {
+          "stringValue": "ea26adb1-d0f2-40df-97e8-ec00e2a48cb4"
+         }
+        },
+        {
+         "key": "dynamiq.workflow.id",
+         "value": {
+          "stringValue": "workflow"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.input",
+         "value": {
+          "stringValue": "{\"input\":\"What is the answer?\"}"
+         }
+        },
+        {
+         "key": "dynamiq.flow.run_id",
+         "value": {
+          "stringValue": "357cbb52-26db-41fd-963b-eaa2b445e8ff"
+         }
+        },
+        {
+         "key": "dynamiq.output",
+         "value": {
+          "stringValue": "{\"content\":\"done\",\"blocked\":false}"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      }
+     ],
+     "schemaUrl": "https://opentelemetry.io/schemas/1.41.1"
+    }
+   ]
+  }
+ ]
+}

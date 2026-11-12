@@ -1,0 +1,80 @@
+{
+  "llm_workflow": {
+    "description": "Input -> LLM -> Output in a workflow, with node configuration capture on.",
+    "prompt_compaction_enabled": false,
+    "content_capture_enabled": true,
+    "node_config_enabled": true
+  },
+  "agent_function_calling": {
+    "description": "An agent with a tool in a workflow, FUNCTION_CALLING mode; a call-limit hook blocks the second tool call.",
+    "prompt_compaction_enabled": false,
+    "content_capture_enabled": true,
+    "node_config_enabled": false
+  },
+  "agent_xml": {
+    "description": "An agent with a tool run on its own (a root node run), XML mode.",
+    "prompt_compaction_enabled": false,
+    "content_capture_enabled": true,
+    "node_config_enabled": false
+  },
+  "agent_tool_failure": {
+    "description": "An agent whose tool fails; the agent recovers and answers.",
+    "prompt_compaction_enabled": false,
+    "content_capture_enabled": true,
+    "node_config_enabled": false
+  },
+  "retry": {
+    "description": "A node that fails its first attempt and succeeds on the retry.",
+    "prompt_compaction_enabled": false,
+    "content_capture_enabled": true,
+    "node_config_enabled": false
+  },
+  "choice_skipped": {
+    "description": "A Choice whose second branch is not taken, with node configuration capture on.",
+    "prompt_compaction_enabled": false,
+    "content_capture_enabled": true,
+    "node_config_enabled": true
+  },
+  "map": {
+    "description": "A Map over three items.",
+    "prompt_compaction_enabled": false,
+    "content_capture_enabled": true,
+    "node_config_enabled": false
+  },
+  "sub_workflow": {
+    "description": "A sub-workflow node that runs an inner flow.",
+    "prompt_compaction_enabled": false,
+    "content_capture_enabled": true,
+    "node_config_enabled": false
+  },
+  "paused": {
+    "description": "A workflow that pauses on a checkpoint.",
+    "prompt_compaction_enabled": false,
+    "content_capture_enabled": true,
+    "node_config_enabled": false
+  },
+  "foreign_spans": {
+    "description": "Spans of other instrumentation: the workflow runs inside an application span, and a node runs another node without naming a parent run inside an HTTP client span, which makes that run a root.",
+    "prompt_compaction_enabled": false,
+    "content_capture_enabled": true,
+    "node_config_enabled": false
+  },
+  "prompt_compaction": {
+    "description": "An agent with four model calls, prompt compaction on for the spans and the handler.",
+    "prompt_compaction_enabled": true,
+    "content_capture_enabled": true,
+    "node_config_enabled": false
+  },
+  "failed_workflow": {
+    "description": "A workflow that fails: a node raises and the node after it is skipped.",
+    "prompt_compaction_enabled": false,
+    "content_capture_enabled": true,
+    "node_config_enabled": false
+  },
+  "content_capture_off": {
+    "description": "Content capture off: an agent with a blocked call and a failing tool, a node that fails and returns, and a Choice branch that is not taken.",
+    "prompt_compaction_enabled": false,
+    "content_capture_enabled": false,
+    "node_config_enabled": false
+  }
+}
