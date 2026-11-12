@@ -692,6 +692,16 @@ def test_a_sub_agent_passes_over_the_placeholders_of_the_agent_that_called_it():
     assert sub_agent.run(HookPoint.ON_INPUT, run_context(sub_agent, parent=caller_ctx), brief).value == brief
 
 
+def test_a_sub_agent_blocks_a_tool_call_with_a_callers_placeholder_it_cannot_restore():
+    caller = HookRunner([PIIHook()])
+    caller_ctx = run_context(caller)
+    placeholder = caller.run(HookPoint.ON_INPUT, caller_ctx, "ann.lee@example.com").value
+    sub_agent = HookRunner([PIIHook(restore_in_tools=["send-email"])])
+    call = ToolCall(name="send-email", input={"to": placeholder})
+    with pytest.raises(ToolBlockedException, match="no longer available"):
+        sub_agent.run(HookPoint.BEFORE_TOOL, run_context(sub_agent, parent=caller_ctx), call.input, call=call)
+
+
 def test_a_blocking_pattern_written_in_full_width_digits_still_matches_them():
     hook = RegexHook(patterns=["[０-９]{4}"], on=["input"], on_violation=BlockAs.ANSWER)
     with pytest.raises(HookAnswerException):

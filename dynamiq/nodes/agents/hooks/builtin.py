@@ -508,18 +508,19 @@ def _sub_issued(text: str, issued: Collection[str], repl) -> str:
     return _PLACEHOLDER.sub(lambda match: repl(match) if match.group(0) in issued else match.group(0), text)
 
 
-def _issued_placeholders(ctx: HookContext, hook: Hook) -> set[str]:
-    """The placeholders the ``pii`` hooks issued in this run (``hook`` included) and in the runs of the agents that
-    called it, whose placeholders a brief carries. Only these are passed over by the patterns and detectors: text
-    that merely has their shape, such as ``<X_4111111111111111>``, is checked like any other, or it would carry what
-    the hooks look for past them."""
+def _issued_placeholders(ctx: HookContext, hook: Hook, callers: bool = True) -> set[str]:
+    """The placeholders the ``pii`` hooks issued in this run (``hook`` included) and, with ``callers``, in the runs
+    of the agents that called it, whose placeholders a brief carries. Only these are passed over by the patterns and
+    detectors: text that merely has their shape, such as ``<X_4111111111111111>``, is checked like any other, or it
+    would carry what the hooks look for past them. No hook of this run can restore a caller's placeholder, so the
+    check for placeholders a tool would get unrestored leaves ``callers`` out."""
     issued: set[str] = set()
     run, pairs = ctx, [(ctx.hook_key, hook), *ctx.hooks]
     while run is not None:
         for key, other in pairs:
             if isinstance(other, PIIHook):
                 issued.update(_held_placeholders(run.for_call(hook_key=key)))
-        run = run.parent
+        run = run.parent if callers else None
         pairs = run.hooks if run is not None else []
     return issued
 
@@ -843,7 +844,7 @@ class PIIHook(TextGuardHook):
         map_strings(values, collect)
         if not found:
             return []
-        known = _issued_placeholders(ctx, self)
+        known = _issued_placeholders(ctx, self, callers=False)
         return list(dict.fromkeys(placeholder for placeholder in found if placeholder not in known))
 
     def on_output(self, ctx: HookContext, answer: Any) -> Decision:
