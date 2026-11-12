@@ -608,7 +608,7 @@ class TestFileSystemBackend(BackendTestMixin):
         flow_dir = backend._flow_dir(flow_id)
         run_dirs = [d for d in flow_dir.iterdir() if d.is_dir()]
         assert len(run_dirs) == 1
-        assert run_dirs[0].name.endswith(f"__{wf_run_id}")
+        assert run_dirs[0].name.endswith(f"__{wf_run_id[:8]}")
 
         cp_files = list(run_dirs[0].glob("*.json"))
         assert len(cp_files) == 3
@@ -637,7 +637,7 @@ class TestFileSystemBackend(BackendTestMixin):
 
         flow_dir = backend._flow_dir(flow_id)
         run_dir = next(d for d in flow_dir.iterdir() if d.is_dir())
-        assert run_dir.name.endswith("__wf-run-id")
+        assert run_dir.name.endswith("__wf-run-i")
         assert "flow-run-id" not in run_dir.name
 
     def test_directory_falls_back_to_run_id_without_wf_run_id(self, backend: FileSystem):
@@ -648,7 +648,7 @@ class TestFileSystemBackend(BackendTestMixin):
 
         flow_dir = backend._flow_dir(flow_id)
         run_dir = next(d for d in flow_dir.iterdir() if d.is_dir())
-        assert run_dir.name.endswith("__my-run-id")
+        assert run_dir.name.endswith("__my-run-i")
 
     def test_get_list_by_run_uses_suffix_match(self, backend: FileSystem):
         """get_list_by_run uses suffix match, not substring."""
