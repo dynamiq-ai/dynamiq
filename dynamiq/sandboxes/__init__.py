@@ -10,6 +10,7 @@ __all__ = [
     "ShellCommandResult",
     "BedrockAgentCoreRuntimeSandbox",
     "BedrockAgentCoreSandbox",
+    "BoxdSandbox",
     "DaytonaSandbox",
     "E2BSandbox",
     "E2BDesktopSandbox",
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
     from .base import Sandbox, SandboxConfig, SandboxTool, ShellCommandResult
     from .bedrock_agentcore import BedrockAgentCoreSandbox
     from .bedrock_agentcore_runtime import BedrockAgentCoreRuntimeSandbox
+    from .boxd import BoxdSandbox
     from .daytona import DaytonaSandbox
     from .e2b import E2BSandbox
     from .e2b_desktop import E2BDesktopSandbox
@@ -31,6 +33,7 @@ _LAZY_EXPORTS = {
     "ShellCommandResult": ".base",
     "BedrockAgentCoreRuntimeSandbox": ".bedrock_agentcore_runtime",
     "BedrockAgentCoreSandbox": ".bedrock_agentcore",
+    "BoxdSandbox": ".boxd",
     "DaytonaSandbox": ".daytona",
     "E2BSandbox": ".e2b",
     "E2BDesktopSandbox": ".e2b_desktop",
