@@ -120,10 +120,12 @@ evals = [
     "rouge-score>=0.1.2,<0.2.0",
     "sacrebleu>=2.5.1,<2.6.0",
 ]
+# The boxd sandbox. Not in all: boxd needs grpcio 1.80 or later, and weaviate-client in vectorstores needs an older one.
+boxd = ["boxd>=0.3.0,<0.4.0"]
 cua = ["cua-computer==0.4.19 ; python_version >= '3.12' and python_version < '3.14'"]
 # Kept for existing installs; sandboxes includes it.
 monty = ["pydantic-monty>=1.3.0,<2.0.0"]
-# Every extra except cua, which stays opt-in.
+# Every extra except boxd and cua, which stay opt-in.
 all = ["dynamiq[files,data,vectorstores,sql,browser,sandboxes,gcp,evals]"]
 
 [project.scripts]
@@ -188,6 +190,8 @@ packages = ["dynamiq"]
 
 [tool.uv]
 exclude-newer = "7 days"
+# boxd needs grpcio 1.80 or later, and weaviate-client needs an older one.
+conflicts = [[{ extra = "boxd" }, { extra = "vectorstores" }], [{ extra = "boxd" }, { extra = "all" }]]
 # Security fixes published inside the cooldown window; drop each entry once its release is older than 7 days.
 exclude-newer-package = { brotli = false, brotlicffi = false, certifi = false, databricks-sql-connector = false, e2b-desktop = false, pypdf = false, setuptools = false, streamlit = false }
 

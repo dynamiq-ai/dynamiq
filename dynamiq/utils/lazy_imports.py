@@ -60,6 +60,7 @@ OPTIONAL_DEPENDENCIES: dict[str, tuple[str, str]] = {
     "rapidfuzz": ("rapidfuzz", "evals"),
     "rouge_score": ("rouge-score", "evals"),
     "sacrebleu": ("sacrebleu", "evals"),
+    "boxd": ("boxd", "boxd"),
     "computer": ("cua-computer", "cua"),
     "pydantic_monty": ("pydantic-monty", "monty"),
 }
