@@ -1,3 +1,4 @@
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, ClassVar, Literal
 from urllib.parse import urljoin
@@ -19,8 +20,9 @@ BENIGN_LABELS = frozenset({"SAFE", "LEGIT", "BENIGN", "LABEL_0"})
 ATTACK_LABELS = frozenset({"INJECTION", "JAILBREAK", "MALICIOUS", "LABEL_1"})
 
 # These classifiers read at most 512 tokens and their servers drop the rest silently, so longer text is scored in
-# overlapping windows. Their DeBERTa-v3 tokenizers make at most one token per character, so a window of 500 is read
-# whole in any script, and the overlap holds an injection that the edge of a window cuts.
+# overlapping windows, cut from the text folded with NFKC as their DeBERTa-v3 tokenizers fold it. Folded, any script
+# takes at most one token per character, so a window of 500 is read whole and the overlap holds an injection that the
+# edge of a window cuts. Unfolded, a character such as "\u3307" alone takes five tokens.
 WINDOW_CHARS = 500
 WINDOW_OVERLAP_CHARS = 100
 MAX_PARALLEL_REQUESTS = 4
@@ -103,7 +105,7 @@ class PromptInjectionDetector(ConnectionNode):
         """
         api_url = self.connection.url or urljoin(HUGGINGFACE_URL, self.model)
         headers = {"Authorization": f"Bearer {self.connection.api_key}"}
-        windows = split_windows(message, WINDOW_CHARS, WINDOW_OVERLAP_CHARS)
+        windows = split_windows(unicodedata.normalize("NFKC", message), WINDOW_CHARS, WINDOW_OVERLAP_CHARS)
 
         def score(window: str) -> float:
             response = requests.post(api_url, headers=headers, json={"inputs": window}, timeout=self.timeout)
@@ -122,9 +124,9 @@ class PromptInjectionDetector(ConnectionNode):
         Detects prompt injection attempts in a given message using a Lakera endpoint.
 
         Lakera flags a request when any detector of the project's policy fires. A flag that only the detectors of
-        ``LAKERA_NON_ATTACK_DETECTORS`` raised does not count; any other, such as content moderation or a custom
-        detector, does, so a policy still blocks what it was set up to block. A project in Lakera's Detect mode
-        never flags, so it never blocks here either.
+        ``LAKERA_NON_ATTACK_DETECTORS`` raised does not count; any other does, content moderation and custom detectors
+        included, and so does a flag the breakdown does not explain. A project in Lakera's Detect mode never flags, so
+        it never blocks here either.
 
         Args:
             message (str): The input message to analyze for prompt injection.
@@ -143,11 +145,9 @@ class PromptInjectionDetector(ConnectionNode):
         result = response.json()
         if result.get("flagged") is None:
             raise ValueError("Lakera returned no `flagged` verdict")
-        breakdown = result.get("breakdown")
-        attack = breakdown is None or any(
-            item.get("detected") and not str(item.get("detector_type", "")).startswith(LAKERA_NON_ATTACK_DETECTORS)
-            for item in breakdown
-        )
+        breakdown = result.get("breakdown") or []
+        detected = [str(item.get("detector_type", "")) for item in breakdown if item.get("detected")]
+        attack = not detected or any(not detector.startswith(LAKERA_NON_ATTACK_DETECTORS) for detector in detected)
         return {"prompt_detected": bool(result["flagged"]) and attack}
 
 

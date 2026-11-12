@@ -18,7 +18,7 @@ import unicodedata
 from collections import OrderedDict
 from collections.abc import Collection, Iterator, Sequence
 from contextlib import contextmanager
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, ClassVar, Literal
 from uuid import uuid4
 
 import regex
@@ -314,6 +314,7 @@ class TextGuardHook(GuardHook):
 
     on: list[RunPoint] = Field(default_factory=lambda: ["input", "tool_result", "output"], min_length=1)
     action: Literal["block", "mask"] = "block"
+    screens_context: ClassVar[bool] = True
     live_stream: bool = Field(
         default=False,
         description=(
@@ -331,12 +332,14 @@ class TextGuardHook(GuardHook):
 
     def live_text(self, ctx: HookContext, text: str) -> str:
         issued = _issued_placeholders(ctx, self)
-        return _map_outside_placeholders(text, lambda part: self._mask(ctx, part, "output"), issued)
+        return _map_outside_placeholders(text, lambda part: self._mask(ctx, part, "output", issued), issued)
 
     def _violates(self, text: str) -> bool:
         raise NotImplementedError
 
-    def _mask(self, ctx: HookContext, text: str, origin: str) -> str:
+    def _mask(self, ctx: HookContext, text: str, origin: str, issued: set[str] | None = None) -> str:
+        """``text`` masked. ``issued`` holds the placeholders of the run, read once per pass; a subclass that issues
+        more adds them to it."""
         raise NotImplementedError
 
     def _screen(self, ctx: HookContext, value: Any, origin: str) -> Decision:
@@ -346,7 +349,7 @@ class TextGuardHook(GuardHook):
             return self.violation() if any(self._violates(text) for text in texts) else ALLOW
 
         def mask(text: str) -> str:
-            return _map_outside_placeholders(text, lambda part: self._mask(ctx, part, origin), issued)
+            return _map_outside_placeholders(text, lambda part: self._mask(ctx, part, origin, issued), issued)
 
         masked = map_strings(value, mask)
         return Modify(masked) if masked != value else ALLOW
@@ -445,11 +448,13 @@ class RegexHook(TextGuardHook):
         return self
 
     def _violates(self, text: str) -> bool:
-        # Neither "ig\u200bnore" nor a full-width "ｉｇｎｏｒｅ" may slip past a pattern.
-        text = _ZERO_WIDTH.sub("", unicodedata.normalize("NFKC", _untag(text)))
-        return any(pattern.search(text, timeout=REGEX_TIMEOUT_SECONDS) for pattern in self._compiled)
+        # Neither "ig\u200bnore" nor a full-width "ｉｇｎｏｒｅ" may slip past a pattern, and a
+        # pattern written in compatibility characters still matches them as written.
+        plain = _ZERO_WIDTH.sub("", _untag(text))
+        texts = {plain, unicodedata.normalize("NFKC", plain)}
+        return any(pattern.search(each, timeout=REGEX_TIMEOUT_SECONDS) for each in texts for pattern in self._compiled)
 
-    def _mask(self, ctx: HookContext, text: str, origin: str) -> str:
+    def _mask(self, ctx: HookContext, text: str, origin: str, issued: set[str] | None = None) -> str:
         # Match on the text without invisible characters (like _violates), but replace only the matched spans of the
         # original, so text that matches nothing comes back untouched.
         cleaned, origins = _strip_zero_width(_untag(text))
@@ -504,14 +509,18 @@ def _sub_issued(text: str, issued: Collection[str], repl) -> str:
 
 
 def _issued_placeholders(ctx: HookContext, hook: Hook) -> set[str]:
-    """The placeholders the ``pii`` hooks of the run (``hook`` included) issued. Only these are passed over by the
-    patterns and detectors: text that merely has their shape, such as ``<X_4111111111111111>``, is checked like any
-    other, or it would carry what the hooks look for past them."""
+    """The placeholders the ``pii`` hooks issued in this run (``hook`` included) and in the runs of the agents that
+    called it, whose placeholders a brief carries. Only these are passed over by the patterns and detectors: text
+    that merely has their shape, such as ``<X_4111111111111111>``, is checked like any other, or it would carry what
+    the hooks look for past them."""
     issued: set[str] = set()
-    for key, other in [(ctx.hook_key, hook), *ctx.hooks]:
-        if isinstance(other, PIIHook):
-            with _locked_store(ctx.for_call(hook_key=key)) as store:
-                issued.update(store.get("placeholder_to_value", {}))
+    run, pairs = ctx, [(ctx.hook_key, hook), *ctx.hooks]
+    while run is not None:
+        for key, other in pairs:
+            if isinstance(other, PIIHook):
+                issued.update(_held_placeholders(run.for_call(hook_key=key)))
+        run = run.parent
+        pairs = run.hooks if run is not None else []
     return issued
 
 
@@ -540,6 +549,24 @@ _SESSION_STORES_LOCK = threading.RLock()
 _MAX_SESSION_STORES = 1000
 
 
+def _session_key(ctx: HookContext) -> tuple | None:
+    """The key of the hook's mapping in ``_SESSION_STORES``, or ``None`` when the run keeps its own (see
+    ``_locked_store``)."""
+    if not (ctx.trusted and (ctx.session_id or ctx.user_id)):
+        return None
+    return json.dumps(ctx.trusted, sort_keys=True, default=str), ctx.hook_key, ctx.user_id, ctx.session_id
+
+
+def _held_placeholders(ctx: HookContext) -> list[str]:
+    """The placeholders of the hook's mapping, read without the merge ``_locked_store`` does on every use."""
+    with ctx.lock:
+        held = list(ctx.state.get("hooks", {}).get(ctx.hook_key, {}).get("placeholder_to_value", {}))
+    if (key := _session_key(ctx)) is not None:
+        with _SESSION_STORES_LOCK:
+            held += list(_SESSION_STORES.get(key, {}).get("placeholder_to_value", {}))
+    return held
+
+
 @contextmanager
 def _locked_store(ctx: HookContext) -> Iterator[dict]:
     """The placeholder mapping. When the server scopes the run with ``trusted_context``, such as with its tenant,
@@ -553,13 +580,12 @@ def _locked_store(ctx: HookContext) -> Iterator[dict]:
     The run keeps a copy of the session mapping in its own state, which is checkpointed, and puts it back into a
     store that lost it (another process after a resume, or an eviction while the run went on). Placeholders the
     process numbers next take the namespace of its store, so they never repeat one numbered elsewhere."""
-    if not (ctx.trusted and (ctx.session_id or ctx.user_id)):
+    if (key := _session_key(ctx)) is None:
         with ctx.lock:
             if (ctx.session_id or ctx.user_id) and "namespace" not in ctx.hook_state:
                 ctx.hook_state["namespace"] = str(uuid4().int)
             yield ctx.hook_state
         return
-    key = (json.dumps(ctx.trusted, sort_keys=True, default=str), ctx.hook_key, ctx.user_id, ctx.session_id)
     with ctx.lock, _SESSION_STORES_LOCK:
         if key not in _SESSION_STORES:
             _SESSION_STORES[key] = {"namespace": str(uuid4().int)}
@@ -693,8 +719,9 @@ class PIIHook(TextGuardHook):
             for match in pattern.finditer(text, overlapped=True, timeout=REGEX_TIMEOUT_SECONDS)
         )
 
-    def _mask(self, ctx: HookContext, text: str, origin: str, issued: Collection[str] | None = None) -> str:
-        issued = set(_issued_placeholders(ctx, self) if issued is None else issued)
+    def _mask(self, ctx: HookContext, text: str, origin: str, issued: set[str] | None = None) -> str:
+        if issued is None:
+            issued = _issued_placeholders(ctx, self)
         for label, entity, pattern in self._detectors:
 
             def replace(match, label=label, entity=entity):
@@ -757,11 +784,11 @@ class PIIHook(TextGuardHook):
 
     def before_model(self, ctx: HookContext, messages: list) -> Decision:
         """``scope: request``: send a masked copy of the history; the history itself is left alone."""
-        masked = []
+        masked, issued = [], _issued_placeholders(ctx, self)
         for message in messages:
             origin = self._origin_of(message)
             masked.append(
-                map_message_text(message, lambda text, origin=origin: self._mask(ctx, text, origin))
+                map_message_text(message, lambda text, origin=origin: self._mask(ctx, text, origin, issued))
                 if origin in self.on
                 else message
             )
@@ -932,6 +959,7 @@ class PromptInjectionHook(GuardHook):
     detector: Annotated[Node, _DetectorNodeSchema]
     on: list[Literal["input", "tool_result"]] = Field(default_factory=lambda: ["input", "tool_result"], min_length=1)
     max_chars: int = Field(default=20000, gt=0, description="The longest text sent to the detector in one call.")
+    screens_context: ClassVar[bool] = True
 
     @field_validator("detector", mode="before")
     @classmethod

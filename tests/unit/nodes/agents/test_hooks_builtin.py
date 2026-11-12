@@ -684,6 +684,20 @@ def test_text_shaped_like_a_placeholder_is_masked_like_any_other():
     assert "4111111111111111" not in masked
 
 
+def test_a_sub_agent_passes_over_the_placeholders_of_the_agent_that_called_it():
+    caller = HookRunner([PIIHook()])
+    caller_ctx = run_context(caller, session_id="s1")
+    brief = caller.run(HookPoint.ON_INPUT, caller_ctx, "write to ann.lee@example.com").value
+    sub_agent = HookRunner([RegexHook(patterns=[r"\d{8,12}"], action="mask", on=["input"])])
+    assert sub_agent.run(HookPoint.ON_INPUT, run_context(sub_agent, parent=caller_ctx), brief).value == brief
+
+
+def test_a_blocking_pattern_written_in_full_width_digits_still_matches_them():
+    hook = RegexHook(patterns=["[０-９]{4}"], on=["input"], on_violation=BlockAs.ANSWER)
+    with pytest.raises(HookAnswerException):
+        HookRunner([hook]).run(HookPoint.ON_INPUT, HookContext(), "PIN １２３４")
+
+
 def test_detectors_read_placeholders_as_the_words_they_stand_for():
     hook = PhraseSpy(detector={"connection": HuggingFace(api_key="k")})
     runner = HookRunner([PIIHook(), hook], ["0:pii", "1:spy"])

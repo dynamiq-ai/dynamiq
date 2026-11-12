@@ -56,6 +56,7 @@ from dynamiq.nodes.agents.hooks import (
     current_hook_ctx,
     resolve_hook,
 )
+from dynamiq.nodes.agents.hooks.builtin import map_strings
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.agents.shared_session import (
@@ -1955,6 +1956,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             config=config,
             hooks=[*inherited, *self._own_hook_pairs()],
             trusted=dict(getattr(config, "trusted_context", None) or {}),
+            parent=parent,
         )
         if parent is not None:
             ctx.lock = parent.lock
@@ -2054,10 +2056,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         *,
         call: ToolCall | None = None,
         tool_call_id: str | None = None,
+        runner: HookRunner | None = None,
         **kwargs,
     ) -> HookRun:
-        """Run one hook point, record its events on this agent's run (trace) and stream a block if there is one."""
-        runner = self._hook_runner()
+        """Run one hook point, record its events on this agent's run (trace) and stream a block if there is one.
+        ``runner`` narrows the hooks to a subset of the run's."""
+        runner = runner or self._hook_runner()
         if not runner.has(point):
             return HookRun(value=value)
         ctx = current_hook_ctx.get() or HookContext(agent_name=self.name, agent_id=self.id)
@@ -2189,14 +2193,19 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         return message.model_copy(update={"content": [VisionMessageTextContent(text=hooked), *media]})
 
     def _apply_input_hooks_to_context(self, input_data: AgentInputSchema, config, **kwargs) -> None:
-        """``on_input`` on the run input's ``context``, which the system prompt shows the model, so it must not carry
-        what the message itself may not. A ``context`` that is not text is checked as the prompt renders it."""
+        """``on_input`` of the hooks that set ``screens_context`` on each text value of the run input's ``context``,
+        which the system prompt shows the model. A list or dict keeps its shape."""
         context = (input_data.model_extra or {}).get("context")
-        text = context if isinstance(context, str) or context is None else str(context)
-        if not text or not self._hook_runner().has(HookPoint.ON_INPUT):
+        runner = self._hook_runner()
+        pairs = [(key, hook) for key, hook in zip(runner.keys, runner.hooks) if hook.screens_context]
+        if context is None or not pairs:
             return
-        hooked = self._run_hooks(HookPoint.ON_INPUT, text, config, **kwargs).value
-        if hooked != text:
+        screening = HookRunner([hook for _, hook in pairs], [key for key, _ in pairs])
+
+        def screen(text: str) -> str:
+            return self._run_hooks(HookPoint.ON_INPUT, text, config, runner=screening, **kwargs).value if text else text
+
+        if (hooked := map_strings(context, screen)) != context:
             self.system_prompt_manager.update_variables({"context": hooked})
 
     def _run_tool(
