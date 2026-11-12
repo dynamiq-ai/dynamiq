@@ -99,6 +99,10 @@ class MemoryStore(abc.ABC, BaseModel):
         """
         return id(self)
 
+    def content_limit(self) -> int | None:
+        """The most characters one memory may hold, or None when the store sets no limit."""
+        return None
+
     @abc.abstractmethod
     def list(self, prefix: str = "", user_id: str | None = None) -> builtins.list[MemoryEntry]:
         """List memories under ``prefix``. An empty prefix lists everything.

@@ -1,5 +1,6 @@
 import shlex
 import threading
+import time
 from typing import Any, ClassVar
 
 from e2b.exceptions import RateLimitException as E2BRateLimitException
@@ -26,6 +27,11 @@ class E2BSandbox(Sandbox):
     """
 
     DEFAULT_E2B_DOMAIN: ClassVar[str] = "e2b.app"
+    # E2B ends a sandbox a fixed time after it was created or last connected to, busy or not, so a sandbox in use
+    # connects again at most this often, in seconds, to stay up.
+    TIMEOUT_REFRESH_INTERVAL: ClassVar[int] = 60
+    # The longest, in seconds, a foreground command keeps its sandbox up, whatever timeout the agent gives it.
+    MAX_COMMAND_TIMEOUT: ClassVar[int] = 3600
     model_config = ConfigDict(arbitrary_types_allowed=True)
     connection: E2B
     timeout: int = 3600
@@ -51,6 +57,7 @@ class E2BSandbox(Sandbox):
     )
     _sandbox: E2BCodeInterpreterSandbox | None = PrivateAttr(default=None)
     _sandbox_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
+    _timeout_refreshed_at: float = PrivateAttr(default=0.0)
 
     @property
     def to_dict_exclude_params(self) -> dict[str, bool]:
@@ -189,10 +196,13 @@ class E2BSandbox(Sandbox):
         """Lazily initialize or reconnect to E2B sandbox, with retries on rate-limit and transient errors.
 
         Uses double-checked locking so concurrent threads (e.g. parallel tool
-        calls via ThreadPoolExecutor) never create duplicate sandboxes.
+        calls via ThreadPoolExecutor) never create duplicate sandboxes. Every call
+        also keeps the sandbox from timing out while it is in use.
         """
-        if self._sandbox is not None:
-            return self._sandbox
+        sandbox = self._sandbox
+        if sandbox is not None:
+            self._extend_timeout(sandbox)
+            return sandbox
 
         with self._sandbox_lock:
             # Double-check after acquiring the lock
@@ -201,24 +211,41 @@ class E2BSandbox(Sandbox):
 
             if self.sandbox_id:
                 try:
-                    self._sandbox = self._reconnect_with_retry()
+                    sandbox = self._reconnect_with_retry()
+                    self._timeout_refreshed_at = time.monotonic()
+                    self._sandbox = sandbox
                     logger.debug(f"E2B sandbox reconnected: {self.sandbox_id}")
-                    # Call set_timeout explicitly to ensure the sandbox timeout
-                    # is set to the proper value after reconnect.
-                    try:
-                        self._sandbox.set_timeout(self.timeout)
-                    except Exception as e:
-                        logger.debug("set_timeout after reconnect failed: %s", e)
                     self._ensure_directories()
                     return self._sandbox
                 except Exception as e:
                     raise SandboxConnectionError(self.sandbox_id, cause=e) from e
 
-            self._sandbox = self._create_with_retry()
+            sandbox = self._create_with_retry()
+            self._timeout_refreshed_at = time.monotonic()
+            self._sandbox = sandbox
             self.sandbox_id = self._sandbox.sandbox_id
             logger.debug(f"E2B sandbox created: {self.sandbox_id}")
             self._ensure_directories()
             return self._sandbox
+
+    def _extend_timeout(self, sandbox: E2BCodeInterpreterSandbox, seconds: int | None = None) -> None:
+        """Keep the sandbox running for the configured timeout from now, or for ``seconds`` when that is longer.
+
+        Connecting only ever lengthens the timeout of a running sandbox, so instances and threads that share one
+        cannot cut each other short. The configured timeout is renewed at most once a TIMEOUT_REFRESH_INTERVAL, and
+        a failed renewal is retried after the interval.
+        """
+        now = time.monotonic()
+        if seconds is None or seconds <= self.timeout:
+            if now - self._timeout_refreshed_at < min(self.TIMEOUT_REFRESH_INTERVAL, self.timeout // 2):
+                return
+            seconds = self.timeout
+        self._timeout_refreshed_at = now
+        try:
+            # A short request timeout, so that a slow E2B API does not hold up the agent.
+            sandbox.connect(timeout=seconds, request_timeout=10)
+        except Exception as e:
+            logger.warning(f"E2BSandbox failed to extend the timeout of sandbox {self.sandbox_id}: {e}")
 
     def _ensure_directories(self) -> None:
         """Create the base directory inside the sandbox if it does not exist."""
@@ -295,6 +322,40 @@ class E2BSandbox(Sandbox):
 
         return create()
 
+    # Seconds to wait for the sandbox to start a background command, the limit the SDK's default timeout set.
+    BACKGROUND_START_TIMEOUT: ClassVar[float] = 60
+
+    def _start_in_background(self, sandbox: E2BCodeInterpreterSandbox, command: str) -> None:
+        """Start a command that keeps running after this call returns.
+
+        Raises:
+            TimeoutError: If the sandbox has not reported the command started within BACKGROUND_START_TIMEOUT
+                seconds. The command may still start later.
+        """
+        outcome: list[Exception | None] = []
+
+        def start() -> None:
+            try:
+                # timeout=0: the SDK's default 60 s bounds the connection the background process lives on.
+                sandbox.commands.run(command, background=True, cwd=self.base_path, timeout=0)
+                outcome.append(None)
+            except Exception as e:
+                outcome.append(e)
+
+        # timeout=0 also lifts the SDK's only limit on opening the command's stream, so a hung envd would block
+        # the agent for good. The start is waited on for a bounded time, in a daemon thread so a stuck start does
+        # not hold up the interpreter's exit.
+        thread = threading.Thread(target=start, name="e2b-background-start", daemon=True)
+        thread.start()
+        thread.join(self.BACKGROUND_START_TIMEOUT)
+        if not outcome:
+            raise TimeoutError(
+                f"The sandbox did not report the command started within {self.BACKGROUND_START_TIMEOUT:g} seconds. "
+                "It may still start."
+            )
+        if outcome[0] is not None:
+            raise outcome[0]
+
     def run_command_shell(
         self,
         command: str,
@@ -312,11 +373,14 @@ class E2BSandbox(Sandbox):
             ShellCommandResult with stdout, stderr, and exit_code.
         """
         sandbox = self._ensure_sandbox()
+        if not run_in_background_enabled:
+            # The sandbox has to outlive a command allowed to run longer than its timeout.
+            self._extend_timeout(sandbox, min(timeout, self.MAX_COMMAND_TIMEOUT) + self.TIMEOUT_REFRESH_INTERVAL)
         logger.debug(f"E2BSandbox running command: {command[:100]}...")
 
         try:
             if run_in_background_enabled:
-                sandbox.commands.run(command, background=True, cwd=self.base_path)
+                self._start_in_background(sandbox, command)
                 return ShellCommandResult(background=True)
 
             result = sandbox.commands.run(command, timeout=timeout, cwd=self.base_path)
@@ -335,6 +399,8 @@ class E2BSandbox(Sandbox):
         except Exception as e:
             logger.error(f"Command execution failed: {e}")
             return ShellCommandResult(error=str(e))
+        finally:
+            self._extend_timeout(sandbox)
 
     def upload_file(
         self,
