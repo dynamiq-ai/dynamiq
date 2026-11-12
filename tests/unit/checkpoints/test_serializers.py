@@ -3,10 +3,13 @@
 import base64
 import json
 import math
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from io import BytesIO
+from ipaddress import ip_address, ip_interface, ip_network
 from uuid import uuid4
+
+import pytest
 
 from dynamiq.checkpoints.checkpoint import CheckpointStatus, FlowCheckpoint, NodeCheckpointState, PendingInputContext
 from dynamiq.runnables import RunnableResult, RunnableStatus
@@ -472,6 +475,31 @@ class TestValuesJsonCannotHold:
         checkpoint = FlowCheckpoint(flow_id="loan", run_id="run-1", original_input={"ratio": float("nan")})
 
         assert math.isnan(FlowCheckpoint.from_bytes(checkpoint.to_bytes()).original_input["ratio"])
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "0500742425263120".ljust(24, "\x00"),
+            "Ok I can pay friday \ud83d",
+            {"t\x00x\x00n\x00_\x00i\x00d\x00": "T-1"},
+            time(17, 0),
+            timedelta(days=11, seconds=3600, microseconds=5),
+            ip_address("203.0.113.7"),
+            ip_interface("10.1.2.3/24"),
+            ip_network("10.0.0.0/8"),
+        ],
+        ids=["nul", "lone-surrogate", "nul-in-key", "time", "timedelta", "ip-address", "ip-interface", "ip-network"],
+    )
+    def test_a_value_jsonb_cannot_hold_as_it_is_comes_back_unchanged(self, value):
+        """The platform keeps checkpoints in a Postgres jsonb column, which refuses the escape JSON writes for a NUL."""
+        checkpoint = FlowCheckpoint(flow_id="loan", run_id="run-1", original_input={"value": value})
+
+        stored = checkpoint.to_bytes()
+        restored = FlowCheckpoint.from_bytes(stored).original_input["value"]
+
+        assert b"\\u0000" not in stored
+        assert restored == value
+        assert type(restored) is type(value)
 
 
 class TestByteSerialization:

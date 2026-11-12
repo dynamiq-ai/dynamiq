@@ -4,6 +4,7 @@ import io
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 import pytest
 
@@ -57,6 +58,12 @@ class TestWaitInPlace:
         result = run(Delay(), {"until": until.isoformat()})
 
         assert result.output["waited_until"] == until.replace(tzinfo=timezone.utc).isoformat()
+
+    @pytest.mark.parametrize("until", ["20200102", 20200102, Decimal("20200102"), 1577923200])
+    def test_a_date_written_as_eight_digits_is_that_date_and_other_numbers_are_unix_seconds(self, until):
+        result = run(Delay(), {"until": until})
+
+        assert result.output["waited_until"] == "2020-01-02T00:00:00+00:00"
 
     def test_files_pass_through_untouched(self):
         statement = io.BytesIO(b"Statement: balance 1,204.55 EUR")

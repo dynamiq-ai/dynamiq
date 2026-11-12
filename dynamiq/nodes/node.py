@@ -163,25 +163,25 @@ def is_retryable_error(exc: BaseException) -> bool:
     """
     if getattr(exc, "retryable", True) is False:
         return False
-    if "litellm" not in sys.modules:  # the error cannot come from litellm, and importing it takes seconds
-        return True
-    try:
-        from litellm.exceptions import (
-            AuthenticationError,
-            BadRequestError,
-            BudgetExceededError,
-            NotFoundError,
-            PermissionDeniedError,
-        )
-    except ImportError:  # provider library unavailable: keep retrying as before
-        return True
-
+    # Only a litellm that finished importing raises its own errors, so its exceptions are read where its import left
+    # them. Importing them here would take seconds where litellm is not imported, and could deadlock on the import
+    # lock of a litellm that another thread is still importing.
+    exceptions = sys.modules.get("litellm.exceptions")
     # BadRequestError also covers ContextWindowExceededError and UnsupportedParamsError.
     # RateLimitError is deliberately absent — retryable, and does not subclass these.
-    return not isinstance(
-        exc,
-        (AuthenticationError, PermissionDeniedError, BadRequestError, NotFoundError, BudgetExceededError),
+    permanent = tuple(
+        getattr(exceptions, name, None)
+        for name in (
+            "AuthenticationError",
+            "PermissionDeniedError",
+            "BadRequestError",
+            "NotFoundError",
+            "BudgetExceededError",
+        )
     )
+    if None in permanent:
+        return True
+    return not isinstance(exc, permanent)
 
 
 # The time.monotonic() by which the innermost node with a timeout that is running this code must finish.

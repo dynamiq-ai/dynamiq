@@ -4,6 +4,8 @@ Every node type runs through ``execute_with_retry``, not only LLMs, so the class
 recognises what it is certain about and leaves everything else alone.
 """
 
+import builtins
+
 import pytest
 from litellm.exceptions import AuthenticationError, BadRequestError, RateLimitError, Timeout
 
@@ -39,6 +41,20 @@ class TestIsRetryableError:
     @pytest.mark.parametrize("exc", [RateLimitError, Timeout])
     def test_transient_failures_are_still_retried(self, exc):
         assert is_retryable_error(_llm_error(exc))
+
+    def test_an_error_is_classified_without_importing_litellm(self, monkeypatch):
+        """A worker's first LLM run imports litellm while another node's retry loop classifies an error: importing
+        litellm's exceptions there could deadlock on the import lock the first thread holds."""
+        imported = builtins.__import__
+
+        def refuse_litellm(name, *args, **kwargs):
+            assert not name.startswith("litellm"), f"imported {name}"
+            return imported(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", refuse_litellm)
+
+        assert not is_retryable_error(_llm_error(AuthenticationError))
+        assert is_retryable_error(_llm_error(RateLimitError))
 
     def test_unrecognised_errors_keep_the_previous_behaviour(self):
         """Narrow the retry budget; never second-guess an error we do not understand."""

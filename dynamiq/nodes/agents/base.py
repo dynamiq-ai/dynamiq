@@ -550,20 +550,21 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             self.tools.extend(sandbox_tools)
 
         elif self.file_store_backend:
-            self.tools.extend(
-                [
-                    FileReadTool(file_store=self.file_store_backend, llm=self.llm),
-                    FileSearchTool(file_store=self.file_store_backend),
-                    FileListTool(file_store=self.file_store_backend),
-                ]
-            )
+            file_tools = [
+                FileReadTool(file_store=self.file_store_backend, llm=self.llm),
+                FileSearchTool(file_store=self.file_store_backend),
+                FileListTool(file_store=self.file_store_backend),
+            ]
             if self.file_store.agent_file_write_enabled:
-                self.tools.append(FileWriteTool(file_store=self.file_store_backend))
+                file_tools.append(FileWriteTool(file_store=self.file_store_backend))
             elif self.artifacts_backend:
                 logger.warning(
                     f"Agent {self.name} - {self.id}: artifacts move as files, but agent_file_write_enabled is off, "
                     "so the agent can publish only files already in its file store and cannot edit loaded ones."
                 )
+            # The agent recreates these tools from its file_store config on load, so they are not serialized.
+            self._excluded_tool_ids.update(t.id for t in file_tools)
+            self.tools.extend(file_tools)
 
         if self._skills_should_init():
             self._init_skills()

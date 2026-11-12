@@ -179,9 +179,6 @@ def test_the_sandbox_claim_to_be_memory_is_contradicted(llm, backend):
     assert "NOT your long-term memory" in _ops_block(agent)
 
 
-# A file-store agent is deliberately absent: it cannot round-trip through YAML at all, with or
-# without memory, because `FileSearchTool` is not exported from `dynamiq.nodes.tools` and the loader
-# resolves nodes by import path. That is pre-existing and unrelated to this feature.
 @pytest.mark.parametrize("with_sandbox", [False, True])
 def test_yaml_round_trip_rebuilds_the_tool(llm, backend, tmp_path, with_sandbox):
     from dynamiq import Workflow
