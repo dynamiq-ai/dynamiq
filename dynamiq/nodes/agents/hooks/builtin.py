@@ -443,13 +443,21 @@ class RegexHook(TextGuardHook):
 
 PIIEntity = Literal["email", "phone", "credit_card", "ssn", "ip_address"]
 
+# A grouped card number never starts at a group of an IBAN, whose groups of four look the same.
+_NOT_IN_IBAN = r"(?<![A-Z]{2}\d{2}(?:[ ][A-Z0-9]{4}){0,7}[ ])"
 _PII_PATTERNS: dict[str, str] = {
-    "credit_card": (r"(?<![\d-])(?:\d{4}([ -])\d{4}\1\d{4}\1\d{1,7}|\d{4}([ -])\d{6}\2\d{5}|\d{13,19})(?![\d-]|[ ]\d)"),
+    "credit_card": (
+        rf"(?<![\d-])(?:{_NOT_IN_IBAN}(?:\d{{4}}([ -])\d{{4}}\1\d{{4}}\1\d{{1,7}}|\d{{4}}([ -])\d{{6}}\2\d{{5}})"
+        r"|\d{13,19})(?![\d-])"
+    ),
     "ssn": r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)",
     "email": r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}",
     "ip_address": r"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])",
     "phone": r"(?<![\w.])\+?\d[\d\s().\-]{7,}\d(?![\w])",
 }
+# A 19-digit card grouped 4-4-4-4-3 starts with a 16-digit grouping, and only the Luhn check tells it from a 16-digit
+# card followed by its CVV, so it is looked for before the other forms.
+_GROUPED_19_DIGIT_CARD = rf"(?<![\d-]){_NOT_IN_IBAN}\d{{4}}([ -])\d{{4}}\1\d{{4}}\1\d{{4}}\1\d{{3}}(?![\d-])"
 _VALIDATED_ENTITIES = {"credit_card", "phone"}
 _PLACEHOLDER = regex.compile(r"<(?P<label>[A-Z_]+)_\d+(?:_\d+)?>")
 
@@ -592,6 +600,8 @@ class PIIHook(TextGuardHook):
         if self.scope == "request" and self.action != "mask":
             raise ValueError("pii `scope: request` only applies to `action: mask`")
         built_in = [(name.upper(), name, _PII_PATTERNS[name]) for name in _PII_PATTERNS if name in self.entities]
+        if "credit_card" in self.entities:
+            built_in.insert(0, ("CREDIT_CARD", "credit_card", _GROUPED_19_DIGIT_CARD))
         custom = [(name, None, pattern) for name, pattern in self.custom_patterns.items()]
         self._detectors = [
             (label, entity, compile_regex(pattern, f"pattern for {label}"))

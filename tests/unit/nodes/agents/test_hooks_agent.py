@@ -1142,7 +1142,12 @@ def test_an_after_model_hook_that_edits_the_output_in_place_is_applied_when_stre
         ("SSN 123-45-6789 4111 1111 1111 1111", "SSN <SSN_1> <CREDIT_CARD_1>"),
         ("+1 415 555 0100 4111 1111 1111 1111", "<PHONE_1> <CREDIT_CARD_1>"),
         ("+1 415 867 5309 4111 1111 1111 1111", "<PHONE_1> <CREDIT_CARD_1>"),
+        ("Card 4111 1111 1111 1111 12/27 CVV 123", "Card <CREDIT_CARD_1> 12/27 CVV 123"),
+        ("Card 4111 1111 1111 1111 123", "Card <CREDIT_CARD_1> 123"),
+        ("Replace 4111111111111111 5555555555554444", "Replace <CREDIT_CARD_1> <CREDIT_CARD_2>"),
+        ("UnionPay 6250 9410 0652 8599 123", "UnionPay <CREDIT_CARD_1>"),
         ("Order 123456789 epoch 1728230400000 invoice 2026 1006 1844", None),
+        ("IBAN DE98 0409 5461 1139 3095 59 or DE79 0787 7893 2879 2174 21", None),
     ],
 )
 def test_pii_finds_numbers_next_to_each_other_and_ignores_plain_ids(text, expected):

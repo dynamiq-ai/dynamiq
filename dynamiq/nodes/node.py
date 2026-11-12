@@ -681,8 +681,16 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             NodeConditionFailedException: If the dependency option is not met.
             NodeConditionSkippedException: If the dependency option is skipped.
         """
+        dep_output_data = depends_result.get(depend.node.id)
+        # A Choice that failed or was skipped took no option. Under behavior "return" its dependents still get here,
+        # and what it returned holds no option to check, so each of its branches would run.
+        if dep_output_data and dep_output_data.status != RunnableStatus.SUCCESS:
+            raise NodeConditionSkippedException(
+                failed_depend=depend,
+                message=f"Dependency {depend.node.id} option {depend.option}: not taken, the node did not succeed",
+            )
         if (
-            (dep_output_data := depends_result.get(depend.node.id))
+            dep_output_data
             and (isinstance(dep_output_data.output, dict))
             and (dep_condition_result := dep_output_data.output.get(depend.option))
         ):

@@ -3,11 +3,13 @@ import json
 import pytest
 
 from dynamiq import Workflow, connections
+from dynamiq.connections.managers import get_connection_manager
 from dynamiq.flows import Flow
 from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.tools import HttpApiCall, ResponseType
 from dynamiq.nodes.tools.http_api_call import HttpApiCallInputSchema
 from dynamiq.runnables import RunnableResult, RunnableStatus
+from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
 
 
 @pytest.mark.parametrize(
@@ -74,7 +76,7 @@ def test_workflow_with_httpapicall(
         (201, {}, 1),
         (402, {}, 1),
         (422, {}, 1),
-        (403, {"Retry-After": "1"}, 3),
+        (402, {"Retry-After": "60"}, 1),
         (404, {}, 3),
         (409, {}, 3),
         (429, {}, 3),
@@ -97,9 +99,24 @@ def test_a_request_is_sent_again_only_where_a_later_attempt_can_pass(
     assert payment.call_count == requests_sent
 
 
+@pytest.mark.parametrize("content_type", ["application/json", "application/json; charset=utf-8"])
+def test_a_json_answer_is_read_as_json_also_after_a_yaml_round_trip(requests_mock, tmp_path, content_type):
+    url = "https://api.example.com/score"
+    requests_mock.get(url, content=b'{"score": 742}', headers={"content-type": content_type})
+    workflow = Workflow(flow=Flow(nodes=[HttpApiCall(id="bureau", connection=connections.Http(method="GET", url=url))]))
+    yaml_file = tmp_path / "bureau.yaml"
+    workflow.to_yaml_file(yaml_file)
+    with get_connection_manager() as cm:
+        loaded = Workflow.from_yaml_file_data(
+            file_data=WorkflowYAMLLoader.load(file_path=yaml_file, connection_manager=cm, init_components=True)
+        )
+
+    for run in (workflow, loaded):
+        assert run.run_sync(input_data={}).output["bureau"]["output"]["content"] == {"score": 742}
+
+
 def test_an_agent_can_read_a_json_body_that_arrived_as_bytes(requests_mock):
-    """`ResponseType.RAW` is the default and the auto-JSON override needs an exact
-    `application/json` header, so an ordinary charset-tagged body reaches the agent as bytes."""
+    """A body the server does not mark as JSON reaches the agent as bytes."""
     from dynamiq.connections import OpenAI as OpenAIConnection
     from dynamiq.nodes.agents import Agent
     from dynamiq.nodes.llms import OpenAI
@@ -112,7 +129,7 @@ def test_an_agent_can_read_a_json_body_that_arrived_as_bytes(requests_mock):
     requests_mock.get(
         url,
         content=b'{"answer": 42, "detail": "what the agent needed"}',
-        headers={"content-type": "application/json; charset=utf-8"},
+        headers={"content-type": "text/plain; charset=utf-8"},
     )
     agent = Agent(
         name="Agent",

@@ -41,10 +41,10 @@ Examples:
 - {"url": "https://api.com/users", "method": "POST", "body": {"name": "John"}}
 - {"url": "https://api.com/upload", "method": "PUT", "files": {"file1.txt": "content1", "file2.pdf": "content2"}}"""
 
-# The answers a later attempt can get past, besides a server error and any answer that says when to try again: a
-# resource not there yet, a timeout, a conflict with a request still in flight, a request sent too early and a rate
-# limit. Any other answer comes back the same however often the request is sent, so a declined card or a rejected
-# payment is sent once, and so is a payment the server took under a success code the node does not expect.
+# The answers a later attempt can get past, besides a server error: a resource not there yet, a timeout, a conflict with
+# a request still in flight, a request sent too early and a rate limit. Any other answer comes back the same however
+# often the request is sent, so a declined card or a rejected payment is sent once, even when it says when to try
+# again, and so is a payment the server took under a success code the node does not expect.
 RETRYABLE_STATUS_CODES = frozenset({404, 408, 409, 425, 429})
 
 
@@ -162,7 +162,8 @@ class HttpApiCall(ConnectionNode):
         params(dict[str,Any]): The additional query params of request.
         url(str): The endpoint url for sending request
         method(str): The HTTP method for sending request.
-        response_type(ResponseType|str): The type of response content.
+        response_type(ResponseType|str|None): The type of response content. None, the default, reads an answer the
+            server marks as JSON as JSON and any other as raw bytes.
     """
 
     name: str = "api-call"
@@ -177,7 +178,7 @@ class HttpApiCall(ConnectionNode):
     params: dict[str, Any] = Field(default_factory=dict)
     url: str = ""
     method: HTTPMethod | None = None
-    response_type: ResponseType | str | None = ResponseType.RAW
+    response_type: ResponseType | str | None = None
     is_files_allowed: bool = True
     input_schema: ClassVar[type[HttpApiCallInputSchema]] = HttpApiCallInputSchema
 
@@ -227,16 +228,13 @@ class HttpApiCall(ConnectionNode):
                 f"Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
-            error.retryable = (
-                response.status_code >= 500
-                or response.status_code in RETRYABLE_STATUS_CODES
-                or "retry-after" in response.headers
-            )
+            error.retryable = response.status_code >= 500 or response.status_code in RETRYABLE_STATUS_CODES
             raise error
 
         response_type = self.response_type
-        if "response_type" not in self.model_fields_set and response.headers.get("content-type") == "application/json":
-            response_type = ResponseType.JSON
+        if response_type is None:
+            media_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+            response_type = ResponseType.JSON if media_type == "application/json" else ResponseType.RAW
 
         if response_type == ResponseType.TEXT:
             content = response.text
