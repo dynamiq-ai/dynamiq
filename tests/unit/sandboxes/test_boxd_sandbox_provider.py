@@ -223,9 +223,7 @@ def test_a_port_gets_one_public_proxy(fake_boxd, make_sandbox):
     assert first.public_host == f"p3000.{machine.name}.boxd.sh"
     assert first.public_url == f"https://p3000.{machine.name}.boxd.sh"
     assert second.public_url == first.public_url
-    assert [(proxy.name, proxy.port) for proxy in fake_boxd.machines_api.proxies.list(machine.name)] == [
-        ("p3000", 3000)
-    ]
+    assert [(proxy.name, proxy.port) for proxy in fake_boxd.machines_api.proxies.list(machine.id)] == [("p3000", 3000)]
 
 
 def test_sandbox_info_without_a_port_has_no_public_url(make_sandbox):
@@ -288,3 +286,21 @@ def test_a_machine_whose_base_path_cannot_be_created_is_deleted(fake_boxd, make_
 
     assert fake_boxd.deleted == [fake_boxd.created[0].id]
     assert sandbox.sandbox_id is None
+
+
+def test_a_new_machine_never_goes_to_standby_and_has_no_delete_timer_by_default(fake_boxd, make_sandbox):
+    make_sandbox().ensure_started()
+
+    (machine,) = fake_boxd.created
+    assert machine.create_kwargs["auto_suspend_timeout"] == 0
+    assert machine.create_kwargs["delete_after"] is None
+
+
+@pytest.mark.parametrize(("delete_after", "expected"), [(7200, 7200), (0, None)])
+def test_delete_after_reaches_the_new_machine_and_views(fake_boxd, make_sandbox, delete_after, expected):
+    sandbox = make_sandbox(delete_after=delete_after)
+    sandbox.ensure_started()
+    view = sandbox.create_view("/home/boxd/workspace/work/agent-1")
+
+    assert fake_boxd.created[0].create_kwargs["delete_after"] == expected
+    assert view.delete_after == delete_after

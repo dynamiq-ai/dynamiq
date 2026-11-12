@@ -232,7 +232,8 @@ def test_the_tool_survives_a_yaml_round_trip(fake_boxd, make_tool, tmp_path):
         name_prefix="agent-",
         vcpu=4,
         memory="16G",
-        auto_suspend_timeout=0,
+        auto_suspend_timeout=300,
+        delete_after=1800,
     )
     path = tmp_path / "workflow.yaml"
     Workflow(id="wf", flow=Flow(id="flow", nodes=[tool])).to_yaml_file(str(path))
@@ -244,10 +245,12 @@ def test_the_tool_survives_a_yaml_round_trip(fake_boxd, make_tool, tmp_path):
 
     assert isinstance(restored, BoxdInterpreterTool)
     assert (restored.snapshot, restored.labels, restored.name_prefix) == ("python-data", {"team": "data"}, "agent-")
-    assert (restored.vcpu, restored.memory, restored.auto_suspend_timeout) == (4, "16G", 0)
+    assert (restored.vcpu, restored.memory, restored.auto_suspend_timeout) == (4, "16G", 300)
+    assert restored.delete_after == 1800
     assert isinstance(restored.connection, BoxdConnection)
     restored.execute(CodeInterpreterInputSchema(shell_command="ls"))
     assert fake_boxd.created[-1].create_kwargs["from_snapshot"] == "python-data"
+    assert fake_boxd.created[-1].create_kwargs["delete_after"] == 1800
 
 
 @pytest.mark.parametrize("persistent", [False, True])
@@ -272,3 +275,29 @@ def test_no_command_runs_without_a_time_limit(fake_boxd, make_tool):
     assert all(call.timeout is not None for call in fake_boxd.execs)
     assert {call.timeout for call in fake_boxd.execs if call.script.endswith("\nmake")} == {900}
     assert {call.timeout for call in fake_boxd.execs if "pip install" in call.script} == {120}
+
+
+def test_new_machines_never_go_to_standby_by_default(fake_boxd, make_tool):
+    make_tool()
+
+    assert fake_boxd.created[0].create_kwargs["auto_suspend_timeout"] == 0
+
+
+@pytest.mark.parametrize(
+    ("persistent", "timeout", "delete_after", "expected"),
+    [
+        (False, 600, None, 3600),
+        (False, 1200, None, 4800),
+        (True, 600, None, None),
+        (False, 600, 900, 900),
+        (True, 600, 900, 900),
+        (False, 600, 0, None),
+    ],
+)
+def test_a_machine_for_a_single_call_gets_a_delete_timer(
+    fake_boxd, make_tool, persistent, timeout, delete_after, expected
+):
+    tool = make_tool(persistent_sandbox=persistent, timeout=timeout, delete_after=delete_after)
+    tool.execute(CodeInterpreterInputSchema(shell_command="ls"))
+
+    assert fake_boxd.created[0].create_kwargs["delete_after"] == expected
