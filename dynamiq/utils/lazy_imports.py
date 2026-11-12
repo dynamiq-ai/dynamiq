@@ -62,6 +62,8 @@ OPTIONAL_DEPENDENCIES: dict[str, tuple[str, str]] = {
     "sacrebleu": ("sacrebleu", "evals"),
     "computer": ("cua-computer", "cua"),
     "pydantic_monty": ("pydantic-monty", "monty"),
+    "opentelemetry.sdk": ("opentelemetry-sdk", "otel"),
+    "opentelemetry.exporter.otlp.proto.http": ("opentelemetry-exporter-otlp-proto-http", "otel"),
 }
 
 # Serializes the first import of the module a serialized "type" string names: the YAML loader resolves node types

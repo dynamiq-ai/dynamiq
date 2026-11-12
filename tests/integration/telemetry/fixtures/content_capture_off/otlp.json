@@ -1,0 +1,1760 @@
+{
+ "resourceSpans": [
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "dynamiq-golden-fixtures"
+      }
+     }
+    ]
+   },
+   "scopeSpans": [
+    {
+     "scope": {
+      "name": "dynamiq",
+      "version": "0.73.0",
+      "attributes": [
+       {
+        "key": "dynamiq.trace.shape_version",
+        "value": {
+         "intValue": "1"
+        }
+       }
+      ]
+     },
+     "spans": [
+      {
+       "traceId": "ddfe82e929e55b90d2700b53355b77c8",
+       "spanId": "09781b9aab38cfea",
+       "parentSpanId": "f03fa963ed240eec",
+       "name": "choice",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109924645000",
+       "endTimeUnixNano": "1794496109927011000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "289e300e-73e3-4a12-9a2e-ed442b64e812"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "choice"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "choice"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.operators.Choice"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "operators"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "ddfe82e929e55b90d2700b53355b77c8",
+       "spanId": "1a81e06c50692eed",
+       "parentSpanId": "f03fa963ed240eec",
+       "name": "broken",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109924458000",
+       "endTimeUnixNano": "1794496109927547000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "ef6a1c35-37f1-4f16-a677-b28d5d9836e3"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "broken"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "broken"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "tests.integration.telemetry.Failing"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "utils"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "failed"
+         }
+        },
+        {
+         "key": "error.type",
+         "value": {
+          "stringValue": "RuntimeError"
+         }
+        }
+       ],
+       "events": [
+        {
+         "timeUnixNano": "1794496109924534000",
+         "name": "dynamiq.node.execution",
+         "attributes": [
+          {
+           "key": "dynamiq.execution.id",
+           "value": {
+            "stringValue": "2527f24c-04db-4855-9195-544a9c425650"
+           }
+          },
+          {
+           "key": "dynamiq.execution.attempt",
+           "value": {
+            "intValue": "1"
+           }
+          },
+          {
+           "key": "dynamiq.execution.status",
+           "value": {
+            "stringValue": "failed"
+           }
+          },
+          {
+           "key": "dynamiq.execution.start_time_unix_nano",
+           "value": {
+            "intValue": "1794496109924500000"
+           }
+          },
+          {
+           "key": "error.type",
+           "value": {
+            "stringValue": "RuntimeError"
+           }
+          }
+         ]
+        },
+        {
+         "timeUnixNano": "1794496109927546000",
+         "name": "exception",
+         "attributes": [
+          {
+           "key": "exception.type",
+           "value": {
+            "stringValue": "RuntimeError"
+           }
+          }
+         ]
+        }
+       ],
+       "status": {
+        "code": 2
+       },
+       "flags": 256
+      },
+      {
+       "traceId": "ddfe82e929e55b90d2700b53355b77c8",
+       "spanId": "593d4f6d6cfdc6b5",
+       "parentSpanId": "02a9e8769abc709b",
+       "name": "chat gpt-4o",
+       "kind": 3,
+       "startTimeUnixNano": "1794496109925184000",
+       "endTimeUnixNano": "1794496109927722000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "ddb24bbb-a65b-4cb4-b9d2-c8c4ac390bdb"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "0fcbad62-5881-488c-9619-df7ed553fdb8"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "LLM"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.llms.OpenAI"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "llms"
+         }
+        },
+        {
+         "key": "dynamiq.node.model",
+         "value": {
+          "stringValue": "openai/gpt-4o"
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "chat"
+         }
+        },
+        {
+         "key": "gen_ai.provider.name",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.system",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.request.model",
+         "value": {
+          "stringValue": "gpt-4o"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.request.temperature",
+         "value": {
+          "doubleValue": 0.0
+         }
+        },
+        {
+         "key": "gen_ai.request.max_tokens",
+         "value": {
+          "intValue": "100"
+         }
+        },
+        {
+         "key": "dynamiq.usage.total_tokens",
+         "value": {
+          "intValue": "18"
+         }
+        },
+        {
+         "key": "dynamiq.usage.input_cost_usd",
+         "value": {
+          "doubleValue": 2.75e-05
+         }
+        },
+        {
+         "key": "dynamiq.usage.output_cost_usd",
+         "value": {
+          "doubleValue": 7.000000000000001e-05
+         }
+        },
+        {
+         "key": "dynamiq.usage.total_cost_usd",
+         "value": {
+          "doubleValue": 9.750000000000001e-05
+         }
+        },
+        {
+         "key": "gen_ai.usage.input_tokens",
+         "value": {
+          "intValue": "11"
+         }
+        },
+        {
+         "key": "gen_ai.usage.output_tokens",
+         "value": {
+          "intValue": "7"
+         }
+        },
+        {
+         "key": "gen_ai.response.id",
+         "value": {
+          "stringValue": "chatcmpl-e7144dab-86d4-4fd7-ab34-19240914f95c"
+         }
+        },
+        {
+         "key": "gen_ai.response.finish_reasons",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "tool_call"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "ddfe82e929e55b90d2700b53355b77c8",
+       "spanId": "ccc261674a132175",
+       "parentSpanId": "02a9e8769abc709b",
+       "name": "execute_tool search",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109927965000",
+       "endTimeUnixNano": "1794496109928077000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "8ce82511-4270-47b4-bf7f-ff00793a3670"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "search"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "search"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "tests.helpers.SearchTool"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "tools"
+         }
+        },
+        {
+         "key": "dynamiq.run.depends",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "0fcbad62-5881-488c-9619-df7ed553fdb8"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "execute_tool"
+         }
+        },
+        {
+         "key": "gen_ai.tool.name",
+         "value": {
+          "stringValue": "search"
+         }
+        },
+        {
+         "key": "gen_ai.tool.type",
+         "value": {
+          "stringValue": "function"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "ddfe82e929e55b90d2700b53355b77c8",
+       "spanId": "04a5fc834f7b2f99",
+       "parentSpanId": "02a9e8769abc709b",
+       "name": "chat gpt-4o",
+       "kind": 3,
+       "startTimeUnixNano": "1794496109928223000",
+       "endTimeUnixNano": "1794496109928938000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "19fc3f60-ae4c-41b1-b4af-34d6dfc33d36"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "0fcbad62-5881-488c-9619-df7ed553fdb8"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "LLM"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.llms.OpenAI"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "llms"
+         }
+        },
+        {
+         "key": "dynamiq.node.model",
+         "value": {
+          "stringValue": "openai/gpt-4o"
+         }
+        },
+        {
+         "key": "dynamiq.run.depends",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "search"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "chat"
+         }
+        },
+        {
+         "key": "gen_ai.provider.name",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.system",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.request.model",
+         "value": {
+          "stringValue": "gpt-4o"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.request.temperature",
+         "value": {
+          "doubleValue": 0.0
+         }
+        },
+        {
+         "key": "gen_ai.request.max_tokens",
+         "value": {
+          "intValue": "100"
+         }
+        },
+        {
+         "key": "dynamiq.usage.total_tokens",
+         "value": {
+          "intValue": "18"
+         }
+        },
+        {
+         "key": "dynamiq.usage.input_cost_usd",
+         "value": {
+          "doubleValue": 2.75e-05
+         }
+        },
+        {
+         "key": "dynamiq.usage.output_cost_usd",
+         "value": {
+          "doubleValue": 7.000000000000001e-05
+         }
+        },
+        {
+         "key": "dynamiq.usage.total_cost_usd",
+         "value": {
+          "doubleValue": 9.750000000000001e-05
+         }
+        },
+        {
+         "key": "gen_ai.usage.input_tokens",
+         "value": {
+          "intValue": "11"
+         }
+        },
+        {
+         "key": "gen_ai.usage.output_tokens",
+         "value": {
+          "intValue": "7"
+         }
+        },
+        {
+         "key": "gen_ai.response.id",
+         "value": {
+          "stringValue": "chatcmpl-20e30ec5-5aae-433e-b5e5-bd3d4de51699"
+         }
+        },
+        {
+         "key": "gen_ai.response.finish_reasons",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "tool_call"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "ddfe82e929e55b90d2700b53355b77c8",
+       "spanId": "0d6e72b77c599ccd",
+       "parentSpanId": "f03fa963ed240eec",
+       "name": "skipped",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109929805000",
+       "endTimeUnixNano": "1794496109929849000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "a32a7e66-606d-47e2-84ea-5ef3bb3c1ee6"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "skipped"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "skipped"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.operators.Pass"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "operators"
+         }
+        },
+        {
+         "key": "dynamiq.node.depends",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "choice"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.skip",
+         "value": {
+          "stringValue": "{\"failed_dependency\":{\"node\":{\"id\":\"choice\",\"name\":\"choice\",\"type\":\"dynamiq.nodes.operators.Choice\"},\"option\":\"no\"}}"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "skipped"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "ddfe82e929e55b90d2700b53355b77c8",
+       "spanId": "54afabb2be378022",
+       "parentSpanId": "f03fa963ed240eec",
+       "name": "taken",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109930010000",
+       "endTimeUnixNano": "1794496109930150000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "48b12307-77b5-4142-8426-06c964da0ced"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "taken"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "taken"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.operators.Pass"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "operators"
+         }
+        },
+        {
+         "key": "dynamiq.node.depends",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "choice"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "ddfe82e929e55b90d2700b53355b77c8",
+       "spanId": "aee7b0156a58516f",
+       "parentSpanId": "02a9e8769abc709b",
+       "name": "chat gpt-4o",
+       "kind": 3,
+       "startTimeUnixNano": "1794496109929351000",
+       "endTimeUnixNano": "1794496109930234000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "ef1997b9-767f-40e4-a4d2-4b714ad4f891"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "0fcbad62-5881-488c-9619-df7ed553fdb8"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "LLM"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.llms.OpenAI"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "llms"
+         }
+        },
+        {
+         "key": "dynamiq.node.model",
+         "value": {
+          "stringValue": "openai/gpt-4o"
+         }
+        },
+        {
+         "key": "dynamiq.run.depends",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "0fcbad62-5881-488c-9619-df7ed553fdb8"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "chat"
+         }
+        },
+        {
+         "key": "gen_ai.provider.name",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.system",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.request.model",
+         "value": {
+          "stringValue": "gpt-4o"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.request.temperature",
+         "value": {
+          "doubleValue": 0.0
+         }
+        },
+        {
+         "key": "gen_ai.request.max_tokens",
+         "value": {
+          "intValue": "100"
+         }
+        },
+        {
+         "key": "dynamiq.usage.total_tokens",
+         "value": {
+          "intValue": "18"
+         }
+        },
+        {
+         "key": "dynamiq.usage.input_cost_usd",
+         "value": {
+          "doubleValue": 2.75e-05
+         }
+        },
+        {
+         "key": "dynamiq.usage.output_cost_usd",
+         "value": {
+          "doubleValue": 7.000000000000001e-05
+         }
+        },
+        {
+         "key": "dynamiq.usage.total_cost_usd",
+         "value": {
+          "doubleValue": 9.750000000000001e-05
+         }
+        },
+        {
+         "key": "gen_ai.usage.input_tokens",
+         "value": {
+          "intValue": "11"
+         }
+        },
+        {
+         "key": "gen_ai.usage.output_tokens",
+         "value": {
+          "intValue": "7"
+         }
+        },
+        {
+         "key": "gen_ai.response.id",
+         "value": {
+          "stringValue": "chatcmpl-e7cda1c6-d54a-472e-ac20-de31ff945cf6"
+         }
+        },
+        {
+         "key": "gen_ai.response.finish_reasons",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "tool_call"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "ddfe82e929e55b90d2700b53355b77c8",
+       "spanId": "d918fc760a255bf1",
+       "parentSpanId": "02a9e8769abc709b",
+       "name": "execute_tool http",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109930459000",
+       "endTimeUnixNano": "1794496109930712000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "3348c9fb-202b-4b5b-8779-f76e5a4460b5"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "http"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "http"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "tests.helpers.ExplodingTool"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "tools"
+         }
+        },
+        {
+         "key": "dynamiq.run.depends",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "0fcbad62-5881-488c-9619-df7ed553fdb8"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "execute_tool"
+         }
+        },
+        {
+         "key": "gen_ai.tool.name",
+         "value": {
+          "stringValue": "http"
+         }
+        },
+        {
+         "key": "gen_ai.tool.type",
+         "value": {
+          "stringValue": "function"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "failed"
+         }
+        },
+        {
+         "key": "error.type",
+         "value": {
+          "stringValue": "ToolExecutionException"
+         }
+        }
+       ],
+       "events": [
+        {
+         "timeUnixNano": "1794496109930544000",
+         "name": "dynamiq.node.execution",
+         "attributes": [
+          {
+           "key": "dynamiq.execution.id",
+           "value": {
+            "stringValue": "3d9320c0-13d0-4f02-8f95-7b5766e59f6b"
+           }
+          },
+          {
+           "key": "dynamiq.execution.attempt",
+           "value": {
+            "intValue": "1"
+           }
+          },
+          {
+           "key": "dynamiq.execution.status",
+           "value": {
+            "stringValue": "failed"
+           }
+          },
+          {
+           "key": "dynamiq.execution.start_time_unix_nano",
+           "value": {
+            "intValue": "1794496109930507000"
+           }
+          },
+          {
+           "key": "error.type",
+           "value": {
+            "stringValue": "ToolExecutionException"
+           }
+          }
+         ]
+        },
+        {
+         "timeUnixNano": "1794496109930710000",
+         "name": "exception",
+         "attributes": [
+          {
+           "key": "exception.type",
+           "value": {
+            "stringValue": "ToolExecutionException"
+           }
+          }
+         ]
+        }
+       ],
+       "status": {
+        "code": 2
+       },
+       "flags": 256
+      },
+      {
+       "traceId": "ddfe82e929e55b90d2700b53355b77c8",
+       "spanId": "a239af975ff4f114",
+       "parentSpanId": "02a9e8769abc709b",
+       "name": "chat gpt-4o",
+       "kind": 3,
+       "startTimeUnixNano": "1794496109931081000",
+       "endTimeUnixNano": "1794496109931544000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "5b27c595-f39a-47f8-93b1-7956ecb058f7"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "0fcbad62-5881-488c-9619-df7ed553fdb8"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "LLM"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.llms.OpenAI"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "llms"
+         }
+        },
+        {
+         "key": "dynamiq.node.model",
+         "value": {
+          "stringValue": "openai/gpt-4o"
+         }
+        },
+        {
+         "key": "dynamiq.run.depends",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "http"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "chat"
+         }
+        },
+        {
+         "key": "gen_ai.provider.name",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.system",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.request.model",
+         "value": {
+          "stringValue": "gpt-4o"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.request.temperature",
+         "value": {
+          "doubleValue": 0.0
+         }
+        },
+        {
+         "key": "gen_ai.request.max_tokens",
+         "value": {
+          "intValue": "100"
+         }
+        },
+        {
+         "key": "dynamiq.usage.total_tokens",
+         "value": {
+          "intValue": "18"
+         }
+        },
+        {
+         "key": "dynamiq.usage.input_cost_usd",
+         "value": {
+          "doubleValue": 2.75e-05
+         }
+        },
+        {
+         "key": "dynamiq.usage.output_cost_usd",
+         "value": {
+          "doubleValue": 7.000000000000001e-05
+         }
+        },
+        {
+         "key": "dynamiq.usage.total_cost_usd",
+         "value": {
+          "doubleValue": 9.750000000000001e-05
+         }
+        },
+        {
+         "key": "gen_ai.usage.input_tokens",
+         "value": {
+          "intValue": "11"
+         }
+        },
+        {
+         "key": "gen_ai.usage.output_tokens",
+         "value": {
+          "intValue": "7"
+         }
+        },
+        {
+         "key": "gen_ai.response.id",
+         "value": {
+          "stringValue": "chatcmpl-bd319735-7a6a-4adb-ae51-e72b0ea59652"
+         }
+        },
+        {
+         "key": "gen_ai.response.finish_reasons",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "tool_call"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "ddfe82e929e55b90d2700b53355b77c8",
+       "spanId": "02a9e8769abc709b",
+       "parentSpanId": "f03fa963ed240eec",
+       "name": "invoke_agent assistant",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109924161000",
+       "endTimeUnixNano": "1794496109931771000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "7d5ffbbe-49a1-4227-86c1-aaf24e1fa853"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "agent"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "assistant"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.agents.Agent"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "agents"
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "invoke_agent"
+         }
+        },
+        {
+         "key": "gen_ai.agent.name",
+         "value": {
+          "stringValue": "assistant"
+         }
+        },
+        {
+         "key": "gen_ai.agent.id",
+         "value": {
+          "stringValue": "agent"
+         }
+        },
+        {
+         "key": "gen_ai.provider.name",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "gen_ai.request.model",
+         "value": {
+          "stringValue": "gpt-4o"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "events": [
+        {
+         "timeUnixNano": "1794496109929159000",
+         "name": "dynamiq.agent.hook",
+         "attributes": [
+          {
+           "key": "dynamiq.hook.name",
+           "value": {
+            "stringValue": "call_limit"
+           }
+          },
+          {
+           "key": "dynamiq.hook.type",
+           "value": {
+            "stringValue": "call_limit"
+           }
+          },
+          {
+           "key": "dynamiq.hook.point",
+           "value": {
+            "stringValue": "before_tool"
+           }
+          },
+          {
+           "key": "dynamiq.hook.decision",
+           "value": {
+            "stringValue": "block"
+           }
+          }
+         ]
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "ddfe82e929e55b90d2700b53355b77c8",
+       "spanId": "f03fa963ed240eec",
+       "name": "invoke_workflow Workflow",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109923730000",
+       "endTimeUnixNano": "1794496109933457000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "9cbbf47c-823d-429c-8a4b-3375758ff9f6"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "workflow"
+         }
+        },
+        {
+         "key": "dynamiq.run.is_root",
+         "value": {
+          "boolValue": true
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "invoke_workflow"
+         }
+        },
+        {
+         "key": "gen_ai.workflow.name",
+         "value": {
+          "stringValue": "Workflow"
+         }
+        },
+        {
+         "key": "dynamiq.flow.id",
+         "value": {
+          "stringValue": "flow"
+         }
+        },
+        {
+         "key": "dynamiq.config.run_id",
+         "value": {
+          "stringValue": "1f3841df-3d64-4d0c-9ace-229e85207d54"
+         }
+        },
+        {
+         "key": "dynamiq.workflow.id",
+         "value": {
+          "stringValue": "workflow"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.flow.run_id",
+         "value": {
+          "stringValue": "0adc80d3-b1c7-41a2-89de-ad48173be66f"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      }
+     ],
+     "schemaUrl": "https://opentelemetry.io/schemas/1.41.1"
+    }
+   ]
+  }
+ ]
+}

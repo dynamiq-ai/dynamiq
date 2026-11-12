@@ -1,0 +1,1840 @@
+[
+  {
+    "id": "9cbbf47c-823d-429c-8a4b-3375758ff9f6",
+    "name": "Workflow",
+    "type": "workflow",
+    "trace_id": "742e01fd-ee37-4f69-8e4e-4487f4093fa8",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.923884+00:00",
+    "end_time": "2026-11-12T15:08:29.933578+00:00",
+    "parent_run_id": null,
+    "status": "succeeded",
+    "input": {
+      "input": "What is the answer?"
+    },
+    "output": {
+      "agent": {
+        "status": "success",
+        "input": {
+          "input": "What is the answer?",
+          "images": null,
+          "videos": null,
+          "files": null,
+          "user_id": null,
+          "session_id": null,
+          "metadata": {},
+          "tool_params": {
+            "global_params": {},
+            "by_name_params": {},
+            "by_id_params": {}
+          }
+        },
+        "output": {
+          "content": "forty-two",
+          "blocked": false
+        }
+      },
+      "broken": {
+        "status": "failure",
+        "input": {
+          "input": "What is the answer?"
+        },
+        "output": null,
+        "error": {
+          "type": "RuntimeError",
+          "message": "the node broke",
+          "recoverable": false,
+          "failed_nodes": []
+        }
+      },
+      "choice": {
+        "status": "success",
+        "input": {
+          "input": "What is the answer?"
+        },
+        "output": {
+          "yes": {
+            "status": "success",
+            "input": {
+              "input": "What is the answer?"
+            },
+            "output": true
+          },
+          "no": {
+            "status": "skip",
+            "input": {
+              "input": "What is the answer?"
+            },
+            "output": null
+          }
+        }
+      },
+      "taken": {
+        "status": "success",
+        "input": {
+          "input": "What is the answer?",
+          "choice": {
+            "status": "success",
+            "output": {
+              "yes": {
+                "status": "success",
+                "input": {
+                  "input": "What is the answer?"
+                },
+                "output": true
+              },
+              "no": {
+                "status": "skip",
+                "input": {
+                  "input": "What is the answer?"
+                },
+                "output": null
+              }
+            }
+          }
+        },
+        "output": {
+          "input": "What is the answer?",
+          "choice": {
+            "status": "success",
+            "output": {
+              "yes": {
+                "status": "success",
+                "input": {
+                  "input": "What is the answer?"
+                },
+                "output": true
+              },
+              "no": {
+                "status": "skip",
+                "input": {
+                  "input": "What is the answer?"
+                },
+                "output": null
+              }
+            }
+          }
+        }
+      },
+      "skipped": {
+        "status": "skip",
+        "input": {
+          "input": "What is the answer?",
+          "choice": {
+            "status": "success",
+            "output": {
+              "yes": {
+                "status": "success",
+                "input": {
+                  "input": "What is the answer?"
+                },
+                "output": true
+              },
+              "no": {
+                "status": "skip",
+                "input": {
+                  "input": "What is the answer?"
+                },
+                "output": null
+              }
+            }
+          }
+        },
+        "output": null,
+        "error": {
+          "type": "NodeConditionSkippedException",
+          "message": "Dependency choice option no: skipped",
+          "recoverable": false,
+          "failed_nodes": []
+        }
+      }
+    },
+    "metadata": {
+      "workflow": {
+        "id": "workflow",
+        "version": null
+      }
+    },
+    "error": null,
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "0adc80d3-b1c7-41a2-89de-ad48173be66f",
+    "name": "Flow",
+    "type": "flow",
+    "trace_id": "742e01fd-ee37-4f69-8e4e-4487f4093fa8",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.924046+00:00",
+    "end_time": "2026-11-12T15:08:29.933347+00:00",
+    "parent_run_id": "9cbbf47c-823d-429c-8a4b-3375758ff9f6",
+    "status": "succeeded",
+    "input": {
+      "input": "What is the answer?"
+    },
+    "output": {
+      "agent": {
+        "status": "success",
+        "input": {
+          "input": "What is the answer?",
+          "images": null,
+          "videos": null,
+          "files": null,
+          "user_id": null,
+          "session_id": null,
+          "metadata": {},
+          "tool_params": {
+            "global_params": {},
+            "by_name_params": {},
+            "by_id_params": {}
+          }
+        },
+        "output": {
+          "content": "forty-two",
+          "blocked": false
+        }
+      },
+      "broken": {
+        "status": "failure",
+        "input": {
+          "input": "What is the answer?"
+        },
+        "output": null,
+        "error": {
+          "type": "RuntimeError",
+          "message": "the node broke",
+          "recoverable": false,
+          "failed_nodes": []
+        }
+      },
+      "choice": {
+        "status": "success",
+        "input": {
+          "input": "What is the answer?"
+        },
+        "output": {
+          "yes": {
+            "status": "success",
+            "input": {
+              "input": "What is the answer?"
+            },
+            "output": true
+          },
+          "no": {
+            "status": "skip",
+            "input": {
+              "input": "What is the answer?"
+            },
+            "output": null
+          }
+        }
+      },
+      "taken": {
+        "status": "success",
+        "input": {
+          "input": "What is the answer?",
+          "choice": {
+            "status": "success",
+            "output": {
+              "yes": {
+                "status": "success",
+                "input": {
+                  "input": "What is the answer?"
+                },
+                "output": true
+              },
+              "no": {
+                "status": "skip",
+                "input": {
+                  "input": "What is the answer?"
+                },
+                "output": null
+              }
+            }
+          }
+        },
+        "output": {
+          "input": "What is the answer?",
+          "choice": {
+            "status": "success",
+            "output": {
+              "yes": {
+                "status": "success",
+                "input": {
+                  "input": "What is the answer?"
+                },
+                "output": true
+              },
+              "no": {
+                "status": "skip",
+                "input": {
+                  "input": "What is the answer?"
+                },
+                "output": null
+              }
+            }
+          }
+        }
+      },
+      "skipped": {
+        "status": "skip",
+        "input": {
+          "input": "What is the answer?",
+          "choice": {
+            "status": "success",
+            "output": {
+              "yes": {
+                "status": "success",
+                "input": {
+                  "input": "What is the answer?"
+                },
+                "output": true
+              },
+              "no": {
+                "status": "skip",
+                "input": {
+                  "input": "What is the answer?"
+                },
+                "output": null
+              }
+            }
+          }
+        },
+        "output": null,
+        "error": {
+          "type": "NodeConditionSkippedException",
+          "message": "Dependency choice option no: skipped",
+          "recoverable": false,
+          "failed_nodes": []
+        }
+      }
+    },
+    "metadata": {
+      "flow": {
+        "id": "flow"
+      }
+    },
+    "error": null,
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "7d5ffbbe-49a1-4227-86c1-aaf24e1fa853",
+    "name": "assistant",
+    "type": "node",
+    "trace_id": "742e01fd-ee37-4f69-8e4e-4487f4093fa8",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.924271+00:00",
+    "end_time": "2026-11-12T15:08:29.931829+00:00",
+    "parent_run_id": "0adc80d3-b1c7-41a2-89de-ad48173be66f",
+    "status": "succeeded",
+    "input": {
+      "input": "What is the answer?",
+      "images": null,
+      "videos": null,
+      "files": null,
+      "user_id": null,
+      "session_id": null,
+      "metadata": {},
+      "tool_params": {
+        "global_params": {},
+        "by_name_params": {},
+        "by_id_params": {}
+      }
+    },
+    "output": {
+      "content": "forty-two",
+      "blocked": false
+    },
+    "metadata": {
+      "node": {
+        "id": "agent",
+        "name": "assistant",
+        "group": "agents",
+        "error_handling": {
+          "timeout_seconds": 3600.0,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": true,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "max_loops": 6,
+        "tool_output_max_length": 64000,
+        "tool_output_truncate_enabled": true,
+        "hooks": [
+          {
+            "type": "dynamiq.nodes.agents.hooks.CallLimitHook",
+            "name": null,
+            "tools": [
+              "search"
+            ],
+            "inherit": false,
+            "on_error": "block",
+            "timeout_seconds": null,
+            "message": "Call limit reached for this tool in this run. Do not call it again.",
+            "on_violation": "observation",
+            "max_per_run": 1
+          }
+        ],
+        "tool_output_sandbox_persistence": {
+          "enabled": true,
+          "dump_threshold_chars": 7000,
+          "preview_chars": 7000,
+          "sandbox_tool_output_dir": "/home/user/.tools"
+        },
+        "delegation_allowed": false,
+        "parallel_tool_calls_enabled": false,
+        "max_parallel_tool_calls": 8,
+        "memory_limit": 100,
+        "memory_retrieval_strategy": "all",
+        "verbose": false,
+        "share_sandbox_with_subagents": false,
+        "share_browser_session_with_subagents": false,
+        "sandbox_sharing_scope": "all",
+        "role": "help the user",
+        "inference_mode": "FUNCTION_CALLING",
+        "behaviour_on_max_loops": "raise",
+        "direct_tool_output_enabled": false,
+        "format_schema": [],
+        "summarization_config": {
+          "enabled": false,
+          "max_token_context_length": null,
+          "context_usage_ratio": 0.8,
+          "max_preserved_tokens": 10000,
+          "token_budget_ratio": 0.75
+        },
+        "type": "dynamiq.nodes.agents.Agent",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {},
+        "llm": {
+          "id": "0fcbad62-5881-488c-9619-df7ed553fdb8",
+          "name": "LLM",
+          "group": "llms",
+          "error_handling": {
+            "timeout_seconds": 600.0,
+            "retry_interval_seconds": 1,
+            "max_retries": 0,
+            "backoff_rate": 1,
+            "max_retry_interval_seconds": null,
+            "behavior": "raise"
+          },
+          "is_postponed_component_init": false,
+          "is_optimized_for_agents": false,
+          "is_files_allowed": false,
+          "is_parallel_execution_allowed": false,
+          "is_output_persisted_in_sandbox_allowed": false,
+          "input_param_modes": {},
+          "callbacks": [],
+          "model": "openai/gpt-4o",
+          "temperature": 0.0,
+          "max_tokens": 100,
+          "budget_tokens": 1024,
+          "inference_mode": "DEFAULT",
+          "strict_tools": false,
+          "reasoning_effort": "auto",
+          "verbosity": "medium",
+          "type": "dynamiq.nodes.llms.OpenAI",
+          "caching": {
+            "enabled": false
+          },
+          "streaming": {
+            "enabled": false
+          },
+          "approval": {
+            "enabled": false
+          },
+          "mock": {
+            "enabled": false
+          },
+          "depends": [],
+          "input_mapping": {},
+          "connection": {
+            "id": "f7d04068-b66f-4381-b9b3-c0d6dc30ae8d",
+            "type": "dynamiq.connections.OpenAI"
+          }
+        },
+        "tools": [
+          {
+            "id": "search",
+            "name": "search",
+            "description": "Searches the web.",
+            "group": "tools",
+            "error_handling": {
+              "timeout_seconds": null,
+              "retry_interval_seconds": 1,
+              "max_retries": 0,
+              "backoff_rate": 1,
+              "max_retry_interval_seconds": null,
+              "behavior": "raise"
+            },
+            "is_postponed_component_init": false,
+            "is_optimized_for_agents": true,
+            "is_files_allowed": false,
+            "is_parallel_execution_allowed": false,
+            "is_output_persisted_in_sandbox_allowed": false,
+            "input_param_modes": {},
+            "callbacks": [],
+            "result": "forty-two",
+            "type": "tests.helpers.SearchTool",
+            "caching": {
+              "enabled": false
+            },
+            "streaming": {
+              "enabled": false
+            },
+            "approval": {
+              "enabled": false
+            },
+            "mock": {
+              "enabled": false
+            },
+            "depends": [],
+            "input_mapping": {}
+          },
+          {
+            "id": "http",
+            "name": "http",
+            "description": "Calls an API.",
+            "group": "tools",
+            "error_handling": {
+              "timeout_seconds": null,
+              "retry_interval_seconds": 1,
+              "max_retries": 0,
+              "backoff_rate": 1,
+              "max_retry_interval_seconds": null,
+              "behavior": "raise"
+            },
+            "is_postponed_component_init": false,
+            "is_optimized_for_agents": true,
+            "is_files_allowed": false,
+            "is_parallel_execution_allowed": false,
+            "is_output_persisted_in_sandbox_allowed": false,
+            "input_param_modes": {},
+            "callbacks": [],
+            "body": "404 Not Found",
+            "type": "tests.helpers.ExplodingTool",
+            "caching": {
+              "enabled": false
+            },
+            "streaming": {
+              "enabled": false
+            },
+            "approval": {
+              "enabled": false
+            },
+            "mock": {
+              "enabled": false
+            },
+            "depends": [],
+            "input_mapping": {}
+          }
+        ],
+        "memory": null,
+        "long_term_memory": null,
+        "file_store": {
+          "enabled": false
+        },
+        "memory_store": null,
+        "artifacts": null,
+        "sandbox": null,
+        "skills": {
+          "enabled": false,
+          "source": null
+        }
+      },
+      "run_depends": [],
+      "hooks": [
+        {
+          "hook": "call_limit",
+          "type": "call_limit",
+          "point": "before_tool",
+          "decision": "block",
+          "tool": "search",
+          "outcome": "observation"
+        }
+      ],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "2e236c3c-4e8a-4e3c-ab55-52275199b7fd",
+        "start_time": "2026-11-12T15:08:29.924357+00:00",
+        "end_time": "2026-11-12T15:08:29.931748+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "ef6a1c35-37f1-4f16-a677-b28d5d9836e3",
+    "name": "broken",
+    "type": "node",
+    "trace_id": "742e01fd-ee37-4f69-8e4e-4487f4093fa8",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.924487+00:00",
+    "end_time": "2026-11-12T15:08:29.927564+00:00",
+    "parent_run_id": "0adc80d3-b1c7-41a2-89de-ad48173be66f",
+    "status": "failed",
+    "input": {
+      "input": "What is the answer?"
+    },
+    "output": null,
+    "metadata": {
+      "node": {
+        "id": "broken",
+        "name": "broken",
+        "group": "utils",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "return"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "type": "tests.integration.telemetry.Failing",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {}
+      },
+      "run_depends": [],
+      "is_mocked": false
+    },
+    "error": {
+      "message": "the node broke",
+      "traceback": "Traceback (most recent call last):\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1550, in run_sync\n    output, from_cache = cache(self.execute_with_retry)(transformed_input, config, **merged_kwargs)\n                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/cache/utils.py\", line 74, in wrapper\n    output = func(*args, **kwargs)\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1837, in execute_with_retry\n    raise error\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1807, in execute_with_retry\n    output = self.execute(input_data=input_data, config=config, **merged_kwargs)\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/tests/integration/telemetry/golden_scenarios.py\", line 174, in execute\n    raise RuntimeError(\"the node broke\")\nRuntimeError: the node broke\n"
+    },
+    "executions": [
+      {
+        "id": "2527f24c-04db-4855-9195-544a9c425650",
+        "start_time": "2026-11-12T15:08:29.924511+00:00",
+        "end_time": "2026-11-12T15:08:29.924547+00:00",
+        "status": "failed",
+        "input": null,
+        "output": null,
+        "error": {
+          "message": "the node broke",
+          "traceback": "Traceback (most recent call last):\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1807, in execute_with_retry\n    output = self.execute(input_data=input_data, config=config, **merged_kwargs)\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/tests/integration/telemetry/golden_scenarios.py\", line 174, in execute\n    raise RuntimeError(\"the node broke\")\nRuntimeError: the node broke\n"
+        },
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "289e300e-73e3-4a12-9a2e-ed442b64e812",
+    "name": "choice",
+    "type": "node",
+    "trace_id": "742e01fd-ee37-4f69-8e4e-4487f4093fa8",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.924682+00:00",
+    "end_time": "2026-11-12T15:08:29.927031+00:00",
+    "parent_run_id": "0adc80d3-b1c7-41a2-89de-ad48173be66f",
+    "status": "succeeded",
+    "input": {
+      "input": "What is the answer?"
+    },
+    "output": {
+      "yes": {
+        "status": "success",
+        "input": {
+          "input": "What is the answer?"
+        },
+        "output": true
+      },
+      "no": {
+        "status": "skip",
+        "input": {
+          "input": "What is the answer?"
+        },
+        "output": null
+      }
+    },
+    "metadata": {
+      "node": {
+        "id": "choice",
+        "name": "choice",
+        "group": "operators",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "hit_policy": "first",
+        "type": "dynamiq.nodes.operators.Choice",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {},
+        "options": [
+          {
+            "id": "yes",
+            "name": "yes",
+            "condition": {
+              "variable": "$.input",
+              "operator": "string-equals",
+              "value": "What is the answer?",
+              "is_not": false,
+              "operands": null
+            }
+          },
+          {
+            "id": "no",
+            "name": "no",
+            "condition": null
+          }
+        ]
+      },
+      "run_depends": [],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "f42811be-a601-479e-b664-fb5b89accc17",
+        "start_time": "2026-11-12T15:08:29.924712+00:00",
+        "end_time": "2026-11-12T15:08:29.926997+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "ddb24bbb-a65b-4cb4-b9d2-c8c4ac390bdb",
+    "name": "LLM",
+    "type": "node",
+    "trace_id": "742e01fd-ee37-4f69-8e4e-4487f4093fa8",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.925246+00:00",
+    "end_time": "2026-11-12T15:08:29.927741+00:00",
+    "parent_run_id": "7d5ffbbe-49a1-4227-86c1-aaf24e1fa853",
+    "status": "succeeded",
+    "input": {},
+    "output": {
+      "content": "",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": {
+              "thought": "t",
+              "query": "q1"
+            },
+            "name": "search"
+          },
+          "id": "call_0_0",
+          "type": "function"
+        }
+      ]
+    },
+    "metadata": {
+      "node": {
+        "id": "0fcbad62-5881-488c-9619-df7ed553fdb8",
+        "name": "LLM",
+        "group": "llms",
+        "error_handling": {
+          "timeout_seconds": 600.0,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "model": "openai/gpt-4o",
+        "temperature": 0.0,
+        "max_tokens": 100,
+        "stop": [],
+        "budget_tokens": 1024,
+        "inference_mode": "DEFAULT",
+        "strict_tools": false,
+        "reasoning_effort": "auto",
+        "verbosity": "medium",
+        "type": "dynamiq.nodes.llms.OpenAI",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {},
+        "connection": {
+          "id": "f7d04068-b66f-4381-b9b3-c0d6dc30ae8d",
+          "type": "dynamiq.connections.OpenAI"
+        },
+        "prompt": {
+          "id": "9275af24-3542-4b94-8f4c-e8b1f8bd16c4",
+          "version": null,
+          "messages": [
+            {
+              "content": "You are AI powered assistant.\n---\n# PRIMARY INSTRUCTIONS\n\nYou need to use the right functions based on what the user asks.\n\nUse the function `provide_final_answer` when you can give a clear answer to the user's first question,\nand no extra steps, tools, or work are needed.\nCall this function if the user's input is simple and doesn't require additional help or tools.\n\nIf the user's request requires the use of specific tools, such as [search,http],\n you must first call the appropriate function to invoke those tools.\nOnly after utilizing the necessary tools and gathering the required information should\nyou call `provide_final_answer` to deliver the final response.\n\n## Function Calling Guidelines\n- ALWAYS populate the \"thought\" field FIRST before any other field in your function calls\n- Write a concrete, first-person \"thought\" (1-3 sentences) on why this specific function/tool is right and what you expect it to return — no lazy filler like \"Calling X.\" and no starting with \"The user...\"\n- Pass tool parameters as top-level fields of the function arguments (alongside \"thought\"), not nested inside an \"action_input\" wrapper\n- Analyze the request carefully to determine if tools are needed\n- Call functions with properly formatted arguments\n- Handle tool responses appropriately before providing final answer\n- Chain multiple tool calls when necessary for complex tasks\n- If you want an agent tool's response returned verbatim as the final output, include \"delegate_final\": true at the top level of that tool's arguments. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.\n- Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.\n\n## File Handling\n- Tools may generate or process files (images, CSVs, PDFs, etc.)\n- When calling `provide_final_answer`, include an `output_files` argument with comma-separated file paths to return. Pass an empty string if there are no files to return.\n---\n# AVAILABLE TOOLS\n\nAvailable tools: [search,http]\nRefer to each tool's function schema for detailed usage.\n---\n# RESPONSE FORMAT\n\nIn your answers, adhere to the following formatting and stylistic guidelines:\n\n- Use GitHub-flavored Markdown as the default format for all responses and generated documents.\n- Write in a professional, academic tone using complete, well-structured paragraphs.\n- Avoid excessive bullet points; prioritize fully developed prose.\n- When appropriate, alternate between explanatory paragraphs and structured tables\n  to improve clarity, comparison, or organization of key information.\n- Use bold formatting to emphasize essential concepts, distinctions, terminology, or conclusions.\n- Use blockquotes to highlight formal definitions, cited statements, or especially important excerpts.\n- Include inline hyperlinks when referencing websites, platforms, or external resources.\n- When making factual claims, support them with inline numeric citations using Markdown reference-style links.\n- NEVER use emojis unless the user explicitly requests it.\n\nIMPORTANT:\n- Formatting must enhance readability and analytical clarity.\n- Tables should only be used when they materially improve organization or comparison.\n- Do not over-format; maintain a professional and academically consistent presentation style.\n- In your final answer:\n    - Avoid phrases like 'based on the information gathered or provided'.\n    - Clearly mention any files that were generated during the process\n    - Provide file names and brief descriptions of their contents.\n---\n# AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES\n(This section defines how the assistant presents information and behaves - its personality, tone, communication style,\nand additional behavioral guidelines.\nThese supplementary instructions enhance the agent's interactions but should never override or contradict\nthe PRIMARY INSTRUCTIONS above.)\nhelp the user\n- Current date: 12 November 2026",
+              "role": "system"
+            },
+            {
+              "content": "What is the answer?",
+              "role": "user"
+            }
+          ],
+          "tools": null,
+          "response_format": null
+        }
+      },
+      "run_depends": [],
+      "usage": {
+        "prompt_tokens": 11,
+        "prompt_tokens_cost_usd": 0.0000275,
+        "completion_tokens": 7,
+        "completion_tokens_cost_usd": 0.00007000000000000001,
+        "total_tokens": 18,
+        "total_tokens_cost_usd": 0.00009750000000000001,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": null
+      },
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "2c758ff7-b339-4782-ab4f-9c56cb85f506",
+        "start_time": "2026-11-12T15:08:29.925287+00:00",
+        "end_time": "2026-11-12T15:08:29.927689+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "8ce82511-4270-47b4-bf7f-ff00793a3670",
+    "name": "search",
+    "type": "node",
+    "trace_id": "742e01fd-ee37-4f69-8e4e-4487f4093fa8",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.927998+00:00",
+    "end_time": "2026-11-12T15:08:29.928089+00:00",
+    "parent_run_id": "7d5ffbbe-49a1-4227-86c1-aaf24e1fa853",
+    "status": "succeeded",
+    "input": {
+      "query": "q1",
+      "mode": "slow"
+    },
+    "output": {
+      "content": "forty-two"
+    },
+    "metadata": {
+      "node": {
+        "id": "search",
+        "name": "search",
+        "description": "Searches the web.",
+        "group": "tools",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": true,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "result": "forty-two",
+        "type": "tests.helpers.SearchTool",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {}
+      },
+      "run_depends": [
+        {
+          "node": {
+            "id": "0fcbad62-5881-488c-9619-df7ed553fdb8",
+            "name": "LLM",
+            "type": "dynamiq.nodes.llms.OpenAI"
+          },
+          "option": null,
+          "condition": null,
+          "trigger": "success"
+        }
+      ],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "5427190b-f745-42da-87da-f8a7db53b5b6",
+        "start_time": "2026-11-12T15:08:29.928027+00:00",
+        "end_time": "2026-11-12T15:08:29.928067+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "19fc3f60-ae4c-41b1-b4af-34d6dfc33d36",
+    "name": "LLM",
+    "type": "node",
+    "trace_id": "742e01fd-ee37-4f69-8e4e-4487f4093fa8",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.928286+00:00",
+    "end_time": "2026-11-12T15:08:29.928964+00:00",
+    "parent_run_id": "7d5ffbbe-49a1-4227-86c1-aaf24e1fa853",
+    "status": "succeeded",
+    "input": {},
+    "output": {
+      "content": "",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": {
+              "thought": "t",
+              "query": "q2"
+            },
+            "name": "search"
+          },
+          "id": "call_1_0",
+          "type": "function"
+        }
+      ]
+    },
+    "metadata": {
+      "node": {
+        "id": "0fcbad62-5881-488c-9619-df7ed553fdb8",
+        "name": "LLM",
+        "group": "llms",
+        "error_handling": {
+          "timeout_seconds": 600.0,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "model": "openai/gpt-4o",
+        "temperature": 0.0,
+        "max_tokens": 100,
+        "stop": [],
+        "budget_tokens": 1024,
+        "inference_mode": "DEFAULT",
+        "strict_tools": false,
+        "reasoning_effort": "auto",
+        "verbosity": "medium",
+        "type": "dynamiq.nodes.llms.OpenAI",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {},
+        "connection": {
+          "id": "f7d04068-b66f-4381-b9b3-c0d6dc30ae8d",
+          "type": "dynamiq.connections.OpenAI"
+        },
+        "prompt": {
+          "id": "b0c49d3b-7c71-4c6c-9388-37a24ba6dd2b",
+          "version": null,
+          "messages": [
+            {
+              "content": "You are AI powered assistant.\n---\n# PRIMARY INSTRUCTIONS\n\nYou need to use the right functions based on what the user asks.\n\nUse the function `provide_final_answer` when you can give a clear answer to the user's first question,\nand no extra steps, tools, or work are needed.\nCall this function if the user's input is simple and doesn't require additional help or tools.\n\nIf the user's request requires the use of specific tools, such as [search,http],\n you must first call the appropriate function to invoke those tools.\nOnly after utilizing the necessary tools and gathering the required information should\nyou call `provide_final_answer` to deliver the final response.\n\n## Function Calling Guidelines\n- ALWAYS populate the \"thought\" field FIRST before any other field in your function calls\n- Write a concrete, first-person \"thought\" (1-3 sentences) on why this specific function/tool is right and what you expect it to return — no lazy filler like \"Calling X.\" and no starting with \"The user...\"\n- Pass tool parameters as top-level fields of the function arguments (alongside \"thought\"), not nested inside an \"action_input\" wrapper\n- Analyze the request carefully to determine if tools are needed\n- Call functions with properly formatted arguments\n- Handle tool responses appropriately before providing final answer\n- Chain multiple tool calls when necessary for complex tasks\n- If you want an agent tool's response returned verbatim as the final output, include \"delegate_final\": true at the top level of that tool's arguments. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.\n- Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.\n\n## File Handling\n- Tools may generate or process files (images, CSVs, PDFs, etc.)\n- When calling `provide_final_answer`, include an `output_files` argument with comma-separated file paths to return. Pass an empty string if there are no files to return.\n---\n# AVAILABLE TOOLS\n\nAvailable tools: [search,http]\nRefer to each tool's function schema for detailed usage.\n---\n# RESPONSE FORMAT\n\nIn your answers, adhere to the following formatting and stylistic guidelines:\n\n- Use GitHub-flavored Markdown as the default format for all responses and generated documents.\n- Write in a professional, academic tone using complete, well-structured paragraphs.\n- Avoid excessive bullet points; prioritize fully developed prose.\n- When appropriate, alternate between explanatory paragraphs and structured tables\n  to improve clarity, comparison, or organization of key information.\n- Use bold formatting to emphasize essential concepts, distinctions, terminology, or conclusions.\n- Use blockquotes to highlight formal definitions, cited statements, or especially important excerpts.\n- Include inline hyperlinks when referencing websites, platforms, or external resources.\n- When making factual claims, support them with inline numeric citations using Markdown reference-style links.\n- NEVER use emojis unless the user explicitly requests it.\n\nIMPORTANT:\n- Formatting must enhance readability and analytical clarity.\n- Tables should only be used when they materially improve organization or comparison.\n- Do not over-format; maintain a professional and academically consistent presentation style.\n- In your final answer:\n    - Avoid phrases like 'based on the information gathered or provided'.\n    - Clearly mention any files that were generated during the process\n    - Provide file names and brief descriptions of their contents.\n---\n# AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES\n(This section defines how the assistant presents information and behaves - its personality, tone, communication style,\nand additional behavioral guidelines.\nThese supplementary instructions enhance the agent's interactions but should never override or contradict\nthe PRIMARY INSTRUCTIONS above.)\nhelp the user\n- Current date: 12 November 2026",
+              "role": "system"
+            },
+            {
+              "content": "What is the answer?",
+              "role": "user"
+            },
+            {
+              "content": "Calling: search",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_0_0",
+                  "type": "function",
+                  "function": {
+                    "name": "search",
+                    "arguments": "{\"thought\": \"t\", \"query\": \"q1\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "content": "forty-two",
+              "role": "tool",
+              "tool_call_id": "call_0_0",
+              "name": "search"
+            }
+          ],
+          "tools": null,
+          "response_format": null
+        }
+      },
+      "run_depends": [
+        {
+          "node": {
+            "id": "search",
+            "name": "search",
+            "type": "tests.helpers.SearchTool"
+          },
+          "option": null,
+          "condition": null,
+          "trigger": "success"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 11,
+        "prompt_tokens_cost_usd": 0.0000275,
+        "completion_tokens": 7,
+        "completion_tokens_cost_usd": 0.00007000000000000001,
+        "total_tokens": 18,
+        "total_tokens_cost_usd": 0.00009750000000000001,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": null
+      },
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "f4396d7d-642c-431d-877d-60b2b2be9f89",
+        "start_time": "2026-11-12T15:08:29.928326+00:00",
+        "end_time": "2026-11-12T15:08:29.928822+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "ef1997b9-767f-40e4-a4d2-4b714ad4f891",
+    "name": "LLM",
+    "type": "node",
+    "trace_id": "742e01fd-ee37-4f69-8e4e-4487f4093fa8",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.929422+00:00",
+    "end_time": "2026-11-12T15:08:29.930253+00:00",
+    "parent_run_id": "7d5ffbbe-49a1-4227-86c1-aaf24e1fa853",
+    "status": "succeeded",
+    "input": {},
+    "output": {
+      "content": "",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": {
+              "thought": "t",
+              "query": "x"
+            },
+            "name": "http"
+          },
+          "id": "call_2_0",
+          "type": "function"
+        }
+      ]
+    },
+    "metadata": {
+      "node": {
+        "id": "0fcbad62-5881-488c-9619-df7ed553fdb8",
+        "name": "LLM",
+        "group": "llms",
+        "error_handling": {
+          "timeout_seconds": 600.0,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "model": "openai/gpt-4o",
+        "temperature": 0.0,
+        "max_tokens": 100,
+        "stop": [],
+        "budget_tokens": 1024,
+        "inference_mode": "DEFAULT",
+        "strict_tools": false,
+        "reasoning_effort": "auto",
+        "verbosity": "medium",
+        "type": "dynamiq.nodes.llms.OpenAI",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {},
+        "connection": {
+          "id": "f7d04068-b66f-4381-b9b3-c0d6dc30ae8d",
+          "type": "dynamiq.connections.OpenAI"
+        },
+        "prompt": {
+          "id": "fb896531-510d-43ef-beb4-9d306fc68fa6",
+          "version": null,
+          "messages": [
+            {
+              "content": "You are AI powered assistant.\n---\n# PRIMARY INSTRUCTIONS\n\nYou need to use the right functions based on what the user asks.\n\nUse the function `provide_final_answer` when you can give a clear answer to the user's first question,\nand no extra steps, tools, or work are needed.\nCall this function if the user's input is simple and doesn't require additional help or tools.\n\nIf the user's request requires the use of specific tools, such as [search,http],\n you must first call the appropriate function to invoke those tools.\nOnly after utilizing the necessary tools and gathering the required information should\nyou call `provide_final_answer` to deliver the final response.\n\n## Function Calling Guidelines\n- ALWAYS populate the \"thought\" field FIRST before any other field in your function calls\n- Write a concrete, first-person \"thought\" (1-3 sentences) on why this specific function/tool is right and what you expect it to return — no lazy filler like \"Calling X.\" and no starting with \"The user...\"\n- Pass tool parameters as top-level fields of the function arguments (alongside \"thought\"), not nested inside an \"action_input\" wrapper\n- Analyze the request carefully to determine if tools are needed\n- Call functions with properly formatted arguments\n- Handle tool responses appropriately before providing final answer\n- Chain multiple tool calls when necessary for complex tasks\n- If you want an agent tool's response returned verbatim as the final output, include \"delegate_final\": true at the top level of that tool's arguments. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.\n- Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.\n\n## File Handling\n- Tools may generate or process files (images, CSVs, PDFs, etc.)\n- When calling `provide_final_answer`, include an `output_files` argument with comma-separated file paths to return. Pass an empty string if there are no files to return.\n---\n# AVAILABLE TOOLS\n\nAvailable tools: [search,http]\nRefer to each tool's function schema for detailed usage.\n---\n# RESPONSE FORMAT\n\nIn your answers, adhere to the following formatting and stylistic guidelines:\n\n- Use GitHub-flavored Markdown as the default format for all responses and generated documents.\n- Write in a professional, academic tone using complete, well-structured paragraphs.\n- Avoid excessive bullet points; prioritize fully developed prose.\n- When appropriate, alternate between explanatory paragraphs and structured tables\n  to improve clarity, comparison, or organization of key information.\n- Use bold formatting to emphasize essential concepts, distinctions, terminology, or conclusions.\n- Use blockquotes to highlight formal definitions, cited statements, or especially important excerpts.\n- Include inline hyperlinks when referencing websites, platforms, or external resources.\n- When making factual claims, support them with inline numeric citations using Markdown reference-style links.\n- NEVER use emojis unless the user explicitly requests it.\n\nIMPORTANT:\n- Formatting must enhance readability and analytical clarity.\n- Tables should only be used when they materially improve organization or comparison.\n- Do not over-format; maintain a professional and academically consistent presentation style.\n- In your final answer:\n    - Avoid phrases like 'based on the information gathered or provided'.\n    - Clearly mention any files that were generated during the process\n    - Provide file names and brief descriptions of their contents.\n---\n# AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES\n(This section defines how the assistant presents information and behaves - its personality, tone, communication style,\nand additional behavioral guidelines.\nThese supplementary instructions enhance the agent's interactions but should never override or contradict\nthe PRIMARY INSTRUCTIONS above.)\nhelp the user\n- Current date: 12 November 2026",
+              "role": "system"
+            },
+            {
+              "content": "What is the answer?",
+              "role": "user"
+            },
+            {
+              "content": "Calling: search",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_0_0",
+                  "type": "function",
+                  "function": {
+                    "name": "search",
+                    "arguments": "{\"thought\": \"t\", \"query\": \"q1\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "content": "forty-two",
+              "role": "tool",
+              "tool_call_id": "call_0_0",
+              "name": "search"
+            },
+            {
+              "content": "Calling: search",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_1_0",
+                  "type": "function",
+                  "function": {
+                    "name": "search",
+                    "arguments": "{\"thought\": \"t\", \"query\": \"q2\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "content": "[tool_error] Call limit reached for this tool in this run. Do not call it again.",
+              "role": "tool",
+              "tool_call_id": "call_1_0",
+              "name": "search"
+            }
+          ],
+          "tools": null,
+          "response_format": null
+        }
+      },
+      "run_depends": [
+        {
+          "node": {
+            "id": "0fcbad62-5881-488c-9619-df7ed553fdb8",
+            "name": "LLM",
+            "type": "dynamiq.nodes.llms.OpenAI"
+          },
+          "option": null,
+          "condition": null,
+          "trigger": "success"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 11,
+        "prompt_tokens_cost_usd": 0.0000275,
+        "completion_tokens": 7,
+        "completion_tokens_cost_usd": 0.00007000000000000001,
+        "total_tokens": 18,
+        "total_tokens_cost_usd": 0.00009750000000000001,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": null
+      },
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "0bd6542e-d5ea-4070-ad57-fa173909fa73",
+        "start_time": "2026-11-12T15:08:29.929470+00:00",
+        "end_time": "2026-11-12T15:08:29.929943+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "a32a7e66-606d-47e2-84ea-5ef3bb3c1ee6",
+    "name": "skipped",
+    "type": "node",
+    "trace_id": "742e01fd-ee37-4f69-8e4e-4487f4093fa8",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.929866+00:00",
+    "end_time": "2026-11-12T15:08:29.929866+00:00",
+    "parent_run_id": "0adc80d3-b1c7-41a2-89de-ad48173be66f",
+    "status": "skipped",
+    "input": {
+      "input": "What is the answer?",
+      "choice": {
+        "status": "success",
+        "output": {
+          "yes": {
+            "status": "success",
+            "input": {
+              "input": "What is the answer?"
+            },
+            "output": true
+          },
+          "no": {
+            "status": "skip",
+            "input": {
+              "input": "What is the answer?"
+            },
+            "output": null
+          }
+        }
+      }
+    },
+    "output": null,
+    "metadata": {
+      "node": {
+        "id": "skipped",
+        "name": "skipped",
+        "group": "operators",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "transformers": [],
+        "type": "dynamiq.nodes.operators.Pass",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [
+          {
+            "node": {
+              "id": "choice",
+              "name": "choice",
+              "type": "dynamiq.nodes.operators.Choice"
+            },
+            "option": "no",
+            "condition": null,
+            "trigger": "success"
+          }
+        ],
+        "input_mapping": {}
+      },
+      "run_depends": [],
+      "skip": {
+        "failed_dependency": {
+          "node": {
+            "id": "choice",
+            "name": "choice",
+            "type": "dynamiq.nodes.operators.Choice"
+          },
+          "option": "no",
+          "condition": null,
+          "trigger": "success"
+        }
+      }
+    },
+    "error": null,
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "48b12307-77b5-4142-8426-06c964da0ced",
+    "name": "taken",
+    "type": "node",
+    "trace_id": "742e01fd-ee37-4f69-8e4e-4487f4093fa8",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.930051+00:00",
+    "end_time": "2026-11-12T15:08:29.930163+00:00",
+    "parent_run_id": "0adc80d3-b1c7-41a2-89de-ad48173be66f",
+    "status": "succeeded",
+    "input": {
+      "input": "What is the answer?",
+      "choice": {
+        "status": "success",
+        "output": {
+          "yes": {
+            "status": "success",
+            "input": {
+              "input": "What is the answer?"
+            },
+            "output": true
+          },
+          "no": {
+            "status": "skip",
+            "input": {
+              "input": "What is the answer?"
+            },
+            "output": null
+          }
+        }
+      }
+    },
+    "output": {
+      "input": "What is the answer?",
+      "choice": {
+        "status": "success",
+        "output": {
+          "yes": {
+            "status": "success",
+            "input": {
+              "input": "What is the answer?"
+            },
+            "output": true
+          },
+          "no": {
+            "status": "skip",
+            "input": {
+              "input": "What is the answer?"
+            },
+            "output": null
+          }
+        }
+      }
+    },
+    "metadata": {
+      "node": {
+        "id": "taken",
+        "name": "taken",
+        "group": "operators",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "transformers": [],
+        "type": "dynamiq.nodes.operators.Pass",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [
+          {
+            "node": {
+              "id": "choice",
+              "name": "choice",
+              "type": "dynamiq.nodes.operators.Choice"
+            },
+            "option": "yes",
+            "condition": null,
+            "trigger": "success"
+          }
+        ],
+        "input_mapping": {}
+      },
+      "run_depends": [],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "49e212f4-fb1d-4b2d-91de-1d84da00282c",
+        "start_time": "2026-11-12T15:08:29.930085+00:00",
+        "end_time": "2026-11-12T15:08:29.930141+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "3348c9fb-202b-4b5b-8779-f76e5a4460b5",
+    "name": "http",
+    "type": "node",
+    "trace_id": "742e01fd-ee37-4f69-8e4e-4487f4093fa8",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.930491+00:00",
+    "end_time": "2026-11-12T15:08:29.930727+00:00",
+    "parent_run_id": "7d5ffbbe-49a1-4227-86c1-aaf24e1fa853",
+    "status": "failed",
+    "input": {
+      "query": "x",
+      "mode": "slow"
+    },
+    "output": null,
+    "metadata": {
+      "node": {
+        "id": "http",
+        "name": "http",
+        "description": "Calls an API.",
+        "group": "tools",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": true,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "body": "404 Not Found",
+        "type": "tests.helpers.ExplodingTool",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {}
+      },
+      "run_depends": [
+        {
+          "node": {
+            "id": "0fcbad62-5881-488c-9619-df7ed553fdb8",
+            "name": "LLM",
+            "type": "dynamiq.nodes.llms.OpenAI"
+          },
+          "option": null,
+          "condition": null,
+          "trigger": "success"
+        }
+      ],
+      "is_mocked": false
+    },
+    "error": {
+      "message": "404 Not Found",
+      "traceback": "Traceback (most recent call last):\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1550, in run_sync\n    output, from_cache = cache(self.execute_with_retry)(transformed_input, config, **merged_kwargs)\n                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/cache/utils.py\", line 74, in wrapper\n    output = func(*args, **kwargs)\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1837, in execute_with_retry\n    raise error\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1807, in execute_with_retry\n    output = self.execute(input_data=input_data, config=config, **merged_kwargs)\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/tests/helpers/agent_hooks.py\", line 75, in execute\n    raise ToolExecutionException(self.body, recoverable=True)\ndynamiq.nodes.agents.exceptions.ToolExecutionException: 404 Not Found\n"
+    },
+    "executions": [
+      {
+        "id": "3d9320c0-13d0-4f02-8f95-7b5766e59f6b",
+        "start_time": "2026-11-12T15:08:29.930519+00:00",
+        "end_time": "2026-11-12T15:08:29.930557+00:00",
+        "status": "failed",
+        "input": null,
+        "output": null,
+        "error": {
+          "message": "404 Not Found",
+          "traceback": "Traceback (most recent call last):\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1807, in execute_with_retry\n    output = self.execute(input_data=input_data, config=config, **merged_kwargs)\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/tests/helpers/agent_hooks.py\", line 75, in execute\n    raise ToolExecutionException(self.body, recoverable=True)\ndynamiq.nodes.agents.exceptions.ToolExecutionException: 404 Not Found\n"
+        },
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "5b27c595-f39a-47f8-93b1-7956ecb058f7",
+    "name": "LLM",
+    "type": "node",
+    "trace_id": "742e01fd-ee37-4f69-8e4e-4487f4093fa8",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.931147+00:00",
+    "end_time": "2026-11-12T15:08:29.931561+00:00",
+    "parent_run_id": "7d5ffbbe-49a1-4227-86c1-aaf24e1fa853",
+    "status": "succeeded",
+    "input": {},
+    "output": {
+      "content": "",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": {
+              "thought": "done",
+              "answer": "forty-two"
+            },
+            "name": "provide_final_answer"
+          },
+          "id": "call_3",
+          "type": "function"
+        }
+      ]
+    },
+    "metadata": {
+      "node": {
+        "id": "0fcbad62-5881-488c-9619-df7ed553fdb8",
+        "name": "LLM",
+        "group": "llms",
+        "error_handling": {
+          "timeout_seconds": 600.0,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "model": "openai/gpt-4o",
+        "temperature": 0.0,
+        "max_tokens": 100,
+        "stop": [],
+        "budget_tokens": 1024,
+        "inference_mode": "DEFAULT",
+        "strict_tools": false,
+        "reasoning_effort": "auto",
+        "verbosity": "medium",
+        "type": "dynamiq.nodes.llms.OpenAI",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {},
+        "connection": {
+          "id": "f7d04068-b66f-4381-b9b3-c0d6dc30ae8d",
+          "type": "dynamiq.connections.OpenAI"
+        },
+        "prompt": {
+          "id": "8c8aa3f2-2a40-4241-b3ff-2f9fceec16b8",
+          "version": null,
+          "messages": [
+            {
+              "content": "You are AI powered assistant.\n---\n# PRIMARY INSTRUCTIONS\n\nYou need to use the right functions based on what the user asks.\n\nUse the function `provide_final_answer` when you can give a clear answer to the user's first question,\nand no extra steps, tools, or work are needed.\nCall this function if the user's input is simple and doesn't require additional help or tools.\n\nIf the user's request requires the use of specific tools, such as [search,http],\n you must first call the appropriate function to invoke those tools.\nOnly after utilizing the necessary tools and gathering the required information should\nyou call `provide_final_answer` to deliver the final response.\n\n## Function Calling Guidelines\n- ALWAYS populate the \"thought\" field FIRST before any other field in your function calls\n- Write a concrete, first-person \"thought\" (1-3 sentences) on why this specific function/tool is right and what you expect it to return — no lazy filler like \"Calling X.\" and no starting with \"The user...\"\n- Pass tool parameters as top-level fields of the function arguments (alongside \"thought\"), not nested inside an \"action_input\" wrapper\n- Analyze the request carefully to determine if tools are needed\n- Call functions with properly formatted arguments\n- Handle tool responses appropriately before providing final answer\n- Chain multiple tool calls when necessary for complex tasks\n- If you want an agent tool's response returned verbatim as the final output, include \"delegate_final\": true at the top level of that tool's arguments. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.\n- Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.\n\n## File Handling\n- Tools may generate or process files (images, CSVs, PDFs, etc.)\n- When calling `provide_final_answer`, include an `output_files` argument with comma-separated file paths to return. Pass an empty string if there are no files to return.\n---\n# AVAILABLE TOOLS\n\nAvailable tools: [search,http]\nRefer to each tool's function schema for detailed usage.\n---\n# RESPONSE FORMAT\n\nIn your answers, adhere to the following formatting and stylistic guidelines:\n\n- Use GitHub-flavored Markdown as the default format for all responses and generated documents.\n- Write in a professional, academic tone using complete, well-structured paragraphs.\n- Avoid excessive bullet points; prioritize fully developed prose.\n- When appropriate, alternate between explanatory paragraphs and structured tables\n  to improve clarity, comparison, or organization of key information.\n- Use bold formatting to emphasize essential concepts, distinctions, terminology, or conclusions.\n- Use blockquotes to highlight formal definitions, cited statements, or especially important excerpts.\n- Include inline hyperlinks when referencing websites, platforms, or external resources.\n- When making factual claims, support them with inline numeric citations using Markdown reference-style links.\n- NEVER use emojis unless the user explicitly requests it.\n\nIMPORTANT:\n- Formatting must enhance readability and analytical clarity.\n- Tables should only be used when they materially improve organization or comparison.\n- Do not over-format; maintain a professional and academically consistent presentation style.\n- In your final answer:\n    - Avoid phrases like 'based on the information gathered or provided'.\n    - Clearly mention any files that were generated during the process\n    - Provide file names and brief descriptions of their contents.\n---\n# AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES\n(This section defines how the assistant presents information and behaves - its personality, tone, communication style,\nand additional behavioral guidelines.\nThese supplementary instructions enhance the agent's interactions but should never override or contradict\nthe PRIMARY INSTRUCTIONS above.)\nhelp the user\n- Current date: 12 November 2026",
+              "role": "system"
+            },
+            {
+              "content": "What is the answer?",
+              "role": "user"
+            },
+            {
+              "content": "Calling: search",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_0_0",
+                  "type": "function",
+                  "function": {
+                    "name": "search",
+                    "arguments": "{\"thought\": \"t\", \"query\": \"q1\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "content": "forty-two",
+              "role": "tool",
+              "tool_call_id": "call_0_0",
+              "name": "search"
+            },
+            {
+              "content": "Calling: search",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_1_0",
+                  "type": "function",
+                  "function": {
+                    "name": "search",
+                    "arguments": "{\"thought\": \"t\", \"query\": \"q2\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "content": "[tool_error] Call limit reached for this tool in this run. Do not call it again.",
+              "role": "tool",
+              "tool_call_id": "call_1_0",
+              "name": "search"
+            },
+            {
+              "content": "Calling: http",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_2_0",
+                  "type": "function",
+                  "function": {
+                    "name": "http",
+                    "arguments": "{\"thought\": \"t\", \"query\": \"x\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "content": "[tool_error] ToolExecutionException: Tool 'http' failed: {'type': 'ToolExecutionException', 'message': '404 Not Found', 'recoverable': True, 'failed_nodes': []}",
+              "role": "tool",
+              "tool_call_id": "call_2_0",
+              "name": "http"
+            }
+          ],
+          "tools": null,
+          "response_format": null
+        }
+      },
+      "run_depends": [
+        {
+          "node": {
+            "id": "http",
+            "name": "http",
+            "type": "tests.helpers.ExplodingTool"
+          },
+          "option": null,
+          "condition": null,
+          "trigger": "success"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 11,
+        "prompt_tokens_cost_usd": 0.0000275,
+        "completion_tokens": 7,
+        "completion_tokens_cost_usd": 0.00007000000000000001,
+        "total_tokens": 18,
+        "total_tokens_cost_usd": 0.00009750000000000001,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": null
+      },
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "9ba29a89-ed8e-4b57-9de8-7484178577c7",
+        "start_time": "2026-11-12T15:08:29.931185+00:00",
+        "end_time": "2026-11-12T15:08:29.931500+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  }
+]

@@ -22,6 +22,7 @@ from dynamiq.nodes.node import Node, NodeOutputReference, NodeReadyToRun
 from dynamiq.nodes.types import Behavior, DependencyTrigger
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableFailedNodeInfo, RunnableResultError
+from dynamiq.telemetry import emitter as telemetry
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.types.mocking import RunMockConfig
@@ -771,6 +772,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 error=RunnableResultError.from_exception(e, failed_nodes=failed_nodes),
             )
         finally:
+            telemetry.ensure_run_ended(run_id)
             if run_executor is not None:
                 try:
                     run_executor.shutdown()
@@ -1018,6 +1020,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 error=RunnableResultError.from_exception(e, failed_nodes=failed_nodes),
             )
         finally:
+            telemetry.ensure_run_ended(run_id)
             # wait=False is safe: all node tasks have been awaited via asyncio.gather()
             executor.shutdown(wait=False)
             if cleanup_dry_run:

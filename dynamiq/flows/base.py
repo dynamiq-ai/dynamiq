@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.runnables import Runnable, RunnableConfig
+from dynamiq.telemetry import emitter as telemetry
 from dynamiq.utils import generate_uuid
 
 
@@ -66,12 +67,18 @@ class BaseFlow(BaseModel, Runnable, ABC):
             config (RunnableConfig, optional): Configuration for the runnable.
             **kwargs: Additional keyword arguments to be passed to the callbacks.
         """
+        telemetry.on_flow_start(self, input_data, config, kwargs)
         if config and config.callbacks:
-            for callback in config.callbacks:
-                dict_kwargs = {}
-                if isinstance(callback, TracingCallbackHandler):
-                    dict_kwargs["for_tracing"] = True
-                callback.on_flow_start(self.to_dict(**dict_kwargs), input_data, **kwargs)
+            try:
+                for callback in config.callbacks:
+                    dict_kwargs = {}
+                    if isinstance(callback, TracingCallbackHandler):
+                        dict_kwargs["for_tracing"] = True
+                    callback.on_flow_start(self.to_dict(**dict_kwargs), input_data, **kwargs)
+            except BaseException as e:
+                # A callback that raises here stops the run before the block whose finally ends the span.
+                telemetry.ensure_run_ended(kwargs.get("run_id"), e)
+                raise
 
     def run_on_flow_end(
         self, output_data: Any, config: RunnableConfig = None, **kwargs: Any
@@ -84,6 +91,7 @@ class BaseFlow(BaseModel, Runnable, ABC):
             config (RunnableConfig, optional): Configuration for the runnable.
             **kwargs: Additional keyword arguments to be passed to the callbacks.
         """
+        telemetry.on_flow_end(self, output_data, kwargs)
         if config and config.callbacks:
             for callback in config.callbacks:
                 dict_kwargs = {}
@@ -102,6 +110,7 @@ class BaseFlow(BaseModel, Runnable, ABC):
             config (RunnableConfig, optional): Configuration for the runnable.
             **kwargs: Additional keyword arguments to be passed to the callbacks.
         """
+        telemetry.on_flow_error(self, error, kwargs)
         if config and config.callbacks:
             for callback in config.callbacks:
                 dict_kwargs = {}
@@ -117,6 +126,7 @@ class BaseFlow(BaseModel, Runnable, ABC):
             config (RunnableConfig, optional): Configuration for the runnable.
             **kwargs: Additional keyword arguments to be passed to the callbacks.
         """
+        telemetry.on_flow_canceled(self, kwargs)
         if config and config.callbacks:
             for callback in config.callbacks:
                 dict_kwargs = {}

@@ -1,0 +1,492 @@
+[
+  {
+    "id": "5be12217-acdf-4a52-9725-3210ccefb109",
+    "name": "Workflow",
+    "type": "workflow",
+    "trace_id": "ee7e5d80-dc99-4f5b-af46-c8920d5aa899",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.883825+00:00",
+    "end_time": "2026-11-12T15:08:29.890941+00:00",
+    "parent_run_id": null,
+    "status": "succeeded",
+    "input": {
+      "input": [
+        {
+          "n": 1
+        },
+        {
+          "n": 2
+        },
+        {
+          "n": 3
+        }
+      ]
+    },
+    "output": {
+      "map": {
+        "status": "success",
+        "input": {
+          "input": [
+            {
+              "n": 1
+            },
+            {
+              "n": 2
+            },
+            {
+              "n": 3
+            }
+          ]
+        },
+        "output": {
+          "output": [
+            {
+              "n": 1
+            },
+            {
+              "n": 2
+            },
+            {
+              "n": 3
+            }
+          ]
+        }
+      }
+    },
+    "metadata": {
+      "workflow": {
+        "id": "workflow",
+        "version": null
+      }
+    },
+    "error": null,
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "00d4db3f-d33c-47e0-8157-a11ee8b7fd30",
+    "name": "Flow",
+    "type": "flow",
+    "trace_id": "ee7e5d80-dc99-4f5b-af46-c8920d5aa899",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.883902+00:00",
+    "end_time": "2026-11-12T15:08:29.890820+00:00",
+    "parent_run_id": "5be12217-acdf-4a52-9725-3210ccefb109",
+    "status": "succeeded",
+    "input": {
+      "input": [
+        {
+          "n": 1
+        },
+        {
+          "n": 2
+        },
+        {
+          "n": 3
+        }
+      ]
+    },
+    "output": {
+      "map": {
+        "status": "success",
+        "input": {
+          "input": [
+            {
+              "n": 1
+            },
+            {
+              "n": 2
+            },
+            {
+              "n": 3
+            }
+          ]
+        },
+        "output": {
+          "output": [
+            {
+              "n": 1
+            },
+            {
+              "n": 2
+            },
+            {
+              "n": 3
+            }
+          ]
+        }
+      }
+    },
+    "metadata": {
+      "flow": {
+        "id": "flow"
+      }
+    },
+    "error": null,
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "03eb6131-dcc1-48a7-8ce3-ab4d74ee2612",
+    "name": "mapper",
+    "type": "node",
+    "trace_id": "ee7e5d80-dc99-4f5b-af46-c8920d5aa899",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.884080+00:00",
+    "end_time": "2026-11-12T15:08:29.889393+00:00",
+    "parent_run_id": "00d4db3f-d33c-47e0-8157-a11ee8b7fd30",
+    "status": "succeeded",
+    "input": {
+      "input": [
+        {
+          "n": 1
+        },
+        {
+          "n": 2
+        },
+        {
+          "n": 3
+        }
+      ]
+    },
+    "output": {
+      "output": [
+        {
+          "n": 1
+        },
+        {
+          "n": 2
+        },
+        {
+          "n": 3
+        }
+      ]
+    },
+    "metadata": {
+      "node": {
+        "id": "map",
+        "name": "mapper",
+        "group": "operators",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "behavior": "return",
+        "max_workers": 1,
+        "type": "dynamiq.nodes.operators.Map",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {},
+        "node": {
+          "id": "item",
+          "name": "item",
+          "group": "operators",
+          "error_handling": {
+            "timeout_seconds": null,
+            "retry_interval_seconds": 1,
+            "max_retries": 0,
+            "backoff_rate": 1,
+            "max_retry_interval_seconds": null,
+            "behavior": "raise"
+          },
+          "is_postponed_component_init": false,
+          "is_optimized_for_agents": false,
+          "is_files_allowed": false,
+          "is_parallel_execution_allowed": false,
+          "is_output_persisted_in_sandbox_allowed": false,
+          "input_param_modes": {},
+          "callbacks": [],
+          "transformers": [],
+          "type": "dynamiq.nodes.operators.Pass",
+          "caching": {
+            "enabled": false
+          },
+          "streaming": {
+            "enabled": false
+          },
+          "approval": {
+            "enabled": false
+          },
+          "mock": {
+            "enabled": false
+          },
+          "depends": [],
+          "input_mapping": {}
+        }
+      },
+      "run_depends": [],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "c443492b-6a17-4712-b6da-05a611addf2e",
+        "start_time": "2026-11-12T15:08:29.884125+00:00",
+        "end_time": "2026-11-12T15:08:29.889347+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "87062a42-9d42-4a70-a461-b4224e8a6aa4",
+    "name": "item",
+    "type": "node",
+    "trace_id": "ee7e5d80-dc99-4f5b-af46-c8920d5aa899",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.888300+00:00",
+    "end_time": "2026-11-12T15:08:29.888425+00:00",
+    "parent_run_id": "03eb6131-dcc1-48a7-8ce3-ab4d74ee2612",
+    "status": "succeeded",
+    "input": {
+      "n": 1
+    },
+    "output": {
+      "n": 1
+    },
+    "metadata": {
+      "node": {
+        "id": "11aa11d1-f317-45aa-b507-2edb8e09bd0b",
+        "name": "item",
+        "group": "operators",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "transformers": [],
+        "type": "dynamiq.nodes.operators.Pass",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {}
+      },
+      "run_depends": [],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "33496d66-3c96-4bea-bf69-5cbe3a39fbf7",
+        "start_time": "2026-11-12T15:08:29.888331+00:00",
+        "end_time": "2026-11-12T15:08:29.888394+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "1136c275-f279-4579-9af1-a33fb4078265",
+    "name": "item",
+    "type": "node",
+    "trace_id": "ee7e5d80-dc99-4f5b-af46-c8920d5aa899",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.888757+00:00",
+    "end_time": "2026-11-12T15:08:29.888860+00:00",
+    "parent_run_id": "03eb6131-dcc1-48a7-8ce3-ab4d74ee2612",
+    "status": "succeeded",
+    "input": {
+      "n": 2
+    },
+    "output": {
+      "n": 2
+    },
+    "metadata": {
+      "node": {
+        "id": "8a3970b8-a655-4d09-b59c-f49e67f3c372",
+        "name": "item",
+        "group": "operators",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "transformers": [],
+        "type": "dynamiq.nodes.operators.Pass",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {}
+      },
+      "run_depends": [],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "51bda223-8d6b-4e4d-8f1c-43c3f1f1945f",
+        "start_time": "2026-11-12T15:08:29.888782+00:00",
+        "end_time": "2026-11-12T15:08:29.888833+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "d9bedc2a-2f5d-4cff-ae66-2c9a6d7f773d",
+    "name": "item",
+    "type": "node",
+    "trace_id": "ee7e5d80-dc99-4f5b-af46-c8920d5aa899",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.889152+00:00",
+    "end_time": "2026-11-12T15:08:29.889257+00:00",
+    "parent_run_id": "03eb6131-dcc1-48a7-8ce3-ab4d74ee2612",
+    "status": "succeeded",
+    "input": {
+      "n": 3
+    },
+    "output": {
+      "n": 3
+    },
+    "metadata": {
+      "node": {
+        "id": "380dedf7-773e-4f14-b613-a181001efbe2",
+        "name": "item",
+        "group": "operators",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "transformers": [],
+        "type": "dynamiq.nodes.operators.Pass",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {}
+      },
+      "run_depends": [],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "19eaa0fd-ad85-4509-acd2-8b806fd5c0bf",
+        "start_time": "2026-11-12T15:08:29.889177+00:00",
+        "end_time": "2026-11-12T15:08:29.889231+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  }
+]

@@ -1494,6 +1494,7 @@ dependencies = [
     { name = "omegaconf" },
     { name = "openai" },
     { name = "openpyxl" },
+    { name = "opentelemetry-api" },
     { name = "orjson" },
     { name = "pandas" },
     { name = "pillow" },
@@ -1532,6 +1533,8 @@ all = [
     { name = "matplotlib" },
     { name = "mysql-connector-python" },
     { name = "opensearch-py" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-sdk" },
     { name = "pdf2image" },
     { name = "pdfplumber" },
     { name = "pgvector" },
@@ -1589,6 +1592,10 @@ gcp = [
 ]
 monty = [
     { name = "pydantic-monty" },
+]
+otel = [
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-sdk" },
 ]
 sandboxes = [
     { name = "daytona" },
@@ -1673,7 +1680,7 @@ requires-dist = [
     { name = "cua-computer", marker = "python_full_version >= '3.12' and python_full_version < '3.14' and extra == 'cua'", specifier = "==0.4.19" },
     { name = "databricks-sql-connector", marker = "extra == 'sql'", specifier = ">=4.7.0,<4.9.0" },
     { name = "daytona", marker = "extra == 'sandboxes'", specifier = ">=0.161.0,<0.162.0" },
-    { name = "dynamiq", extras = ["files", "data", "vectorstores", "sql", "browser", "sandboxes", "gcp", "evals"], marker = "extra == 'all'" },
+    { name = "dynamiq", extras = ["files", "data", "vectorstores", "sql", "browser", "sandboxes", "gcp", "evals", "otel"], marker = "extra == 'all'" },
     { name = "e2b", marker = "extra == 'sandboxes'", specifier = ">=2.26.0,<3.0.0" },
     { name = "e2b-code-interpreter", marker = "extra == 'sandboxes'", specifier = ">=2.11.0,<3.0.0" },
     { name = "e2b-desktop", marker = "extra == 'sandboxes'", specifier = ">=2.7.2,<3.0.0" },
@@ -1700,6 +1707,9 @@ requires-dist = [
     { name = "openai", specifier = ">=1.83.0" },
     { name = "openpyxl", specifier = ">=3.1.5,<4.0.0" },
     { name = "opensearch-py", marker = "extra == 'vectorstores'", specifier = ">=3.0.0,<4.0.0" },
+    { name = "opentelemetry-api", specifier = ">=1.30.0,<2.0.0" },
+    { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otel'", specifier = ">=1.30.0,<2.0.0" },
+    { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.30.0,<2.0.0" },
     { name = "orjson", specifier = ">=3.11.6,<4.0.0" },
     { name = "pandas", specifier = ">=2.2.3,<4.0.0" },
     { name = "pdf2image", marker = "extra == 'files'", specifier = ">=1.17.0,<1.18.0" },
@@ -1743,7 +1753,7 @@ requires-dist = [
     { name = "unstructured-client", marker = "extra == 'files'", specifier = ">=0.42.3,<0.43.0" },
     { name = "weaviate-client", marker = "extra == 'vectorstores'", specifier = ">=4.22.0,<4.23.0" },
 ]
-provides-extras = ["files", "data", "vectorstores", "sql", "browser", "sandboxes", "gcp", "evals", "cua", "monty", "all"]
+provides-extras = ["files", "data", "vectorstores", "sql", "browser", "sandboxes", "gcp", "evals", "cua", "monty", "otel", "all"]
 
 [package.metadata.requires-dev]
 dev = [
