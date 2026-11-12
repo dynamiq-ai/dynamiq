@@ -1036,10 +1036,10 @@ def bytes_to_data_url(image_bytes: bytes) -> str:
 def decode_text_payload(value: bytes | bytearray) -> str | None:
     """The text a byte string holds, or ``None`` when it is genuinely binary.
 
-    Tools hand back `bytes` for both: `HttpApiCall` leaves any body that is not exactly
-    ``application/json`` as bytes, so most JSON, HTML and XML answers arrive this way and the model
-    has to be able to read them. A NUL byte or a failed UTF-8 decode is what separates those from
-    audio, images and archives.
+    Tools hand back `bytes` for both: `HttpApiCall` leaves as bytes any body it does not read as JSON,
+    so HTML, XML, JSON under another label and a JSON-labelled body that does not parse arrive this
+    way and the model has to be able to read them. A NUL byte or a failed UTF-8 decode is what
+    separates those from audio, images and archives.
     """
     try:
         text = bytes(value).decode("utf-8")
@@ -1112,9 +1112,13 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
                 elif isinstance(inner_content, (bytes, bytearray)):
                     content = decode_text_payload(inner_content) or describe_binary(inner_content)
                 else:
-                    content = json.dumps(inner_content, indent=2, default=_json_fallback)
+                    content = json.dumps(inner_content, indent=2, default=_json_fallback, ensure_ascii=False)
             else:
-                content = json.dumps(filtered_content, indent=2, default=_json_fallback) if filtered_content else ""
+                content = (
+                    json.dumps(filtered_content, indent=2, default=_json_fallback, ensure_ascii=False)
+                    if filtered_content
+                    else ""
+                )
         elif isinstance(content, (list, tuple)):
             content = "\n".join(str(item) for item in content)
         else:
