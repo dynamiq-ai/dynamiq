@@ -145,6 +145,11 @@ AVAILABLE TOOLS section for usage instructions.
 REACT_BLOCK_TOOLS_BRIEF = """
 Available tools: [{{ tools_name }}]
 Refer to each tool's function schema for detailed usage.
+{%- if tool_description_overflow %}
+
+Descriptions too long for a function schema continue here:
+{{ tool_description_overflow }}
+{%- endif %}
 """
 
 

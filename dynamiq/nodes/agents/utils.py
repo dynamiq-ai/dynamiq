@@ -3,6 +3,7 @@ import html
 import io
 import json
 import re
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Sequence
 
@@ -117,6 +118,54 @@ def first_xml_output_block(text: str) -> str:
             return text[: i + len(closing)]
         i += 1
     return text
+
+
+_XML_ACTION_RE = re.compile(r"<action>(.*?)(?=</action>|<answer>|</output>|$)", re.DOTALL)
+_XML_ANSWER_ELEMENT_RE = re.compile(r"<answer>.*?(?:</answer>|$)", re.DOTALL)
+_XML_FREE_TEXT_ELEMENT_RE = re.compile(r"<(thought|action_input)>.*?(?:</\1>|$)", re.DOTALL)
+
+
+def _xml_reply_structure(text: str) -> str:
+    """``text`` with its ``<thought>`` and ``<action_input>`` elements blanked out, every offset kept.
+
+    Those elements hold free text, reasoning or a tool's input, that may itself mention ``<action>`` or
+    ``<answer>``; only the tags outside them say what the reply does.
+    """
+    return _XML_FREE_TEXT_ELEMENT_RE.sub(lambda match: " " * len(match.group(0)), text)
+
+
+def _xml_tool_action(structure: str, is_tool: Callable[[str], bool]) -> re.Match | None:
+    """The first ``<action>`` in a reply's structure that names a tool.
+
+    Models fill in ``<action>None</action>``, or leave the template's empty tags, next to their answer, and
+    prose can mention the tag. None of those makes the reply a tool call.
+    """
+    return next((action for action in _XML_ACTION_RE.finditer(structure) if is_tool(action.group(1))), None)
+
+
+def xml_reply_has_action(text: str, is_tool: Callable[[str], bool]) -> bool:
+    """Whether an XML reply calls a tool, ignoring tags mentioned inside its thought or tool input."""
+    return _xml_tool_action(_xml_reply_structure(text), is_tool) is not None
+
+
+def xml_reply_has_answer(text: str) -> bool:
+    """Whether an XML reply has an ``<answer>`` of its own, not one mentioned inside its thought or tool input."""
+    return bool(_XML_ANSWER_ELEMENT_RE.search(_xml_reply_structure(text)))
+
+
+def drop_answer_after_xml_action(text: str, is_tool: Callable[[str], bool]) -> str:
+    """The reply without an ``<answer>`` written after its tool call in the same block.
+
+    Such an answer was written before the tool's result existed, so the action is what the step does.
+    A reply whose answer comes first, or that calls no tool, is returned unchanged, and so are tags
+    mentioned inside the thought or the tool input.
+    """
+    structure = _xml_reply_structure(text)
+    action = _xml_tool_action(structure, is_tool)
+    answer = _XML_ANSWER_ELEMENT_RE.search(structure)
+    if not action or not answer or answer.start() < action.start():
+        return text
+    return text[: answer.start()] + text[answer.end() :]
 
 
 class XMLParser:
@@ -1120,8 +1169,9 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
         else:
             content = str(content)
 
+    # Template braces (`{{ .Values.image }}`) stay verbatim: observations are static messages, never
+    # rendered as templates, and the model may write what it read back to a file.
     max_len_in_char: int = max_tokens * CHARS_PER_TOKEN
-    content = re.sub(r"\{\{\s*(.*?)\s*\}\}", r"\1", content)
 
     if len(content) > max_len_in_char and truncate:
         half_length: int = (max_len_in_char - 100) // 2
@@ -1282,7 +1332,7 @@ def process_tool_output_with_sandbox_persistence(
 
 
 class ToolCacheEntry(BaseModel):
-    """Single key entry in tool cache."""
+    """Key of an entry in the tool result cache the agent no longer keeps; kept so imports still work."""
 
     action: str
     action_input: dict | str
@@ -1293,7 +1343,7 @@ class ToolCacheEntry(BaseModel):
     @classmethod
     def convert_to_str(cls, data):
         if isinstance(data, dict):
-            data["action_input"] = json.dumps(data.get('action_input'), sort_keys=True)
+            data["action_input"] = json.dumps(data.get("action_input"), sort_keys=True)
         return data
 
 

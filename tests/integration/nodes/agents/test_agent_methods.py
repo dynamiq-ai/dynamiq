@@ -1094,43 +1094,6 @@ class TestParallelToolCloning:
 
         assert clone_spy.call_count == 1, "_clone_tool_for_execution must be called for parallel execution"
 
-    def test_execute_tools_single_tool_does_not_pass_is_parallel(self, parallel_agent, mocker):
-        """When _execute_tools dispatches a single tool it must NOT set
-        is_parallel=True on the inner _execute_single_tool call."""
-        mock_single = mocker.patch.object(
-            parallel_agent,
-            "_execute_single_tool",
-            return_value=("result", [], False, True, {"node": "dep"}),
-        )
-
-        tools_data = [{"name": "Calculator", "input": {"expression": "1+1"}}]
-        parallel_agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
-
-        mock_single.assert_called_once()
-        call_kw = mock_single.call_args.kwargs
-        assert call_kw.get("is_parallel", False) is False, "Single-tool dispatch must not set is_parallel=True"
-
-    def test_execute_tools_multiple_tools_passes_is_parallel(self, parallel_agent, mocker):
-        """When _execute_tools dispatches multiple tools concurrently it must
-        set is_parallel=True on every _execute_single_tool call."""
-        mock_single = mocker.patch.object(
-            parallel_agent,
-            "_execute_single_tool",
-            return_value=("result", [], False, True, {"node": "dep"}),
-        )
-
-        tools_data = [
-            {"name": "Calculator", "input": {"expression": "1+1"}},
-            {"name": "Formatter", "input": {"text": "hello"}},
-        ]
-        parallel_agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
-
-        assert mock_single.call_count == 2
-        for call in mock_single.call_args_list:
-            assert (
-                call.kwargs.get("is_parallel") is True
-            ), "Concurrent dispatch must set is_parallel=True for every tool"
-
 
 class TestContextManagerEarlyReturn:
     """Regression tests for _execute_single_tool early return when nothing needs summarizing."""

@@ -2043,10 +2043,18 @@ class Databricks(BaseApiKeyConnection):
 def merge_mcp_http_headers(base: dict[str, Any] | None, extra: dict[str, Any] | None) -> dict[str, Any] | None:
     """Merge connection-level and per-call MCP HTTP headers without mutating either dict.
 
-    Per-call values win on duplicate keys. An empty merge returns ``None`` so the MCP client
-    keeps its default (no extra headers) rather than sending ``{}``.
+    Per-call values win on duplicate keys, compared case-insensitively as HTTP header names are: a
+    per-call ``authorization`` replaces the connection's ``Authorization`` instead of being sent next
+    to it. An empty merge returns ``None`` so the MCP client keeps its default (no extra headers)
+    rather than sending ``{}``.
     """
-    merged = {**(base or {}), **(extra or {})}
+    merged: dict[str, Any] = {}
+    names: dict[str, str] = {}  # lowercased name -> the spelling kept in ``merged``
+    for headers in (base or {}, extra or {}):
+        for key, value in headers.items():
+            merged.pop(names.get(str(key).lower(), key), None)
+            names[str(key).lower()] = key
+            merged[key] = value
     return merged or None
 
 

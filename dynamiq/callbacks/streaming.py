@@ -504,6 +504,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._brace_scan_index: int = 0
         self._so_action_emitted: bool = False
         self._xml_turn_complete: bool = False
+        self._default_turn_complete: bool = False
         self._state_has_emitted: dict[str, bool] = {
             StreamingState.REASONING: False,
             StreamingState.ANSWER: False,
@@ -575,6 +576,32 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                     self._xml_turn_complete = True
                     if not text_delta:
                         return
+
+        # DEFAULT: the same for an Observation the model writes after its action ("Observation:" is the stop
+        # sequence reasoning models ignore), so the invented result and answer that follow are never streamed.
+        if self.mode_name == InferenceMode.DEFAULT.value:
+            if self._default_turn_complete:
+                return
+            # Local import: dynamiq.nodes.agents imports this module.
+            from dynamiq.nodes.agents.components.parser import cut_default_reply_at_observation
+
+            candidate = self.accumulated_content + text_delta
+            # Only this delta can complete the label, so only then is the whole reply read again.
+            label_window = candidate[max(0, len(self.accumulated_content) - len("Observation:")) :]
+            cut = candidate
+            if "Observation:" in label_window:
+                cut = cut_default_reply_at_observation(candidate, self.agent._is_tool_action)
+            if cut != candidate:
+                self._default_turn_complete = True
+                # The start of the label, and the line break before it, arrived in earlier chunks.
+                already_taken = len(self.accumulated_content) - len(cut)
+                if already_taken > 0:
+                    self.accumulated_content = cut
+                    self._buffer = self._buffer[: max(0, len(self._buffer) - already_taken)]
+                    return
+                text_delta = cut[len(self.accumulated_content) :]
+                if not text_delta:
+                    return
 
         self.accumulated_content += text_delta
         self._buffer += text_delta
@@ -825,7 +852,11 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                 raw_name = self._current_action_name or ""
                 sanitized_name = self.agent.sanitize_tool_name(raw_name)
                 if raw_name not in allowed and sanitized_name not in allowed:
-                    return
+                    # The allowlist names tools, and the model may be offered a tool under another name (two MCP
+                    # servers with a tool of the same name).
+                    tool = self.agent.tool_by_names.get(sanitized_name)
+                    if tool is None or not {tool.name, self.agent.sanitize_tool_name(tool.name)} & set(allowed):
+                        return
 
         if step in self._state_has_emitted:
             if not self._state_has_emitted[step]:
@@ -895,11 +926,25 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             **(self.kwargs | {"loop_num": self.loop_num}),
         )
 
+    def _reply_before(self, buffer_index: int) -> str:
+        """The reply up to an index of the buffer, which holds the end of the reply."""
+        return self.accumulated_content[: len(self.accumulated_content) - len(self._buffer) + buffer_index]
+
     def _process_default_mode(self, final_answer_only: bool) -> None:
+        # Local import: dynamiq.nodes.agents imports this module.
+        from dynamiq.nodes.agents.components.parser import has_default_action_input
+
         if self._current_state is None:
             start = self._state_last_emit_index
             idx_thought = self._buffer.find(DefaultModeTag.THOUGHT, start) if not final_answer_only else -1
             idx_answer = self._buffer.find(DefaultModeTag.ANSWER, start)
+            first_label = min((index for index in (idx_thought, idx_answer) if index != -1), default=-1)
+            if first_label != -1 and has_default_action_input(
+                self._reply_before(first_label), self.agent._is_tool_action
+            ):
+                # Past a tool call's "Action Input:" the text is the tool's input (a FAQ, a fixture), not a
+                # thought or the answer.
+                idx_thought = idx_answer = -1
 
             if not final_answer_only and idx_thought != -1 and (idx_answer == -1 or idx_thought < idx_answer):
                 self._current_state = StreamingState.REASONING
@@ -951,6 +996,9 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             self._state_last_emit_index = safe_end
 
     def _process_xml_mode(self, final_answer_only: bool) -> None:
+        # Local import: dynamiq.nodes.agents imports this module.
+        from dynamiq.nodes.agents.utils import xml_reply_has_action
+
         if self._current_state is None:
             start = self._state_last_emit_index
 
@@ -991,7 +1039,12 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                 self._state_has_emitted[StreamingState.TOOL_INPUT] = False
                 self._state_start_index = idx_action_input + len(XMLModeTag.OPEN_ACTION_INPUT)
                 self._state_last_emit_index = self._state_start_index
-            elif idx_answer != -1:
+            elif idx_answer != -1 and not xml_reply_has_action(
+                self._reply_before(idx_answer), self.agent._is_tool_action
+            ):
+                # An answer after a tool call in the same reply predates the tool's result and is dropped
+                # (drop_answer_after_xml_action), so it is not streamed either. The answer's own text may mention
+                # <action>, so only the reply before it is checked.
                 self._current_state = StreamingState.ANSWER
                 self._answer_started = True
                 self._state_start_index = idx_answer + len(XMLModeTag.OPEN_ANSWER)

@@ -1,7 +1,7 @@
 """Schema generation for Agent function calling and structured output modes."""
 
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from enum import Enum
 from typing import Any, Literal, Union, get_args, get_origin
 
@@ -37,8 +37,9 @@ FINAL_ANSWER_FUNCTION_SCHEMA = {
     "type": "function",
     "function": {
         "name": "provide_final_answer",
-        "description": "Function should be called when if you can answer the initial request"
-        " or if there is not request at all.",
+        "description": (
+            "Call this function when you can answer the initial request, or when there is no request at all."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -114,8 +115,7 @@ def build_final_answer_function_schema(response_format: dict | type[BaseModel] |
         "function": {
             "name": "provide_final_answer",
             "description": (
-                "Function should be called when if you can answer the initial request"
-                " or if there is not request at all."
+                "Call this function when you can answer the initial request, or when there is no request at all."
             ),
             "parameters": parameters,
         },
@@ -123,6 +123,39 @@ def build_final_answer_function_schema(response_format: dict | type[BaseModel] |
 
 
 PRIORITY_FIELDS = ("brief",)
+
+# OpenAI rejects a longer function description.
+MAX_FUNCTION_DESCRIPTION_LENGTH = 1024
+DESCRIPTION_CONTINUED = " (continued in the system prompt)"
+
+
+def split_function_description(description: str | None) -> tuple[str, str]:
+    """Split a tool description into the part a function schema accepts and the rest, which is empty when it fits.
+
+    The cut falls on a line break, or a space, so neither part starts or ends mid-word.
+    """
+    text = description or ""
+    if len(text) <= MAX_FUNCTION_DESCRIPTION_LENGTH:
+        return text, ""
+    limit = MAX_FUNCTION_DESCRIPTION_LENGTH - len(DESCRIPTION_CONTINUED)
+    cut = text.rfind("\n", 0, limit)
+    if cut < limit // 2:
+        cut = text.rfind(" ", 0, limit)
+    if cut <= 0:
+        cut = limit
+    return text[:cut].rstrip() + DESCRIPTION_CONTINUED, text[cut:].strip()
+
+
+def function_description_overflow(
+    tools: list[Node], sanitize_tool_name: Callable[[str], str], *, offered_names: Sequence[str] | None = None
+) -> str:
+    """The rest of each tool description too long for its function schema, for the system prompt."""
+    lines = []
+    for tool, tool_name in zip(tools, _tool_names(tools, sanitize_tool_name, offered_names)):
+        _, rest = split_function_description(tool.description)
+        if rest:
+            lines.append(f"- {tool_name} (continued): {rest}")
+    return "\n".join(lines)
 
 
 def _is_accessible_to_agent(field: Any) -> bool:
@@ -148,19 +181,34 @@ def _reorder_fields(fields: dict) -> list[tuple[str, Any]]:
     return priority + rest
 
 
-def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str], str]) -> str:
+def _tool_names(
+    tools: list[Node], sanitize_tool_name: Callable[[str], str], offered_names: Sequence[str] | None
+) -> list[str]:
+    """The name each tool is offered under: ``offered_names`` when given (one per tool), else its sanitized name."""
+    if offered_names is None:
+        return [sanitize_tool_name(tool.name) for tool in tools]
+    if len(offered_names) != len(tools):
+        raise ValueError(f"Got {len(offered_names)} offered names for {len(tools)} tools.")
+    return list(offered_names)
+
+
+def generate_input_formats(
+    tools: list[Node], sanitize_tool_name: Callable[[str], str], *, offered_names: Sequence[str] | None = None
+) -> str:
     """
     Generate formatted input descriptions for each tool.
 
     Args:
         tools: List of tools to generate input formats for
         sanitize_tool_name: Function to sanitize tool names
+        offered_names: The name the model is offered each tool under, in the order of ``tools``. Defaults to
+            ``sanitize_tool_name(tool.name)``.
 
     Returns:
         Formatted string describing input parameters for each tool
     """
     input_formats = []
-    for tool in tools:
+    for tool, tool_name in zip(tools, _tool_names(tools, sanitize_tool_name, offered_names)):
         params = []
         for name, field in _reorder_fields(tool.resolved_input_schema.model_fields):
             if _is_accessible_to_agent(field):
@@ -185,12 +233,16 @@ def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str]
                 description = field.description or "No description"
                 params.append(f"{name} ({type_str}): {description}")
         if params:
-            input_formats.append(f" - {sanitize_tool_name(tool.name)}\n \t* " + "\n\t* ".join(params))
+            input_formats.append(f" - {tool_name}\n \t* " + "\n\t* ".join(params))
     return "\n".join(input_formats)
 
 
 def generate_structured_output_schemas(
-    tools: list[Node], sanitize_tool_name: Callable[[str], str], delegation_allowed: bool
+    tools: list[Node],
+    sanitize_tool_name: Callable[[str], str],
+    delegation_allowed: bool,
+    *,
+    offered_names: Sequence[str] | None = None,
 ) -> dict:
     """
     Generate schema for structured output mode.
@@ -199,11 +251,13 @@ def generate_structured_output_schemas(
         tools: List of tools to generate schema for
         sanitize_tool_name: Function to sanitize tool names
         delegation_allowed: Whether delegation is allowed
+        offered_names: The name the model is offered each tool under, in the order of ``tools``. Defaults to
+            ``sanitize_tool_name(tool.name)``.
 
     Returns:
         Dictionary containing the structured output schema
     """
-    tool_names = [sanitize_tool_name(tool.name) for tool in tools]
+    tool_names = _tool_names(tools, sanitize_tool_name, offered_names)
 
     action_input_description = "Input for chosen action."
 
@@ -317,7 +371,9 @@ def _resolve_type_schema(param: Any, _seen: set | None = None) -> dict[str, Any]
         if _seen is None:
             _seen = set()
         if param in _seen:
-            raise ValueError(f"Self-referencing model {param.__name__} is not supported in tool input schemas.")
+            # A recursive model (a filter tree, nested blocks) is described one level deep; below that
+            # it takes any object, so one such tool cannot stop the agent from building.
+            return {"type": "object"}
         _seen.add(param)
         result = _basemodel_to_schema(param, _seen)
         _seen.discard(param)
@@ -386,6 +442,11 @@ def generate_property_schema(properties: dict, name: str, field: Any) -> None:
 
         if non_null:
             properties[name].update(non_null[0])
+        elif any(p is Any or p is object for p in params):
+            # An untyped parameter (an MCP property without a "type", with a "const" or an unresolved "$ref"
+            # becomes Any) still takes a value; advertised as "null" alone, it could never be set. Other types
+            # without a JSON Schema equivalent (BytesIO, bytes, dates) keep the schema they always had.
+            properties[name]["type"] = "string"
         elif schemas:
             properties[name].update(schemas[0])
         else:
@@ -405,6 +466,8 @@ def generate_function_calling_schemas(
     delegation_allowed: bool,
     sanitize_tool_name: Callable[[str], str],
     response_format: dict | type[BaseModel] | None = None,
+    *,
+    offered_names: Sequence[str] | None = None,
 ) -> list[dict]:
     """
     Generate schemas for function calling mode.
@@ -417,13 +480,15 @@ def generate_function_calling_schemas(
             ``provide_final_answer`` function's ``answer`` property is
             replaced with this schema so the LLM returns structured data
             directly as part of the final answer function call.
+        offered_names: The function name of each tool, in the order of ``tools``. Defaults to
+            ``sanitize_tool_name(tool.name)``.
 
     Returns:
         List of function calling schemas for all tools
     """
     schemas = [build_final_answer_function_schema(response_format)]
 
-    for tool in tools:
+    for tool, tool_name in zip(tools, _tool_names(tools, sanitize_tool_name, offered_names)):
         properties = {}
         required_fields = []
         input_params = tool.resolved_input_schema.model_fields.items()
@@ -454,8 +519,8 @@ def generate_function_calling_schemas(
             schema = {
                 "type": "function",
                 "function": {
-                    "name": sanitize_tool_name(tool.name),
-                    "description": (tool.description or "")[:1024],
+                    "name": tool_name,
+                    "description": split_function_description(tool.description)[0],
                     "parameters": {
                         "type": "object",
                         "properties": properties,
@@ -472,8 +537,8 @@ def generate_function_calling_schemas(
             schema = {
                 "type": "function",
                 "function": {
-                    "name": sanitize_tool_name(tool.name),
-                    "description": (tool.description or "")[:1024],
+                    "name": tool_name,
+                    "description": split_function_description(tool.description)[0],
                     "parameters": {
                         "type": "object",
                         "properties": {
