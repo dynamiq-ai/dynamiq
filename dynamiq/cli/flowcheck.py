@@ -658,6 +658,12 @@ def check_node_settings(node: dict, where: str) -> list:
         for key in ("timeout_seconds", "retry_interval_seconds", "backoff_rate", "max_retry_interval_seconds"):
             if _number_below(handling.get(key), 1):
                 errors.append(f"{where}: error_handling.{key} {handling.get(key)!r} must be at least 1.")
+        ceiling, interval = handling.get("max_retry_interval_seconds"), handling.get("retry_interval_seconds")
+        if _is_number(ceiling) and _is_number(interval) and 1 <= ceiling < interval:
+            errors.append(
+                f"{where}: error_handling.max_retry_interval_seconds {ceiling!r} is below retry_interval_seconds "
+                f"{interval!r}. It caps every wait, so it must be at least the interval."
+            )
         if _number_below(handling.get("max_retries"), 0):
             errors.append(f"{where}: error_handling.max_retries {handling.get('max_retries')!r} must be 0 or more.")
         behavior = handling.get("behavior")
