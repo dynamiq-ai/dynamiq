@@ -57,6 +57,9 @@ OPTIONAL_DEPENDENCIES: dict[str, tuple[str, str]] = {
     "google.cloud.aiplatform_v1": ("google-cloud-aiplatform", "gcp"),
     "google.cloud.documentai": ("google-cloud-documentai", "gcp"),
     "vertexai": ("google-cloud-aiplatform", "gcp"),
+    # After the gcp entries: a failed `from google.cloud import ...` names only google.cloud, which the first
+    # google.cloud entry answers for.
+    "google.cloud.bigquery": ("google-cloud-bigquery", "sql"),
     "rapidfuzz": ("rapidfuzz", "evals"),
     "rouge_score": ("rouge-score", "evals"),
     "sacrebleu": ("sacrebleu", "evals"),

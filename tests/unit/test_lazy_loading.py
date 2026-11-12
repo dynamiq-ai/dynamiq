@@ -43,6 +43,7 @@ DEFERRED_MODULES = [
     "daytona",
     "e2b",
     "google.cloud.aiplatform",
+    "google.cloud.bigquery",
     "google.cloud.documentai",
     "rapidfuzz",
     "sacrebleu",
@@ -177,6 +178,34 @@ def test_a_missing_sdk_is_reported_with_its_extra():
         "Entity 'dynamiq.nodes.writers.qdrant.QdrantDocumentWriter' is not available. "
         "dynamiq.nodes.writers.qdrant.QdrantDocumentWriter needs the 'qdrant-client' package, which is not installed. "
         'Install it with: pip install "dynamiq[vectorstores]"',
+    ]
+
+
+def test_a_missing_bigquery_sdk_is_reported_with_its_extra_in_the_default_install():
+    """With no Google Cloud package installed, the import fails on the google.cloud namespace that they share."""
+    output = run_python(
+        """
+        import sys
+
+        class NoGoogleCloudPackages:
+            def find_spec(self, name, path=None, target=None):
+                if name == "google.cloud" or name.startswith("google.cloud."):
+                    raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+
+        sys.meta_path.insert(0, NoGoogleCloudPackages())
+
+        from dynamiq.connections import BigQuery
+        from dynamiq.connections.managers import ConnectionManager
+
+        try:
+            ConnectionManager().get_connection_client(BigQuery(project="p", service_account_json={}))
+        except ModuleNotFoundError as error:
+            print(error)
+        """
+    )
+    assert output == [
+        "dynamiq.connections.BigQuery needs the 'google-cloud-bigquery' package, which is not installed. "
+        'Install it with: pip install "dynamiq[sql]"'
     ]
 
 

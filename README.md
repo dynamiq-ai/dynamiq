@@ -50,7 +50,7 @@ This installs agents, workflows, every LLM provider, the built-in tools and memo
 | `vectorstores` | Chroma, Elasticsearch, Milvus, OpenSearch, pgvector, Pinecone, Qdrant, Turbopuffer and Weaviate writers, retrievers and memory backends |
 | `files` | HTML and Markdown transformers, Markdown to PDF, PDF page images, the HTML header splitter and the Unstructured converter, plus pdfplumber in the Python tools |
 | `data` | matplotlib and seaborn for charts in the Python tools |
-| `sql` | MySQL, Snowflake and Databricks in the SQL executor |
+| `sql` | MySQL, Snowflake, Databricks and BigQuery in the SQL executor |
 | `browser` | The Stagehand browser tool |
 | `sandboxes` | E2B and Daytona sandboxes and the Python Monty tool |
 | `gcp` | Vertex AI RAG search and the Document AI converter |

@@ -4,7 +4,7 @@ import sys
 import httpx
 import pytest
 
-from dynamiq.connections.connections import Chroma, DatabricksSQL
+from dynamiq.connections.connections import BigQuery, Chroma, DatabricksSQL
 from dynamiq.connections.connections import Http as HttpConnection
 from dynamiq.connections.connections import HTTPMethod
 from dynamiq.connections.connections import OpenAI as OpenAIConnection
@@ -256,8 +256,9 @@ async def test_aclose_awaits_a_close_method_marked_as_a_coroutine():
         (Chroma(host="localhost", port=8000), "chromadb", "vectorstores"),
         (DatabricksSQL(server_hostname="host", http_path="path", access_token="token"), "databricks", "sql"),
         (Snowflake(user="u", password="p", account="a", warehouse="w", database="d", schema="s"), "snowflake", "sql"),
+        (BigQuery(project="p", service_account_json={}), "google.cloud.bigquery", "sql"),
     ],
-    ids=["chroma", "databricks", "snowflake"],
+    ids=["chroma", "databricks", "snowflake", "bigquery"],
 )
 def test_connecting_without_the_sdk_names_the_extra(connection, module, extra, monkeypatch):
     monkeypatch.setitem(sys.modules, module, None)
