@@ -1514,6 +1514,13 @@ def test_the_readers_return_plain_values_a_workflow_can_serialise():
             "pass",
         ),
         ("not (app.amount > app.limit)", {"amount": Decimal("100"), "limit": float("nan")}, "not_evaluated"),
+        ("app.amount * 0.0025 == 62.5", {"amount": Decimal("25000.00")}, "pass"),
+        (
+            "app.dti in [0.36, 0.5] and app.dti is in [0.36] and app.dti not in [0.5]",
+            {"dti": Decimal("0.3600")},
+            "pass",
+        ),
+        ("sum([app.fee, 0.1]) == ([app.fee, 0.1] | sum) == 0.35", {"fee": Decimal("0.25")}, "pass"),
     ],
 )
 def test_a_sql_decimal_meets_a_threshold_written_as_a_float(check, app, status):
@@ -1524,3 +1531,4 @@ def test_a_sql_decimal_meets_a_threshold_written_as_a_float(check, app, status):
 
 def test_an_expression_decides_on_a_sql_decimal_as_a_rule_does():
     assert evaluate("'A' if rate <= 0.0725 else 'B'", rate=Decimal("0.0725")) == "A"
+    assert evaluate("(premium * 0.9) | round(2)", premium=Decimal("2875.50")) == Decimal("2587.95")

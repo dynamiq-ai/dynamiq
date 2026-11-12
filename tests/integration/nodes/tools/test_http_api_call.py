@@ -1,5 +1,8 @@
+import asyncio
 import json
+from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 from dynamiq import Workflow, connections
@@ -113,6 +116,37 @@ def test_a_json_answer_is_read_as_json_also_after_a_yaml_round_trip(requests_moc
 
     for run in (workflow, loaded):
         assert run.run_sync(input_data={}).output["bureau"]["output"]["content"] == {"score": 742}
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+def test_both_clients_send_the_query_string_of_the_url_with_the_params(requests_mock, mode):
+    url = "https://screening.example.com/v1/screen?min_score=0.75"
+    node = HttpApiCall(
+        connection=connections.Http(method="GET", url=url),
+        params={"name": "Ana", "middle_name": None, "is_joint": False},
+    )
+    sent = "https://screening.example.com/v1/screen?min_score=0.75&name=Ana&is_joint=false"
+
+    if mode == "sync":
+        requests_mock.get(url, json={"matches": []})
+        result = node.run(input_data={})
+        assert requests_mock.last_request.url == sent
+    else:
+        requests = []
+
+        def answer(request):
+            requests.append(str(request.url))
+            return httpx.Response(200, json={"matches": []})
+
+        async def run():
+            async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as client:
+                with patch.object(HttpApiCall, "get_async_client", AsyncMock(return_value=client)):
+                    return await node.run_async(input_data={})
+
+        result = asyncio.run(run())
+        assert requests == [sent]
+
+    assert result.status == RunnableStatus.SUCCESS
 
 
 def test_an_agent_can_read_a_json_body_that_arrived_as_bytes(requests_mock):

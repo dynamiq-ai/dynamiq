@@ -3,6 +3,7 @@ import io
 import json
 from typing import Any, ClassVar, Literal
 
+import requests
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from dynamiq.connections import Http as HttpConnection
@@ -199,11 +200,19 @@ class HttpApiCall(ConnectionNode):
         if not url:
             raise ValueError("No url provided.")
         method = input_data.method or self.method or self.connection.method
+        params = {
+            key: str(value).lower() if isinstance(value, bool) else value
+            for key, value in (self.connection.params | self.params | input_data.params).items()
+            if value is not None
+        }
+        # httpx replaces the query string of the URL with the params, where requests adds them to it, so the URL is
+        # built once, the way requests builds it, and both clients send the same one.
+        prepared = requests.PreparedRequest()
+        prepared.prepare_url(url, params)
         kwargs: dict[str, Any] = {
             "method": method,
-            "url": url,
+            "url": prepared.url,
             "headers": self.connection.headers | self.headers | input_data.headers,
-            "params": self.connection.params | self.params | input_data.params,
             "timeout": self.timeout,
         }
         if files:

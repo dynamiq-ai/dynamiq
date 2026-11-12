@@ -16,6 +16,7 @@ from jinja2 import ChainableUndefined, Template, TemplateSyntaxError, Undefined,
 from jinja2.compiler import CodeGenerator, Frame, optimizeconst
 from jinja2.environment import TemplateExpression
 from jinja2.exceptions import TemplateRuntimeError, UndefinedError
+from jinja2.filters import make_attrgetter
 from jinja2.parser import Parser
 from jinja2.runtime import Context
 from jinja2.sandbox import ImmutableSandboxedEnvironment
@@ -500,6 +501,15 @@ def first_present(environment: "RecordSandbox", *values: Any) -> Any:
     return environment.blank(hint="missing value: first_present() found nothing present", exc=MissingValue)
 
 
+def aligned_sum(values: Any, start: Any = 0) -> Any:
+    """`sum`, adding a Decimal and a float as the sandbox's `+` does."""
+    total = start
+    for value in values:
+        left, right = align_decimal_with_float(total, value)
+        total = left + right
+    return total
+
+
 HELPERS: dict[str, Callable[..., Any]] = {
     "has": has,
     "days_between": days_between,
@@ -509,7 +519,7 @@ HELPERS: dict[str, Callable[..., Any]] = {
     "abs": abs,
     "min": min,
     "max": max,
-    "sum": sum,
+    "sum": aligned_sum,
     "round": round,
     "text": text,
     "number": number,
@@ -597,8 +607,19 @@ class RuleUndefined(QuotedUndefined, ChainableUndefined):
     __len__ = __iter__ = __contains__ = Undefined._fail_with_undefined_error
 
 
-# The comparisons by the names Jinja's parser gives them. Membership, `in` and `not in`, stays Python's: it compares a
-# value with the items of whatever holds them, text included, as their own `==` does.
+def _contains(container: Any, item: Any) -> bool:
+    """`item in container`, with the items of a list, a tuple or a set compared with a Decimal or a float item as `==`
+    compares them, so `rate in [0.36, 0.5]` agrees with `rate == 0.36`. Text and mappings keep Python's membership."""
+    if isinstance(item, (Decimal, float)) and isinstance(container, (list, tuple, set, frozenset)):
+        for member in container:
+            left, right = align_decimal_with_float(item, member)
+            if member is item or left == right:
+                return True
+        return False
+    return item in container
+
+
+# The comparisons by the names Jinja's parser gives them.
 _COMPARISONS: dict[str, Callable[[Any, Any], Any]] = {
     "eq": lambda a, b: a == b,
     "ne": lambda a, b: a != b,
@@ -606,6 +627,8 @@ _COMPARISONS: dict[str, Callable[[Any, Any], Any]] = {
     "gteq": lambda a, b: a >= b,
     "lt": lambda a, b: a < b,
     "lteq": lambda a, b: a <= b,
+    "in": lambda a, b: _contains(b, a),
+    "notin": lambda a, b: not _contains(b, a),
 }
 
 # The tests that compare two values, which `select`, `reject`, `selectattr` and `rejectattr` also call by name.
@@ -626,6 +649,14 @@ def compare(left: Any, *links: Any) -> Any:
     return result
 
 
+@pass_environment
+def _sum_filter(environment: Any, values: Any, attribute: str | int | None = None, start: Any = 0) -> Any:
+    """Jinja's `sum` filter, adding as `aligned_sum` does."""
+    if attribute is not None:
+        values = map(make_attrgetter(environment, attribute), values)
+    return aligned_sum(values, start)
+
+
 def _aligning(test: Callable[..., Any]) -> Callable[..., Any]:
     """A comparison test that reads a Decimal beside a float as `compare` does, so `x is le(0.36)` agrees with
     `x <= 0.36`."""
@@ -639,12 +670,12 @@ def _aligning(test: Callable[..., Any]) -> Callable[..., Any]:
 
 class RecordCodeGenerator(CodeGenerator):
     """Jinja's code generator, compiling each comparison to a call of the environment's `compare`, so that a SQL
-    Decimal meets a threshold written as a float. One that holds an `in` or a `not in` stays Python's, and so does
-    every comparison in an async environment, where a function cannot hold the `await` a right side may need."""
+    Decimal meets a threshold written as a float. Every comparison in an async environment stays Python's, as a
+    function cannot hold the `await` a right side may need."""
 
     @optimizeconst
     def visit_Compare(self, node: nodes.Compare, frame: Frame) -> None:
-        if self.environment.is_async or any(operand.op not in _COMPARISONS for operand in node.ops):
+        if self.environment.is_async:
             super().visit_Compare(node, frame)
             return
         self.write("environment.compare(")
@@ -669,16 +700,24 @@ class RecordSandbox(ImmutableSandboxedEnvironment):
     blank: type[Undefined]
     code_generator_class = RecordCodeGenerator
     compare = staticmethod(compare)
+    # Arithmetic reads a Decimal beside a float as a comparison does, so `amount * 0.0025` over a SQL NUMERIC is exact
+    # where it raised a TypeError.
+    intercepted_binops = frozenset(ImmutableSandboxedEnvironment.default_binop_table)
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **{"undefined": QuotedUndefined, **kwargs})
         self.blank = type("Blank", (Blank, self.undefined), {"__slots__": ()})
         self.globals.update(HELPERS)
+        self.filters["sum"] = _sum_filter
         self.tests.update(TESTS)
+        self.tests["in"] = lambda value, seq: _contains(seq, value)
         self.tests.update({name: _refuses_unreadable(test) for name, test in self.tests.items()})
         self.tests.update({name: _aligning(self.tests[name]) for name in _COMPARISON_TESTS})
         for name in _TEXT_FILTERS:
             self.filters[name] = _keeps_blank(self.filters[name])
+
+    def call_binop(self, context: Context, operator: str, left: Any, right: Any) -> Any:
+        return super().call_binop(context, operator, *align_decimal_with_float(left, right))
 
     def getattr(self, obj: Any, attribute: str) -> Any:
         if isinstance(obj, Mapping):
