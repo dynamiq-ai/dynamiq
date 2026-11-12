@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from .bedrock_agentcore_runtime_sandbox import BedrockAgentCoreRuntimeInterpreterTool
     from .bedrock_agentcore_sandbox import BedrockAgentCoreInterpreterTool
     from .bedrock_agentcore_web_search import BedrockAgentCoreWebSearchTool
+    from .boxd_sandbox import BoxdInterpreterTool
     from .composio import Composio
     from .cua_desktop import CuaDesktopTool
     from .cypher_executor import CypherExecutor
@@ -50,6 +51,7 @@ _LAZY_EXPORTS = {
     "BedrockAgentCoreRuntimeInterpreterTool": ".bedrock_agentcore_runtime_sandbox",
     "BedrockAgentCoreInterpreterTool": ".bedrock_agentcore_sandbox",
     "BedrockAgentCoreWebSearchTool": ".bedrock_agentcore_web_search",
+    "BoxdInterpreterTool": ".boxd_sandbox",
     "Composio": ".composio",
     "CuaDesktopTool": ".cua_desktop",
     "CypherExecutor": ".cypher_executor",
@@ -110,6 +112,7 @@ __all__ = [
     "BedrockAgentCoreRuntimeInterpreterTool",
     "BedrockAgentCoreInterpreterTool",
     "BedrockAgentCoreWebSearchTool",
+    "BoxdInterpreterTool",
     "Composio",
     "CuaDesktopTool",
     "CypherExecutor",

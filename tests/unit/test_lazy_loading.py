@@ -40,6 +40,7 @@ DEFERRED_MODULES = [
     "browserbase",
     "playwright",
     "stagehand",
+    "boxd",
     "daytona",
     "e2b",
     "google.cloud.aiplatform",

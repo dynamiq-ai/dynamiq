@@ -1410,6 +1410,27 @@ class Daytona(BaseApiKeyConnection):
         return self._client
 
 
+class Boxd(BaseApiKeyConnection):
+    api_key: str = Field(default_factory=partial(get_env_var, "BOXD_API_KEY"))
+    org: str | None = Field(default_factory=partial(get_env_var, "BOXD_ORG", None))
+    region: str | None = Field(default_factory=partial(get_env_var, "BOXD_REGION", None))
+
+    _client: Any = PrivateAttr(default=None)
+
+    def connect(self):
+        pass
+
+    def get_client(self):
+        """Get or create a cached boxd SDK client instance."""
+        if self._client is None:
+            if not self.api_key:
+                raise ValueError("A boxd API key is required. Set BOXD_API_KEY or pass api_key to the connection.")
+            from boxd import Boxd as BoxdSDK
+
+            self._client = BoxdSDK(api_key=self.api_key, region=self.region)
+        return self._client
+
+
 class HuggingFace(BaseApiKeyConnection):
     api_key: str = Field(default_factory=partial(get_env_var, "HUGGINGFACE_API_KEY"))
 

@@ -55,8 +55,9 @@ This installs agents, workflows, every LLM provider, the built-in tools and memo
 | `sandboxes` | E2B and Daytona sandboxes and the Python Monty tool |
 | `gcp` | Vertex AI RAG search and the Document AI converter |
 | `evals` | The BLEU, ROUGE and string similarity metrics |
+| `boxd` | The boxd sandbox and code interpreter. It can't be installed with `vectorstores` or `all`: boxd needs grpcio 1.80 or later, and weaviate-client an older one |
 | `cua` | The CUA desktop tool (Python 3.12 and 3.13) |
-| `all` | Every extra except `cua` |
+| `all` | Every extra except `boxd` and `cua` |
 
 ```sh
 pip install "dynamiq[vectorstores,files]"
@@ -117,8 +118,9 @@ print(result.output)
 
 ### Simple ReAct Agent with asynchronous execution
 An agent that has access to the E2B Code Interpreter and is capable of solving complex coding tasks. E2B needs the
-`sandboxes` extra. Code sandboxes are also available via Daytona (`DaytonaInterpreterTool`, in the same extra) and
-AWS Bedrock AgentCore Code Interpreter (`BedrockAgentCoreInterpreterTool`, using the standard AWS connection).
+`sandboxes` extra. Code sandboxes are also available via Daytona (`DaytonaInterpreterTool`, in the same extra), AWS
+Bedrock AgentCore Code Interpreter (`BedrockAgentCoreInterpreterTool`, using the standard AWS connection) and
+boxd (`BoxdInterpreterTool` and `BoxdSandbox`, in the `boxd` extra).
 
 ```python
 import asyncio

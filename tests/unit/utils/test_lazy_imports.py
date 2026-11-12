@@ -141,7 +141,8 @@ def test_optional_dependencies_match_pyproject_extras():
     # Never missing: python-dateutil comes with boto3, and pyOpenSSL only pins what snowflake-connector-python installs.
     assert in_extras - mapped == {"python-dateutil", "pyopenssl"}
     (everything,) = extras["all"]
-    assert set(re.fullmatch(r"dynamiq\[(.*)\]", everything)[1].split(",")) == set(extras) - {"all", "cua", "monty"}
+    not_in_all = {"all", "boxd", "cua", "monty"}
+    assert set(re.fullmatch(r"dynamiq\[(.*)\]", everything)[1].split(",")) == set(extras) - not_in_all
 
 
 @pytest.fixture

@@ -560,10 +560,26 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
     def _initialize_persistent_sandbox(self):
         """Initialize the persistent sandbox, install packages, and upload initial files."""
         logger.debug(f"Tool {self.name} - {self.id}: " f"Initializing Persistent Sandbox with timeout {self.timeout}s")
-        self._sandbox = self._create_sandbox_with_retry()
-        self._install_default_packages(self._sandbox)
-        if self.files:
-            self._upload_files(files=self.files, sandbox=self._sandbox)
+        sandbox = self._create_sandbox_with_retry()
+        self._prepare_new_sandbox(sandbox, destroy_on_failure=True)
+        self._sandbox = sandbox
+
+    def _prepare_new_sandbox(self, sandbox: Any, destroy_on_failure: bool) -> None:
+        """Install the default packages and upload the initial files into a sandbox that was just created.
+
+        A sandbox that fails here is not handed to anyone, so it is destroyed rather than left running.
+        """
+        try:
+            self._install_default_packages(sandbox)
+            if self.files:
+                self._upload_files(files=self.files, sandbox=sandbox)
+        except Exception:
+            if destroy_on_failure:
+                try:
+                    self._destroy_sandbox(sandbox)
+                except Exception as e:
+                    logger.warning(f"Tool {self.name} - {self.id}: Failed to destroy sandbox: {e}")
+            raise
 
     def _install_default_packages(self, sandbox: Any) -> None:
         """Install the default packages in the specified sandbox."""
@@ -784,9 +800,7 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
             sandbox = self._sandbox
         else:
             sandbox = self._create_sandbox_with_retry()
-            self._install_default_packages(sandbox)
-            if self.files:
-                self._upload_files(files=self.files, sandbox=sandbox)
+            self._prepare_new_sandbox(sandbox, destroy_on_failure=not self.persistent_sandbox)
 
         tool_data = {
             "tool_session_id": self._get_sandbox_id(sandbox),
