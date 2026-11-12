@@ -15,12 +15,14 @@ from dynamiq.nodes.agents.utils import SummarizationConfig
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.file_tools import FileReadTool
+from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.sandboxes import SandboxConfig
 from dynamiq.sandboxes.base import Sandbox, ShellCommandResult
 from dynamiq.sandboxes.e2b import E2BSandbox
 from dynamiq.sandboxes.tools.shell import SandboxShellTool
+from dynamiq.storages.file import FileStoreConfig, InMemoryFileStore
 
 
 class MockSandbox(Sandbox):
@@ -247,6 +249,39 @@ def test_agent_e2b_sandbox_yaml_roundtrip_no_duplicate_tools(tmp_path):
     assert roundtrip_agent.sandbox is not None
     assert roundtrip_agent.sandbox.enabled
     assert isinstance(roundtrip_agent.sandbox.backend, E2BSandbox)
+
+
+def test_agent_file_store_yaml_roundtrip_no_duplicate_tools(tmp_path):
+    agent = Agent(
+        name="File Store Agent",
+        llm=OpenAI(model="gpt-4o", connection=OpenAIConnection(api_key="test-key")),
+        file_store=FileStoreConfig(enabled=True, backend=InMemoryFileStore(), agent_file_write_enabled=True),
+        tools=[Python(code="def run(input_data): return input_data")],
+    )
+    yaml_path = tmp_path / "agent_file_store.yaml"
+    Workflow(flow=Flow(nodes=[agent])).to_yaml_file(yaml_path)
+
+    loaded_agent = Workflow.from_yaml_file(str(yaml_path), init_components=True).flow.nodes[0]
+
+    assert loaded_agent.file_store.enabled
+    assert [tool.name for tool in loaded_agent.tools] == [tool.name for tool in agent.tools]
+
+
+def test_agent_given_a_file_store_at_run_time_yaml_roundtrip_no_duplicate_tools(tmp_path):
+    """An agent that receives files and has no file store makes an in-memory one, with its file tools, as it runs."""
+    agent = Agent(
+        name="Upload Agent",
+        llm=OpenAI(model="gpt-4o", connection=OpenAIConnection(api_key="test-key")),
+        tools=[Python(code="def run(input_data): return input_data")],
+    )
+    agent._setup_in_memory_file_store_and_tools()
+    yaml_path = tmp_path / "agent_run_time_file_store.yaml"
+    Workflow(flow=Flow(nodes=[agent])).to_yaml_file(yaml_path)
+
+    loaded_agent = Workflow.from_yaml_file(str(yaml_path), init_components=True).flow.nodes[0]
+
+    assert loaded_agent.file_store.enabled
+    assert [tool.name for tool in loaded_agent.tools] == [tool.name for tool in agent.tools]
 
 
 def test_agent_with_sandbox_returns_files(mocker):

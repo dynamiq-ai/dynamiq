@@ -1043,7 +1043,7 @@ def test_binary_tool_results_are_left_alone():
     from dynamiq.nodes.agents.hooks.builtin import iter_strings, map_strings
 
     blob = b"\x00\x01 ann@x.com"
-    assert list(iter_strings({"a": blob})) == [] and map_strings(blob, str.upper) == blob
+    assert list(iter_strings({"a": blob})) == ["a"] and map_strings(blob, str.upper) == blob
     assert map_strings(b"plain", str.upper) == "PLAIN" and map_strings(b"same", lambda text: text) == b"same"
 
 
@@ -1142,7 +1142,21 @@ def test_an_after_model_hook_that_edits_the_output_in_place_is_applied_when_stre
         ("SSN 123-45-6789 4111 1111 1111 1111", "SSN <SSN_1> <CREDIT_CARD_1>"),
         ("+1 415 555 0100 4111 1111 1111 1111", "<PHONE_1> <CREDIT_CARD_1>"),
         ("+1 415 867 5309 4111 1111 1111 1111", "<PHONE_1> <CREDIT_CARD_1>"),
+        ("Card 4111 1111 1111 1111 12/27 CVV 123", "Card <CREDIT_CARD_1> 12/27 CVV 123"),
+        ("Card 4111 1111 1111 1111 123", "Card <CREDIT_CARD_1> 123"),
+        ("Replace 4111111111111111 5555555555554444", "Replace <CREDIT_CARD_1> <CREDIT_CARD_2>"),
+        ("UnionPay 6250 9410 0652 8599 123", "UnionPay <CREDIT_CARD_1>"),
+        ("Ref 1000 1008 4111 1111 1111 1111", "Ref <CREDIT_CARD_1>"),
         ("Order 123456789 epoch 1728230400000 invoice 2026 1006 1844", None),
+        ("IBAN DE98 0409 5461 1139 3095 59 or DE79 0787 7893 2879 2174 21", None),
+        ("IBAN AT61 1904 3002 3457 3201 EUR 500", None),
+        ("IBAN DK5000400440116243", None),
+        ("VI01 4111 1111 1111 1111", "VI01 <CREDIT_CARD_1>"),
+        ("FY26 CORP CARD 4111 1111 1111 1111 EXP 12/27", "FY26 CORP CARD <CREDIT_CARD_1> EXP 12/27"),
+        ("ES91 2100 0418 4502 0005 1332 4111 1111 1111 1111", "ES91 2100 0418 4502 0005 1332 <CREDIT_CARD_1>"),
+        ("AT61 1904 3002 3457 3201 5555 5555 5555 4444", "AT61 1904 3002 3457 3201 <CREDIT_CARD_1>"),
+        ("XX12 3782 822463 10005", "XX12 <CREDIT_CARD_1>"),
+        ("XX00 4111-1111-1111-1111", "XX00 <CREDIT_CARD_1>"),
     ],
 )
 def test_pii_finds_numbers_next_to_each_other_and_ignores_plain_ids(text, expected):
@@ -1150,6 +1164,7 @@ def test_pii_finds_numbers_next_to_each_other_and_ignores_plain_ids(text, expect
 
     masked = PIIHook()._mask(HookContext(), text, "output")
     assert masked == (expected or text)
+    assert PIIHook(action="block")._violates(text) == (expected is not None)
 
 
 def test_pii_restores_only_the_listed_tool_arguments():

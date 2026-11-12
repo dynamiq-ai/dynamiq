@@ -3,6 +3,7 @@ import io
 import json
 from typing import Any, ClassVar, Literal
 
+import requests
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from dynamiq.connections import Http as HttpConnection
@@ -40,6 +41,12 @@ Examples:
 - {"url": "https://api.example.com/data", "method": "GET", "headers": {"Authorization": "Bearer token"}}
 - {"url": "https://api.com/users", "method": "POST", "body": {"name": "John"}}
 - {"url": "https://api.com/upload", "method": "PUT", "files": {"file1.txt": "content1", "file2.pdf": "content2"}}"""
+
+# The answers a later attempt can get past, besides a server error: a resource not there yet, a timeout, a conflict with
+# a request still in flight, a request sent too early and a rate limit. Any other answer comes back the same however
+# often the request is sent, so a declined card or a rejected payment is sent once, even when it says when to try
+# again, and so is a payment the server took under a success code the node does not expect.
+RETRYABLE_STATUS_CODES = frozenset({404, 408, 409, 425, 429})
 
 
 class ResponseType(str, enum.Enum):
@@ -104,6 +111,13 @@ def handle_file_upload(input_data: dict[str, str | bytes] | FileMappedInput) -> 
     return files_data
 
 
+def _query_value(value: Any) -> Any:
+    """``value`` with each boolean in it, alone or in a list, written ``true`` or ``false``, as httpx writes it."""
+    if isinstance(value, (list, tuple)):
+        return [_query_value(item) for item in value]
+    return str(value).lower() if isinstance(value, bool) else value
+
+
 class HttpApiCallInputSchema(BaseModel):
     data: dict = Field(default={}, description="Parameter to provide payload.")
     url: str = Field(default="", description="Parameter to provide endpoint url.")
@@ -156,7 +170,8 @@ class HttpApiCall(ConnectionNode):
         params(dict[str,Any]): The additional query params of request.
         url(str): The endpoint url for sending request
         method(str): The HTTP method for sending request.
-        response_type(ResponseType|str): The type of response content.
+        response_type(ResponseType|str|None): The type of response content. None, the default, reads an answer the
+            server marks as JSON as JSON where it parses, and any other as raw bytes.
     """
 
     name: str = "api-call"
@@ -171,9 +186,20 @@ class HttpApiCall(ConnectionNode):
     params: dict[str, Any] = Field(default_factory=dict)
     url: str = ""
     method: HTTPMethod | None = None
-    response_type: ResponseType | str | None = ResponseType.RAW
+    response_type: ResponseType | str | None = None
     is_files_allowed: bool = True
     input_schema: ClassVar[type[HttpApiCallInputSchema]] = HttpApiCallInputSchema
+
+    @property
+    def to_dict_exclude_params(self):
+        """Leave out a ``response_type`` of None, with which dynamiq 0.73.0 and earlier fail every request.
+
+        A workflow dumped here can run on an older runtime, one not yet upgraded or rolled back to, and each version
+        reads a missing ``response_type`` as its own default.
+        """
+        if self.response_type is None:
+            return super().to_dict_exclude_params | {"response_type": True}
+        return super().to_dict_exclude_params
 
     def _build_request_kwargs(self, input_data: HttpApiCallInputSchema) -> dict[str, Any]:
         """Build the kwargs dict passed to the underlying request call.
@@ -192,11 +218,28 @@ class HttpApiCall(ConnectionNode):
         if not url:
             raise ValueError("No url provided.")
         method = input_data.method or self.method or self.connection.method
+        params = {
+            key: _query_value(value)
+            for key, value in (self.connection.params | self.params | input_data.params).items()
+            if value is not None
+        }
+        # httpx replaces the query string of the URL with the params, where requests adds them to it, so the URL is
+        # built once, the way requests builds it, and both clients send the same one.
+        prepared = requests.PreparedRequest()
+        try:
+            prepared.prepare_url(url, params)
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
+            error = ToolExecutionException(
+                f"Request failed with error: {str(e)}. Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
+            error.retryable = False
+            raise error from e
         kwargs: dict[str, Any] = {
             "method": method,
-            "url": url,
+            "url": prepared.url,
             "headers": self.connection.headers | self.headers | input_data.headers,
-            "params": self.connection.params | self.params | input_data.params,
             "timeout": self.timeout,
         }
         if files:
@@ -216,22 +259,44 @@ class HttpApiCall(ConnectionNode):
         """Validate status and shape the response per response_type."""
         if response.status_code not in self.success_codes:
             logger.error(f"Tool {self.name} - {self.id}: failed to get results.")
-            raise ToolExecutionException(
+            error = ToolExecutionException(
                 f"Request failed with unexpected status code: {response.status_code} and response: {response.text}. "
                 f"Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
+            error.retryable = response.status_code >= 500 or response.status_code in RETRYABLE_STATUS_CODES
+            raise error
 
         response_type = self.response_type
-        if "response_type" not in self.model_fields_set and response.headers.get("content-type") == "application/json":
-            response_type = ResponseType.JSON
-
-        if response_type == ResponseType.TEXT:
+        if response_type is None:
+            media_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+            if media_type == "application/json":
+                # The label is only a guess: middleware that marks every answer as JSON marks an empty body or an error
+                # page too, so a body that does not parse comes back as bytes. Both clients decode the text with the
+                # charset the server declares, and json refuses the byte order mark some servers put first.
+                try:
+                    content = json.loads(response.text.removeprefix("\ufeff"))
+                except ValueError:
+                    content = response.content
+            else:
+                content = response.content
+        elif response_type == ResponseType.TEXT:
             content = response.text
         elif response_type == ResponseType.RAW:
             content = response.content
         elif response_type == ResponseType.JSON:
-            content = response.json()
+            try:
+                content = response.json()
+            except ValueError as e:
+                logger.error(f"Tool {self.name} - {self.id}: failed to read the response as JSON. Error: {str(e)}")
+                error = ToolExecutionException(
+                    f"Request succeeded with status code {response.status_code}, but the response is not valid JSON: "
+                    f"{str(e)}. Response: {response.text}. Please analyze the error and take appropriate action.",
+                    recoverable=True,
+                )
+                # The server took the request, so sending it again could repeat what it did, such as a payment.
+                error.retryable = False
+                raise error from e
         else:
             allowed_types = [item.value for item in ResponseType]
             raise ValueError(

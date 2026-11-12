@@ -1,6 +1,9 @@
 """Built-in hooks, tested directly (no agent loop)."""
 
+import random
+import re
 import time
+from decimal import Decimal
 from typing import ClassVar
 
 import pytest
@@ -82,6 +85,46 @@ def test_pii_masks_tool_results_content_extra_output_and_errors_with_the_same_ma
     assert masked.content == {"rows": ["<EMAIL_1>", "<EMAIL_2>"]} and masked.output == {"raw_response": "to <EMAIL_1>"}
     failed = hook.after_tool(ctx, ToolCall(name="t", input={}), ToolResult(error="400 for new@z.io")).value
     assert failed.error == "400 for <EMAIL_2>"
+
+
+def test_pii_finds_card_numbers_in_dict_keys_and_number_leaves_and_keeps_every_other_value():
+    call = ToolCall(name="http", input={})
+    content = {
+        "card_number": 4111111111111111,
+        "cards_by_pan": {"5555555555554444": "active"},
+        "pan_numeric": Decimal("6011111111111117"),
+        "verified": True,
+        "limit": 1500.5,
+        "count": 3,
+    }
+    masked = HookRunner([PIIHook()]).run(
+        HookPoint.AFTER_TOOL, HookContext(), ToolResult(content=content, output={"status_code": 200}), call=call
+    )
+    assert masked.value.content == {
+        "card_number": "<CREDIT_CARD_1>",
+        "cards_by_pan": {"<CREDIT_CARD_2>": "active"},
+        "pan_numeric": "<CREDIT_CARD_3>",
+        "verified": True,
+        "limit": 1500.5,
+        "count": 3,
+    }
+    assert masked.value.output == {"status_code": 200}
+    blocking = HookRunner([PIIHook(action="block", on=["tool_result"])])
+    for value in ({"card_number": 4111111111111111}, {"5555555555554444": "active"}, [Decimal("6011111111111117")]):
+        with pytest.raises(ToolBlockedException):
+            blocking.run(HookPoint.AFTER_TOOL, HookContext(), ToolResult(content=value), call=call)
+
+
+def test_pii_masks_a_card_after_a_long_run_of_card_candidates_within_the_regex_timeout():
+    # Every four groups make a candidate. Checking them must not count against the scan's timeout: the hook would fail,
+    # and with on_error skip the card would reach the model.
+    rng = random.Random(0)
+    text = " ".join(f"{rng.randrange(10_000):04d}" for _ in range(300_000)) + ". Card 4111 1111 1111 1111"
+    hook = PIIHook(entities=["credit_card"], on_error="skip")
+    masked = HookRunner([hook]).run(
+        HookPoint.AFTER_TOOL, HookContext(), ToolResult(content=text), call=ToolCall(name="http", input={})
+    )
+    assert re.search(r"\. Card <CREDIT_CARD_\d+>$", masked.value.content)
 
 
 def test_pii_output_masks_new_pii_and_restores_only_what_the_user_supplied():
@@ -513,13 +556,14 @@ def test_a_detector_is_called_once_per_text_with_the_whole_tool_result():
             self.calls.append(text)
             return False
 
-    hook = Counting(detector={"connection": HuggingFace(api_key="k")}, max_chars=50)
+    hook = Counting(detector={"connection": HuggingFace(api_key="k")}, max_chars=70)
     result = ToolResult(content=[{"title": "a" * 10, "url": "b" * 10}, {"title": "c" * 10}], output={"raw": "d" * 10})
     HookRunner([hook]).run(HookPoint.AFTER_TOOL, HookContext(), result, call=ToolCall(name="t", input={}))
-    assert len(hook.calls) == 1 and all(part in hook.calls[0] for part in ("a" * 10, "c" * 10, "d" * 10))
+    assert len(hook.calls) == 1
+    assert all(part in hook.calls[0] for part in ("title", "a" * 10, "c" * 10, "raw", "d" * 10))
     hook.calls.clear()
     HookRunner([hook]).run(HookPoint.ON_INPUT, HookContext(), "x" * 120)
-    assert [len(call) for call in hook.calls] == [50, 50, 20]
+    assert [len(call) for call in hook.calls] == [70, 50]
 
 
 def test_masking_hooks_run_before_detectors_at_every_point_whatever_the_list_order():
