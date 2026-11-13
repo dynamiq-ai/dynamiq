@@ -172,8 +172,11 @@ class Qdrant(MemoryBackend):
                 )
             elif filters:
                 documents = self.vector_store.filter_documents(filters=qdrant_filters)
-                if limit:
-                    documents = documents[:limit]
+                # filter_documents has no ordering, so truncating it would keep an arbitrary
+                # subset. Keep the most recent messages, oldest first, like get_all and InMemory.search.
+                documents = sorted(documents, key=lambda doc: (doc.metadata or {}).get("timestamp", 0))
+                if limit and limit > 0:
+                    documents = documents[-limit:]
             else:
                 return []
 
