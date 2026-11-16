@@ -10,8 +10,6 @@ if TYPE_CHECKING:
     from openai import AsyncOpenAI
     from openai import OpenAI as OpenAIClient
 
-# Picks the router among the handlers behind synapse's internal URL, which serves more than the router.
-SYNAPSE_HANDLER_HEADER = "Dynamiq-Synapse-Handler"
 CONNECTION_ID_HEADER = "Dynamiq-Connection-Id"
 
 # What BaseLLM sends for LiteLLM alone: the connection's endpoint, key and headers, which the SDK client holds, and
@@ -30,7 +28,9 @@ class Dynamiq(BaseLLM):
     Attributes:
         connection (DynamiqConnection): The router's address and credentials. Its `url` must be the router's
             OpenAI-compatible base, such as "https://router.getdynamiq.ai/v1", not the platform API the connection
-            defaults to. Its API key, a Dynamiq access key or a router token, and its headers authenticate the calls.
+            defaults to. Its API key, a Dynamiq access key or a router token, authenticates the calls. Its `headers`
+            go with every request as they are, so the platform passes any routing headers the router needs through
+            them; the node adds none of its own.
         model (str): The model's slug in the router's catalog, such as "anthropic/claude-sonnet-5".
         provider_connection_id (str | None): A connection of the project whose provider key the router uses instead
             of Dynamiq's.
@@ -68,7 +68,7 @@ class Dynamiq(BaseLLM):
 
     @property
     def _headers(self) -> dict[str, str]:
-        headers = self.connection.headers | {SYNAPSE_HANDLER_HEADER: "router"}
+        headers = dict(self.connection.headers)
         if self.provider_connection_id:
             headers[CONNECTION_ID_HEADER] = self.provider_connection_id
         return headers

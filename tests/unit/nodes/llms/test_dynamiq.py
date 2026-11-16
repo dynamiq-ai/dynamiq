@@ -176,9 +176,20 @@ class TestRequest:
         [request] = router.requests
         assert str(request.url) == f"{ROUTER_URL}/chat/completions"
         assert request.headers["authorization"] == f"Bearer {TOKEN}"
-        assert request.headers["dynamiq-synapse-handler"] == "router"
+        assert "dynamiq-synapse-handler" not in request.headers
         assert "dynamiq-connection-id" not in request.headers
         assert router.bodies == [{"model": MODEL, "messages": [{"role": "user", "content": "hi"}]}]
+
+    @pytest.mark.parametrize("run_async", [False, True])
+    def test_sends_the_connection_s_headers_as_they_are(self, router, run_async):
+        connection = DynamiqConnection(api_key=TOKEN, url=ROUTER_URL, headers={"Dynamiq-Synapse-Handler": "router"})
+
+        run(make_node(connection=connection), run_async)
+
+        [request] = router.requests
+        assert request.headers["dynamiq-synapse-handler"] == "router"
+        assert request.headers["authorization"] == f"Bearer {TOKEN}"
+        assert "dynamiq-connection-id" not in request.headers
 
     @pytest.mark.asyncio
     async def test_names_the_project_connection_whose_key_the_router_uses(self, router):
@@ -187,7 +198,7 @@ class TestRequest:
         [request] = router.requests
         assert request.headers["dynamiq-connection-id"] == "conn-1"
         assert request.headers["authorization"] == f"Bearer {TOKEN}"
-        assert request.headers["dynamiq-synapse-handler"] == "router"
+        assert "dynamiq-synapse-handler" not in request.headers
 
     @pytest.mark.parametrize("run_async", [False, True])
     def test_takes_the_router_address_from_the_connection_only(self, router, run_async):
