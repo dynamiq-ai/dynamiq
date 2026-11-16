@@ -1,10 +1,11 @@
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pydantic import Field
 
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections.connections import _openai_http_client
-from dynamiq.nodes.llms.base import LLM_DEFAULT_MAX_TOKENS, BaseLLM, ModelInfo
+from dynamiq.nodes.llms.anthropic import AnthropicCacheControl
+from dynamiq.nodes.llms.base import LLM_DEFAULT_MAX_TOKENS, BaseLLM, BaseLLMUsageData, ModelInfo
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -17,6 +18,69 @@ CONNECTION_ID_HEADER = "Dynamiq-Connection-Id"
 _LITELLM_ONLY_PARAMS = frozenset(
     {"allowed_openai_params", "api_base", "api_key", "api_version", "client", "drop_params", "headers", "num_retries"}
 )
+
+# The slugs of models that cache nothing without a breakpoint. The router may serve Claude from Anthropic, Bedrock or
+# Vertex, and converts the markers for each.
+_BREAKPOINT_MODEL_PREFIXES = ("anthropic/",)
+
+# Anthropic rejects a request with more cache breakpoints than this.
+_MAX_CACHE_BREAKPOINTS = 4
+
+
+def _cache_breakpoints(message: dict) -> int:
+    content = message.get("content")
+    if not isinstance(content, list):
+        return 0
+    return sum(1 for part in content if isinstance(part, dict) and part.get("cache_control"))
+
+
+def _with_cache_breakpoint(message: dict, control: dict) -> dict | None:
+    """A copy of `message` with `control` on its last text part, or None when it has no text to mark.
+
+    String content becomes a single text part, since a breakpoint goes on a content part.
+    """
+    content = message.get("content")
+    if isinstance(content, str):
+        return message | {"content": [{"type": "text", "text": content, "cache_control": control}]} if content else None
+    if isinstance(content, list):
+        for index in range(len(content) - 1, -1, -1):
+            part = content[index]
+            if isinstance(part, dict) and part.get("type") == "text" and part.get("text"):
+                parts = list(content)
+                parts[index] = part | {"cache_control": control}
+                return message | {"content": parts}
+    return None
+
+
+def _with_cache_breakpoints(messages: list[dict], cache_control: AnthropicCacheControl) -> list[dict]:
+    """A copy of `messages` with prompt caching breakpoints, as the Anthropic node has LiteLLM place them.
+
+    The last system message with text gets one when `cache_system` is set, and the message at
+    `cache_injection_point_index` gets the rolling one, or the nearest message before it with text, such as the one
+    before an assistant turn that only calls tools. The system breakpoint comes first, so it is the one kept when the
+    request has no room left for both.
+    """
+    control = cache_control.model_dump(exclude_none=True, include={"type", "ttl"})
+    room = _MAX_CACHE_BREAKPOINTS - sum(_cache_breakpoints(message) for message in messages)
+    starts = []
+    if cache_control.cache_system:
+        systems = [index for index, message in enumerate(messages) if message.get("role") == "system"]
+        starts += [index for index in systems if _with_cache_breakpoint(messages[index], control)][-1:]
+    if -len(messages) <= cache_control.cache_injection_point_index < len(messages):
+        starts.append(cache_control.cache_injection_point_index % len(messages))
+
+    marked = list(messages)
+    done: set[int] = set()
+    for start in starts:
+        for index in range(start, -1, -1):
+            if room <= 0 or index in done:
+                break
+            if (message := _with_cache_breakpoint(marked[index], control)) is not None:
+                marked[index] = message
+                done.add(index)
+                room -= 1
+                break
+    return marked
 
 
 class Dynamiq(BaseLLM):
@@ -36,6 +100,10 @@ class Dynamiq(BaseLLM):
             of Dynamiq's.
         model_info (ModelInfo | None): What the model supports. Unset fields take `DEFAULT_MODEL_INFO`, since
             LiteLLM does not know the router's slugs.
+        cache_control (AnthropicCacheControl | Literal[False] | None): Prompt caching config, as on the Anthropic
+            node: breakpoints on the system message and on a rolling message, placed in the messages themselves.
+            None chooses nothing, leaving an Agent free to turn caching on for a model that `supports_prompt_caching`;
+            False opts out.
     """
 
     connection: DynamiqConnection
@@ -43,6 +111,7 @@ class Dynamiq(BaseLLM):
         default=None,
         description="A connection of the project whose provider key the router uses instead of Dynamiq's.",
     )
+    cache_control: AnthropicCacheControl | Literal[False] | None = None
 
     # Input beyond text stays off until `model_info` turns it on. Tools and JSON schema output are on, as BaseLLM
     # assumes for a model it does not know: off, an agent would refuse function calling for every router model.
@@ -122,9 +191,24 @@ class Dynamiq(BaseLLM):
     def is_response_schema_supported(self) -> bool:
         return self._model_capability("supports_response_schema")
 
+    def supports_prompt_caching(self) -> bool:
+        """Whether the model caches nothing without a breakpoint: an "anthropic/" slug, unless `model_info` says."""
+        if self.model_info and self.model_info.supports_prompt_caching is not None:
+            return self.model_info.supports_prompt_caching
+        return self.model.startswith(_BREAKPOINT_MODEL_PREFIXES)
+
     def _tool_params_to_force(self) -> list[str]:
         # The router gets every param the node sends: there is no LiteLLM filter to push tools through.
         return []
+
+    @classmethod
+    def get_usage_data(cls, model: str, completion: Any) -> BaseLLMUsageData:
+        """Usage data, with the cache writes the router reports in OpenAI's `cache_write_tokens`."""
+        usage_data = super().get_usage_data(model, completion)
+        if usage_data.cache_creation_input_tokens is None:
+            details = cls._usage_value(cls._extract_usage(completion), "prompt_tokens_details", None)
+            usage_data.cache_creation_input_tokens = cls._usage_value(details, "cache_write_tokens", None)
+        return usage_data
 
     @classmethod
     def _usage_costs(
@@ -147,6 +231,9 @@ class Dynamiq(BaseLLM):
             for key, value in params.items()
             if value is not None and key not in _LITELLM_ONLY_PARAMS and not (key == "stream" and not value)
         }
+        if self.cache_control and request.get("messages"):
+            # In the messages, since the router drops LiteLLM's cache_control_injection_points.
+            request["messages"] = _with_cache_breakpoints(request["messages"], self.cache_control)
         if "max_tokens" in request:
             request.setdefault("max_completion_tokens", request.pop("max_tokens"))
         thinking = request.pop("thinking", None)

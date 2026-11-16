@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -6,13 +7,14 @@ import httpx
 import litellm
 import pytest
 from openai import OpenAI as OpenAIClient
+from openai.types.chat import ChatCompletion
 
 from dynamiq import Workflow
 from dynamiq.callbacks.streaming import BaseStreamingCallbackHandler, StreamingIteratorCallbackHandler
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.llms import Dynamiq
+from dynamiq.nodes.llms import AnthropicCacheControl, Dynamiq
 from dynamiq.nodes.llms import dynamiq as dynamiq_llm
 from dynamiq.nodes.llms.base import LLM_DEFAULT_MAX_TOKENS, FallbackConfig, FallbackTrigger, ModelInfo
 from dynamiq.nodes.node import ErrorHandling, is_retryable_error
@@ -407,6 +409,130 @@ class TestModelCapabilities:
         assert node.is_vision_supported is True
         assert node.is_function_calling_supported is False
         assert node.is_pdf_input_supported is False
+
+
+EPHEMERAL = {"type": "ephemeral", "ttl": "5m"}
+SYSTEM = {"role": "system", "content": "Be brief."}
+
+
+def text(content: str, cache_control: dict | None = None) -> dict:
+    part = {"type": "text", "text": content}
+    return part | {"cache_control": cache_control} if cache_control else part
+
+
+class TestPromptCaching:
+    def test_marks_the_system_message_and_the_last_message(self, router):
+        prompt = Prompt(messages=[SYSTEM, {"role": "user", "content": "hi"}])
+
+        make_node(prompt=prompt, cache_control=AnthropicCacheControl()).run(input_data={})
+
+        [body] = router.bodies
+        assert body["messages"] == [
+            {"role": "system", "content": [text("Be brief.", EPHEMERAL)]},
+            {"role": "user", "content": [text("hi", EPHEMERAL)]},
+        ]
+        assert "cache_control_injection_points" not in body
+        assert "cache_control" not in body
+
+    @pytest.mark.parametrize("tool_result", [True, False], ids=["tool-result", "tool-calls-only"])
+    def test_marks_a_tool_result_or_the_last_message_with_text_before_a_tool_call(self, router, tool_result):
+        calling = {"role": "assistant", "content": "", "tool_calls": [tool_call("call_1", "search", query="kyiv")]}
+        result = {"role": "tool", "content": "Sunny", "tool_call_id": "call_1"}
+        messages = [SYSTEM, {"role": "user", "content": "Weather?"}, calling] + ([result] if tool_result else [])
+
+        make_node(prompt=Prompt(messages=messages), cache_control=AnthropicCacheControl()).run(input_data={})
+
+        [body] = router.bodies
+        sent = body["messages"]
+        assert sent[0]["content"] == [text("Be brief.", EPHEMERAL)]
+        assert sent[2]["content"] in ("", None)
+        if tool_result:
+            assert sent[1]["content"] == "Weather?"
+            assert sent[3] == {"role": "tool", "content": [text("Sunny", EPHEMERAL)], "tool_call_id": "call_1"}
+        else:
+            assert sent[1]["content"] == [text("Weather?", EPHEMERAL)]
+
+    def test_marks_the_last_text_part_and_leaves_the_caller_s_messages_alone(self):
+        image = {"type": "image_url", "image_url": {"url": "https://example.test/a.png"}}
+        messages = [SYSTEM, {"role": "user", "content": [text("first"), text("second"), image]}]
+        sent_before = copy.deepcopy(messages)
+
+        request, _ = make_node(cache_control=AnthropicCacheControl())._router_request(
+            {"model": MODEL, "messages": messages}
+        )
+
+        assert messages == sent_before
+        assert request["messages"][1]["content"] == [text("first"), text("second", EPHEMERAL), image]
+
+    def test_stays_within_four_breakpoints_keeping_the_system_one(self):
+        marked = [{"role": "user", "content": [text(f"turn {n}", EPHEMERAL)]} for n in range(3)]
+        messages = [SYSTEM, *marked, {"role": "user", "content": "last"}]
+
+        request, _ = make_node(cache_control=AnthropicCacheControl())._router_request(
+            {"model": MODEL, "messages": messages}
+        )
+
+        assert request["messages"][0]["content"] == [text("Be brief.", EPHEMERAL)]
+        assert request["messages"][-1]["content"] == "last"
+
+    def test_reads_cache_reads_and_writes_as_the_router_reports_them(self):
+        details = {"cached_tokens": 4334, "cached_read_tokens": 4334, "cache_write_tokens": 120}
+        usage = {"prompt_tokens": 4487, "completion_tokens": 30, "total_tokens": 4517, "prompt_tokens_details": details}
+        completion = ChatCompletion.construct(id="gen-1", choices=[], created=1, model=MODEL, usage=usage)
+
+        usage_data = Dynamiq.get_usage_data(model=MODEL, completion=completion)
+
+        assert (usage_data.cache_read_input_tokens, usage_data.cache_creation_input_tokens) == (4334, 120)
+
+    @pytest.mark.parametrize("cache_control", [False, None])
+    def test_sends_no_breakpoints_unless_configured(self, router, cache_control):
+        messages = [SYSTEM, {"role": "user", "content": "hi"}]
+
+        make_node(prompt=Prompt(messages=messages), cache_control=cache_control).run(input_data={})
+
+        [body] = router.bodies
+        assert body["messages"] == messages
+
+    @pytest.mark.parametrize(
+        "model, model_info, cached",
+        [
+            ("anthropic/claude-sonnet-5", None, True),
+            ("openai/gpt-6-sol", None, False),
+            (MODEL, None, False),
+            ("anthropic/claude-sonnet-5", ModelInfo(supports_prompt_caching=False), False),
+            (MODEL, ModelInfo(supports_prompt_caching=True), True),
+        ],
+    )
+    def test_an_agent_turns_caching_on_for_models_that_need_breakpoints(self, model, model_info, cached):
+        agent = Agent(name="agent", llm=make_node(model=model, model_info=model_info), tools=[SearchTool()])
+
+        assert agent.llm.cache_control == (AnthropicCacheControl() if cached else None)
+
+    def test_an_agent_on_a_claude_slug_sends_breakpoints(self, router):
+        router.replies = [
+            {"role": "assistant", "content": "", "tool_calls": [tool_call("call_1", "search", thought="t", query="x")]},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [tool_call("call_2", "provide_final_answer", answer="y")],
+            },
+        ]
+        agent = Agent(
+            name="agent",
+            llm=make_node(model="anthropic/claude-sonnet-5"),
+            tools=[SearchTool()],
+            inference_mode=InferenceMode.FUNCTION_CALLING,
+            max_loops=3,
+        )
+
+        result = agent.run(input_data={"input": "Find x."})
+
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        for body in router.bodies:
+            assert body["messages"][0]["role"] == "system"
+            assert body["messages"][0]["content"][-1]["cache_control"] == EPHEMERAL
+            assert body["messages"][-1]["content"][-1]["cache_control"] == EPHEMERAL
+        assert router.bodies[-1]["messages"][-1]["role"] == "tool"
 
 
 @pytest.mark.parametrize("streaming", [False, True])

@@ -103,6 +103,7 @@ class ModelInfo(BaseModel):
     supports_video_input: bool | None = None
     supports_function_calling: bool | None = None
     supports_response_schema: bool | None = None
+    supports_prompt_caching: bool | None = None
 
 
 class FallbackTrigger(str, Enum):
