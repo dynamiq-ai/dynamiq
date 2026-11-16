@@ -23,6 +23,7 @@ from dynamiq.types.streaming import StreamingConfig
 from tests.helpers.agent_hooks import SearchTool
 
 ROUTER_URL = "https://router.test/v1"
+PLATFORM_URL = "https://api.test"
 TOKEN = "router-token"
 # A slug LiteLLM does not know, so nothing here can lean on LiteLLM's tables.
 MODEL = "meta-llama/llama-4-maverick"
@@ -156,7 +157,7 @@ class Collector(BaseStreamingCallbackHandler):
 def make_node(**kwargs) -> Dynamiq:
     kwargs.setdefault("model", MODEL)
     kwargs.setdefault("prompt", Prompt(messages=[{"role": "user", "content": "hi"}]))
-    kwargs.setdefault("connection", DynamiqConnection(api_key=TOKEN, url=ROUTER_URL))
+    kwargs.setdefault("connection", DynamiqConnection(api_key=TOKEN, url=PLATFORM_URL, router_url=ROUTER_URL))
     return Dynamiq(**kwargs)
 
 
@@ -182,7 +183,9 @@ class TestRequest:
 
     @pytest.mark.parametrize("run_async", [False, True])
     def test_sends_the_connection_s_headers_as_they_are(self, router, run_async):
-        connection = DynamiqConnection(api_key=TOKEN, url=ROUTER_URL, headers={"Dynamiq-Synapse-Handler": "router"})
+        connection = DynamiqConnection(
+            api_key=TOKEN, router_url=ROUTER_URL, headers={"Dynamiq-Synapse-Handler": "router"}
+        )
 
         run(make_node(connection=connection), run_async)
 
@@ -201,9 +204,9 @@ class TestRequest:
         assert "dynamiq-synapse-handler" not in request.headers
 
     @pytest.mark.parametrize("run_async", [False, True])
-    def test_takes_the_router_address_from_the_connection_only(self, router, run_async):
+    def test_calls_the_connection_s_router_url_not_its_url(self, router, run_async):
         url = "http://synapse.internal:8080/v1"
-        node = make_node(connection=DynamiqConnection(api_key=TOKEN, url=url))
+        node = make_node(connection=DynamiqConnection(api_key=TOKEN, url=PLATFORM_URL, router_url=url))
 
         result = run(node, run_async)
 
@@ -450,7 +453,7 @@ def test_survives_a_yaml_round_trip(router, tmp_path):
 
     assert isinstance(loaded, Dynamiq)
     assert (loaded.model, loaded.provider_connection_id) == (MODEL, "conn-1")
-    assert loaded.connection.url == ROUTER_URL
+    assert (loaded.connection.url, loaded.connection.router_url) == (PLATFORM_URL, ROUTER_URL)
     assert loaded.model_info.supports_vision is True
     assert loaded.connection.api_key == TOKEN
     loaded.prompt = Prompt(messages=[{"role": "user", "content": "hi"}])

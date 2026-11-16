@@ -211,10 +211,20 @@ class Dynamiq(HttpApiKey):
 
     The base URL and API key can be provided explicitly or sourced from the
     ``DYNAMIQ_URL`` and ``DYNAMIQ_API_KEY`` environment variables.
+
+    Attributes:
+        url (str): The platform API's base URL, which the memory, skills, artifact and knowledge base clients call.
+        api_key (str): The key every call authenticates with.
+        router_url (str): The Dynamiq router's OpenAI-compatible base URL, which the Dynamiq LLM node calls. It
+            defaults to ``DYNAMIQ_ROUTER_URL``, else the public router.
+        headers (dict[str, Any]): Headers sent with every call, with the bearer token and the SDK's User-Agent added.
     """
 
     url: str = Field(default_factory=partial(get_env_var, "DYNAMIQ_URL", "https://api.getdynamiq.ai"))
     api_key: str = Field(default_factory=partial(get_env_var, "DYNAMIQ_API_KEY"))
+    router_url: str = Field(
+        default_factory=partial(get_env_var, "DYNAMIQ_ROUTER_URL", "https://router.getdynamiq.ai/v1")
+    )
     headers: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")

@@ -26,11 +26,11 @@ class Dynamiq(BaseLLM):
     meters it to the caller's project and returns its cost. Requests go through the OpenAI SDK, not LiteLLM.
 
     Attributes:
-        connection (DynamiqConnection): The router's address and credentials. Its `url` must be the router's
-            OpenAI-compatible base, such as "https://router.getdynamiq.ai/v1", not the platform API the connection
-            defaults to. Its API key, a Dynamiq access key or a router token, authenticates the calls. Its `headers`
-            go with every request as they are, so the platform passes any routing headers the router needs through
-            them; the node adds none of its own.
+        connection (DynamiqConnection): The router's address and credentials. The node calls its `router_url`, never
+            its `url`, which is the platform API. On the platform, nexus fills `router_url` with the internal router
+            address; outside it, `router_url` defaults to the public router. Its API key, a Dynamiq access key or a
+            router token, authenticates the calls. Its `headers` go with every request as they are, so the platform
+            passes any routing headers the router needs through them; the node adds none of its own.
         model (str): The model's slug in the router's catalog, such as "anthropic/claude-sonnet-5".
         provider_connection_id (str | None): A connection of the project whose provider key the router uses instead
             of Dynamiq's.
@@ -78,7 +78,7 @@ class Dynamiq(BaseLLM):
 
         return OpenAIClient(
             api_key=self.connection.api_key,
-            base_url=self.connection.url,
+            base_url=self.connection.router_url,
             default_headers=self._headers,
             http_client=_openai_http_client(),
         )
@@ -89,7 +89,7 @@ class Dynamiq(BaseLLM):
 
         return AsyncOpenAI(
             api_key=self.connection.api_key,
-            base_url=self.connection.url,
+            base_url=self.connection.router_url,
             default_headers=self._headers,
             http_client=await self.get_async_client(),
         )
