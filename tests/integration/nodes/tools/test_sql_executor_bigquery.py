@@ -76,7 +76,7 @@ def connection():
         id="bigquery-conn",
         project="analytics-prod",
         location="EU",
-        service_account_json={
+        service_account={
             "private_key": "-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----\n",
             "client_email": "agent@sa-project.iam.gserviceaccount.com",
             "token_uri": "https://oauth2.googleapis.com/token",
@@ -458,7 +458,7 @@ def test_yaml_roundtrip(client, connection, tmp_path):
 
     stored, restored = (yaml.safe_load(path.read_text())["connections"] for path in (yaml_path, roundtrip_path))
     assert stored == restored
-    assert stored["bigquery-conn"]["service_account_json"] == connection.model_dump()["service_account_json"]
+    assert stored["bigquery-conn"]["service_account"] == connection.model_dump()["service_account"]
     assert roundtrip_node.client is client
     assert roundtrip_node.connection.model_dump() == connection.model_dump()
     assert roundtrip_node.max_rows == 50

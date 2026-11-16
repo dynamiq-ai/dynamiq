@@ -800,19 +800,19 @@ class BigQuery(BaseConnection):
             region such as "aws-us-east-1". Without it, BigQuery runs each job where the datasets it reads are.
         maximum_bytes_billed (int | None): The most bytes a query may bill, at least 10 MiB. A query that would bill
             more fails before it runs, without a charge.
-        service_account_json (GoogleCloud): The service account key, as the fields of its JSON key file or as the
+        service_account (GoogleCloud): The service account key, as the fields of its JSON key file or as the
             file's text.
     """
 
     project: str = Field(min_length=1)
     location: str | None = None
     maximum_bytes_billed: int | None = Field(default=None, ge=BIGQUERY_MINIMUM_BYTES_BILLED)
-    service_account_json: GoogleCloud
+    service_account: GoogleCloud
 
     # Keeps key material out of validation errors, and validates a key assigned later the same way.
     model_config = ConfigDict(hide_input_in_errors=True, validate_assignment=True)
 
-    @field_validator("service_account_json", mode="before")
+    @field_validator("service_account", mode="before")
     @classmethod
     def _take_the_key_as_given(cls, key: Any) -> Any:
         """Builds the key from its own fields only: a field it lacks is passed as None, so GoogleCloud does not
@@ -827,7 +827,7 @@ class BigQuery(BaseConnection):
             return dict.fromkeys(GoogleCloud.SERVICE_ACCOUNT_FIELDS) | key
         return key
 
-    @field_serializer("service_account_json")
+    @field_serializer("service_account")
     def _dump_the_key(self, key: GoogleCloud) -> dict[str, str | None]:
         """Dumps only the key's fields: the nested GoogleCloud gets a new id on every build, and ConnectionManager
         caches clients by the dump."""
@@ -840,7 +840,7 @@ class BigQuery(BaseConnection):
         Raises:
             ConnectionError: If the key lacks a field that google-auth needs to sign in.
         """
-        key = self.service_account_json
+        key = self.service_account
         if missing := [field for field in GoogleCloud.SERVICE_ACCOUNT_REQUIRED_FIELDS if not getattr(key, field)]:
             raise ConnectionError(
                 f"The BigQuery connection's service account key has no {', '.join(missing)}. "

@@ -198,7 +198,7 @@ def test_a_missing_bigquery_sdk_is_reported_with_its_extra_in_the_default_instal
         from dynamiq.connections.managers import ConnectionManager
 
         try:
-            ConnectionManager().get_connection_client(BigQuery(project="p", service_account_json={}))
+            ConnectionManager().get_connection_client(BigQuery(project="p", service_account={}))
         except ModuleNotFoundError as error:
             print(error)
         """

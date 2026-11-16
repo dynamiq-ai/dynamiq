@@ -256,7 +256,7 @@ async def test_aclose_awaits_a_close_method_marked_as_a_coroutine():
         (Chroma(host="localhost", port=8000), "chromadb", "vectorstores"),
         (DatabricksSQL(server_hostname="host", http_path="path", access_token="token"), "databricks", "sql"),
         (Snowflake(user="u", password="p", account="a", warehouse="w", database="d", schema="s"), "snowflake", "sql"),
-        (BigQuery(project="p", service_account_json={}), "google.cloud.bigquery", "sql"),
+        (BigQuery(project="p", service_account={}), "google.cloud.bigquery", "sql"),
     ],
     ids=["chroma", "databricks", "snowflake", "bigquery"],
 )

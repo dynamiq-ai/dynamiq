@@ -60,17 +60,17 @@ def test_the_platform_json_builds_the_connection(service_account_key):
         "project": "analytics-prod",
         "location": "europe-west2",
         "maximum_bytes_billed": 1024**3,
-        "service_account_json": service_account_key | {"impersonated_user_email": "someone@example.com"},
+        "service_account": service_account_key | {"impersonated_user_email": "someone@example.com"},
     }
 
     connection = BigQuery(id="bigquery-conn", **payload)
 
     assert connection.type == "dynamiq.connections.BigQuery"
-    assert connection.model_dump(exclude={"id", "type"}) == payload | {"service_account_json": service_account_key}
+    assert connection.model_dump(exclude={"id", "type"}) == payload | {"service_account": service_account_key}
 
 
 def test_connects_as_the_service_account_in_its_key(service_account_key, ambient_credentials):
-    connection = BigQuery(project="analytics-prod", location="EU", service_account_json=service_account_key)
+    connection = BigQuery(project="analytics-prod", location="EU", service_account=service_account_key)
 
     with patch("google.cloud.bigquery.Client") as client_class:
         client = connection.connect()
@@ -85,7 +85,7 @@ def test_connects_as_the_service_account_in_its_key(service_account_key, ambient
 
 def test_the_client_never_looks_up_ambient_credentials(service_account_key, ambient_credentials):
     """The real client looks up Application Default Credentials and a default project when it is given none."""
-    client = BigQuery(project="analytics-prod", service_account_json=service_account_key).connect()
+    client = BigQuery(project="analytics-prod", service_account=service_account_key).connect()
 
     assert client.project == "analytics-prod"
     ambient_credentials.assert_not_called()
@@ -96,7 +96,7 @@ def test_the_client_never_looks_up_ambient_credentials(service_account_key, ambi
 def test_a_key_without_a_required_field_raises_a_connection_error(service_account_key, missing):
     """The GOOGLE_CLOUD_* variables that ambient_credentials sets would complete it, if anything read them."""
     del service_account_key[missing]
-    connection = BigQuery(project="analytics-prod", service_account_json=service_account_key)
+    connection = BigQuery(project="analytics-prod", service_account=service_account_key)
 
     with pytest.raises(ConnectionError, match=f"service account key has no {missing}"):
         connection.connect()
@@ -104,12 +104,12 @@ def test_a_key_without_a_required_field_raises_a_connection_error(service_accoun
 
 def test_an_empty_key_names_every_missing_field():
     with pytest.raises(ConnectionError, match="has no private_key, client_email, token_uri"):
-        BigQuery(project="analytics-prod", service_account_json={}).connect()
+        BigQuery(project="analytics-prod", service_account={}).connect()
 
 
 def test_an_invalid_private_key_raises_a_connection_error(service_account_key):
     service_account_key["private_key"] = "-----BEGIN PRIVATE KEY-----\nc2VjcmV0\n-----END PRIVATE KEY-----\n"
-    connection = BigQuery(project="analytics-prod", service_account_json=service_account_key)
+    connection = BigQuery(project="analytics-prod", service_account=service_account_key)
 
     with pytest.raises(ConnectionError, match="service account key is not valid") as error:
         connection.connect()
@@ -119,29 +119,29 @@ def test_an_invalid_private_key_raises_a_connection_error(service_account_key):
 def test_key_fields_never_come_from_the_environment():
     """The runtime's GOOGLE_CLOUD_* variables fill a GoogleCloud's missing fields, but never a BigQuery key's."""
     runtime_key = GoogleCloud(client_email=KEY_EMAIL)
-    assigned = BigQuery(project="analytics-prod", service_account_json={})
-    assigned.service_account_json = runtime_key
+    assigned = BigQuery(project="analytics-prod", service_account={})
+    assigned.service_account = runtime_key
 
     for connection in (
-        BigQuery(project="analytics-prod", service_account_json={"client_email": KEY_EMAIL}),
-        BigQuery(project="analytics-prod", service_account_json=runtime_key),
+        BigQuery(project="analytics-prod", service_account={"client_email": KEY_EMAIL}),
+        BigQuery(project="analytics-prod", service_account=runtime_key),
         assigned,
     ):
-        assert connection.service_account_json.client_email == KEY_EMAIL
-        assert connection.service_account_json.private_key is None
-        assert connection.model_dump()["service_account_json"]["token_uri"] is None
+        assert connection.service_account.client_email == KEY_EMAIL
+        assert connection.service_account.private_key is None
+        assert connection.model_dump()["service_account"]["token_uri"] is None
 
 
 def test_the_key_can_be_the_text_of_its_json_file(service_account_key):
-    from_text = BigQuery(project="analytics-prod", service_account_json=json.dumps(service_account_key))
-    from_fields = BigQuery(project="analytics-prod", service_account_json=service_account_key)
+    from_text = BigQuery(project="analytics-prod", service_account=json.dumps(service_account_key))
+    from_fields = BigQuery(project="analytics-prod", service_account=service_account_key)
 
     assert from_text.model_dump(exclude={"id"}) == from_fields.model_dump(exclude={"id"})
 
 
 def test_reloading_the_connection_keeps_its_client_cache_key(service_account_key):
     """ConnectionManager keys its clients by the dump, and the runtime builds the connection anew for each run."""
-    payload = {"id": "bigquery-conn", "project": "analytics-prod", "service_account_json": service_account_key}
+    payload = {"id": "bigquery-conn", "project": "analytics-prod", "service_account": service_account_key}
     manager = ConnectionManager()
 
     first, second = BigQuery(**payload), BigQuery(**payload)
@@ -161,12 +161,12 @@ def test_reloading_the_connection_keeps_its_client_cache_key(service_account_key
 )
 def test_invalid_settings_are_rejected(service_account_key, fields):
     with pytest.raises(ValidationError):
-        BigQuery(**({"project": "analytics-prod", "service_account_json": service_account_key} | fields))
+        BigQuery(**({"project": "analytics-prod", "service_account": service_account_key} | fields))
 
 
 def test_the_lowest_bytes_limit_is_what_bigquery_bills_for_a_table(service_account_key):
     connection = BigQuery(
-        project="analytics-prod", maximum_bytes_billed=10 * 1024**2, service_account_json=service_account_key
+        project="analytics-prod", maximum_bytes_billed=10 * 1024**2, service_account=service_account_key
     )
 
     assert connection.maximum_bytes_billed == 10 * 1024**2
@@ -178,6 +178,6 @@ def test_a_validation_error_does_not_quote_the_key(service_account_key):
     cut_off = text[: text.index("-----BEGIN PRIVATE KEY-----") + 60]
 
     with pytest.raises(ValidationError) as error:
-        BigQuery(project="analytics-prod", service_account_json=cut_off)
+        BigQuery(project="analytics-prod", service_account=cut_off)
 
     assert cut_off[-20:] not in str(error.value)
