@@ -52,6 +52,7 @@ from dynamiq.types.streaming import (
     AgentToolData,
     AgentToolInputErrorEventMessageData,
     AgentToolResultEventMessageData,
+    InputStreamingTimeoutError,
     StreamingMode,
 )
 from dynamiq.utils import generate_uuid, serialize_files_in_value
@@ -1498,6 +1499,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     tool_run_id=tool_run_id,
                     **kwargs,
                 )
+            except InputStreamingTimeoutError:
+                # An approval nobody answered in time pauses the run; it is not a summarizer failure.
+                raise
             except (ValueError, RecoverableAgentException) as e:
                 # A call the tool rejects for its input is for the model to correct, with the history intact.
                 if not isinstance(tool, ContextManagerTool) or not self._accepts_input(tool, tool_input):

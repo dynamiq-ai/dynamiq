@@ -171,8 +171,16 @@ class HistoryManagerMixin:
             to_summarize = list(to_summarize) + [to_preserve.pop(0)]
 
         # Summarizing everything only helps when the conversation is what fills the context. When the system
-        # prompt and tool schemas alone exceed the limit, it would summarize the whole history on every loop.
-        if to_summarize == [] and self.is_token_limit_exceeded() and not self.is_fixed_context_over_limit():
+        # prompt and tool schemas alone exceed the limit, it would summarize the whole history on every loop, unless
+        # the request no longer fits the model's context window, which the provider would reject.
+        if (
+            to_summarize == []
+            and self.is_token_limit_exceeded()
+            and (
+                not self.is_fixed_context_over_limit()
+                or self.count_context_tokens()["total"] > self.llm.get_token_limit()
+            )
+        ):
             to_summarize = conversation_history[:last_reply] if last_reply is not None else conversation_history
             to_preserve = [m.copy() for m in conversation_history[len(to_summarize) :]]
 
