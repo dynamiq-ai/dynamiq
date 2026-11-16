@@ -78,8 +78,12 @@ def iter_strings(value: Any) -> Iterator[str]:
             yield from iter_strings(item)
 
 
-def map_strings(value: Any, fn) -> Any:
-    """Copy of a payload with ``fn`` applied to every string leaf (text bytes too: changed ones become ``str``)."""
+def map_strings(value: Any, fn, keys: bool = False) -> Any:
+    """Copy of a payload with ``fn`` applied to every string leaf (text bytes too: changed ones become ``str``).
+
+    With ``keys``, the string keys of a dict are mapped too. A dict whose keys ``fn`` makes equal, as a mask with a
+    fixed replacement can, becomes a list of ``(key, value)`` pairs, so that no entry is lost.
+    """
     if isinstance(value, str):
         return fn(value)
     if isinstance(value, (bytes, bytearray)):
@@ -89,11 +93,15 @@ def map_strings(value: Any, fn) -> Any:
         mapped = fn(text)
         return value if mapped == text else mapped
     if isinstance(value, ToolResult):
-        return ToolResult(map_strings(value.content, fn), map_strings(value.output, fn), map_strings(value.error, fn))
+        return ToolResult(*(map_strings(part, fn, keys) for part in (value.content, value.output, value.error)))
     if isinstance(value, dict):
-        return {key: map_strings(item, fn) for key, item in value.items()}
+        if not keys:
+            return {key: map_strings(item, fn) for key, item in value.items()}
+        pairs = [(fn(key) if isinstance(key, str) else key, map_strings(item, fn, keys)) for key, item in value.items()]
+        mapped = dict(pairs)
+        return mapped if len(mapped) == len(pairs) else pairs
     if isinstance(value, (list, tuple)):
-        return type(value)(map_strings(item, fn) for item in value)
+        return type(value)(map_strings(item, fn, keys) for item in value)
     return value
 
 

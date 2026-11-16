@@ -7,9 +7,10 @@ and ``Skip`` end the evaluation, and an ``Ask`` (``before_tool``) is answered on
 ==============  ==========================================  ===============================================
 Point           When                                        Value (what ``Modify`` replaces)
 ==============  ==========================================  ===============================================
-on_input        once per run; hooks that set                ``str``, the message text, or one text value
-                ``screens_context`` also run on each        of ``context``
-                text value of the run input's ``context``
+on_input        once per run; hooks that set                ``str``, the message text, or one text of
+                ``screens_context`` also run on each        ``context``
+                text of the run input's ``context``,
+                dict keys included
 before_model    every LLM call                              ``list[Message]``, what is sent
 after_model     every LLM call that succeeded               ``dict``, ``{"content", "tool_calls"}``
 before_tool     every tool call (sub-agents included)       the tool input, after ``tool_params`` merging
@@ -270,9 +271,9 @@ class Hook(BaseModel):
             example a PII mapping stays consistent across agents.
         on_error: What to do if the hook itself raises or times out.
         timeout_seconds: Per-call budget; a hook that overruns counts as failed. The worker thread cannot be killed.
-        screens_context: Class attribute. ``on_input`` also runs on each text value of the run input's ``context``,
-            which the system prompt shows the model, so the hook cannot tell it from the message. Off unless a
-            hook class opts in, as the built-in text guards do.
+        screens_context: Class attribute. ``on_input`` also runs on each text of the run input's ``context``, dict
+            keys included, which the system prompt shows the model, so the hook cannot tell it from the message.
+            Off unless a hook class opts in, as the built-in text guards do.
     """
 
     model_config = ConfigDict(extra="forbid")

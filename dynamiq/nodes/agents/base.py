@@ -2193,8 +2193,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         return message.model_copy(update={"content": [VisionMessageTextContent(text=hooked), *media]})
 
     def _apply_input_hooks_to_context(self, input_data: AgentInputSchema, config, **kwargs) -> None:
-        """``on_input`` of the hooks that set ``screens_context`` on each text value of the run input's ``context``,
-        which the system prompt shows the model. A list or dict keeps its shape."""
+        """``on_input`` of the hooks that set ``screens_context`` on each text of the run input's ``context``, dict
+        keys included, which the system prompt shows the model. A list or dict keeps its shape."""
         context = (input_data.model_extra or {}).get("context")
         runner = self._hook_runner()
         pairs = [(key, hook) for key, hook in zip(runner.keys, runner.hooks) if hook.screens_context]
@@ -2205,7 +2205,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         def screen(text: str) -> str:
             return self._run_hooks(HookPoint.ON_INPUT, text, config, runner=screening, **kwargs).value if text else text
 
-        if (hooked := map_strings(context, screen)) != context:
+        if (hooked := map_strings(context, screen, keys=True)) != context:
             self.system_prompt_manager.update_variables({"context": hooked})
 
     def _run_tool(
