@@ -269,7 +269,13 @@ class XMLParser:
 
         text = XMLParser._escape_unbalanced_reserved_tags(text, tags_to_process)
 
-        for tag in tags_to_process:
+        def first_opening(tag: str) -> int:
+            match = re.search(rf"<{re.escape(tag)}[\s>]", text)
+            return match.start() if match else len(text)
+
+        # Outer tags first: a tag opened earlier encloses the ones inside it (an <answer> quoted in an
+        # <action_input>), which its placeholder then hides instead of them being cut out of its content.
+        for tag in sorted(tags_to_process, key=lambda tag: (first_opening(tag), tag)):
             content = XMLParser.extract_content_with_regex_fallback(text, tag)
             if content:
                 tag_pattern = f"<{tag}[^>]*>.*?</{tag}>"

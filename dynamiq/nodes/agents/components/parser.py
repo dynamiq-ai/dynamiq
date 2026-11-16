@@ -9,7 +9,9 @@ from dynamiq.utils.logger import logger
 
 _ACTION_LABEL_RE = re.compile(r"^[ \t]*Action:", re.MULTILINE)
 _ACTION_INPUT_LABEL_RE = re.compile(r"^[ \t]*Action Input:", re.MULTILINE)
-_ANSWER_LABEL_RE = re.compile(r"^[ \t]*(?:Final )?Answer:", re.MULTILINE)
+# Anywhere in a line, as extract_default_final_answer reads it, but not in bold, italics or a heading
+# ("**Answer:**", "### Answer:"): reasoning quoting a labelled line writes it that way.
+_ANSWER_LABEL_RE = re.compile(r"(?<![*_#])(?<!#[ \t])(?<!Final )(?:Final )?Answer:")
 _OBSERVATION_LABEL_RE = re.compile(r"^[ \t]*Observation:", re.MULTILINE)
 _LABELS = ("Thought", "Action Input", "Action", "Final Answer", "Answer", "Output Files", "Observation")
 _BODY_LABELS = ("Action Input", "Final Answer", "Answer")

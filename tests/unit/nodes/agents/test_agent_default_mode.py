@@ -157,6 +157,25 @@ def test_an_answer_line_quoted_in_the_thought_does_not_end_the_run():
     assert result.output["content"] == "ok"
 
 
+@pytest.mark.parametrize("label", ["Answer", "Final Answer"])
+def test_an_answer_label_inside_the_thought_line_is_the_answer(label):
+    example = 'Use this example:\nAction: search\nAction Input: {"query": "example only"}'
+
+    result, _ = run_default([f"Thought: I can explain it. {label}: {example}"])
+
+    assert TOOL_CALLS == []
+    assert result.output["content"] == example
+
+
+def test_a_bold_answer_label_in_the_thought_before_a_tool_call_does_not_end_the_run():
+    action = 'Thought: The FAQ format is: **Answer:** short text\nAction: search\nAction Input: {"query": "faq"}'
+
+    result, _ = run_default([action, "Thought: Done.\nAnswer: ok"])
+
+    assert TOOL_CALLS == [("search", {"query": "faq", "mode": "slow"})]
+    assert result.output["content"] == "ok"
+
+
 def test_labels_inside_an_answer_are_kept_as_written():
     result, _ = run_default(["**Thought:** Done.\n**Answer:** Plan:\n**Action:** buy milk\n### Observation\nnone"])
 
