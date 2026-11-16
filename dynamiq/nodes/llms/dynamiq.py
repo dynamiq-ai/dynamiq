@@ -1,4 +1,3 @@
-from functools import partial
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import Field
@@ -6,14 +5,10 @@ from pydantic import Field
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections.connections import _openai_http_client
 from dynamiq.nodes.llms.base import LLM_DEFAULT_MAX_TOKENS, BaseLLM, ModelInfo
-from dynamiq.utils.env import get_env_var
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
     from openai import OpenAI as OpenAIClient
-
-ROUTER_URL_ENV_VAR = "DYNAMIQ_ROUTER_URL"
-DEFAULT_ROUTER_URL = "https://router.getdynamiq.ai/v1"
 
 # Picks the router among the handlers behind synapse's internal URL, which serves more than the router.
 SYNAPSE_HANDLER_HEADER = "Dynamiq-Synapse-Handler"
@@ -33,10 +28,10 @@ class Dynamiq(BaseLLM):
     meters it to the caller's project and returns its cost. Requests go through the OpenAI SDK, not LiteLLM.
 
     Attributes:
-        connection (DynamiqConnection): Authenticates the calls with its API key, a Dynamiq access key or a router
-            token, and its headers.
+        connection (DynamiqConnection): The router's address and credentials. Its `url` must be the router's
+            OpenAI-compatible base, such as "https://router.getdynamiq.ai/v1", not the platform API the connection
+            defaults to. Its API key, a Dynamiq access key or a router token, and its headers authenticate the calls.
         model (str): The model's slug in the router's catalog, such as "anthropic/claude-sonnet-5".
-        router_url (str): The router's OpenAI-compatible base URL.
         provider_connection_id (str | None): A connection of the project whose provider key the router uses instead
             of Dynamiq's.
         model_info (ModelInfo | None): What the model supports. Unset fields take `DEFAULT_MODEL_INFO`, since
@@ -44,12 +39,6 @@ class Dynamiq(BaseLLM):
     """
 
     connection: DynamiqConnection
-    router_url: str = Field(
-        default_factory=partial(get_env_var, ROUTER_URL_ENV_VAR, DEFAULT_ROUTER_URL),
-        description=(
-            f"The router's OpenAI-compatible base URL. Defaults to {ROUTER_URL_ENV_VAR}, else {DEFAULT_ROUTER_URL}."
-        ),
-    )
     provider_connection_id: str | None = Field(
         default=None,
         description="A connection of the project whose provider key the router uses instead of Dynamiq's.",
@@ -89,7 +78,7 @@ class Dynamiq(BaseLLM):
 
         return OpenAIClient(
             api_key=self.connection.api_key,
-            base_url=self.router_url,
+            base_url=self.connection.url,
             default_headers=self._headers,
             http_client=_openai_http_client(),
         )
@@ -100,7 +89,7 @@ class Dynamiq(BaseLLM):
 
         return AsyncOpenAI(
             api_key=self.connection.api_key,
-            base_url=self.router_url,
+            base_url=self.connection.url,
             default_headers=self._headers,
             http_client=await self.get_async_client(),
         )

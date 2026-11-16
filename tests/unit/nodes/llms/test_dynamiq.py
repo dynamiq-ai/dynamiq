@@ -156,7 +156,8 @@ class Collector(BaseStreamingCallbackHandler):
 def make_node(**kwargs) -> Dynamiq:
     kwargs.setdefault("model", MODEL)
     kwargs.setdefault("prompt", Prompt(messages=[{"role": "user", "content": "hi"}]))
-    return Dynamiq(connection=DynamiqConnection(api_key=TOKEN), router_url=ROUTER_URL, **kwargs)
+    kwargs.setdefault("connection", DynamiqConnection(api_key=TOKEN, url=ROUTER_URL))
+    return Dynamiq(**kwargs)
 
 
 def run(node: Dynamiq, run_async: bool, collector: Collector | None = None):
@@ -188,19 +189,18 @@ class TestRequest:
         assert request.headers["authorization"] == f"Bearer {TOKEN}"
         assert request.headers["dynamiq-synapse-handler"] == "router"
 
-    @pytest.mark.parametrize(
-        "env, url",
-        [(None, dynamiq_llm.DEFAULT_ROUTER_URL), ("http://synapse:8080/v1", "http://synapse:8080/v1")],
-    )
-    def test_router_url_comes_from_the_environment_or_the_default(self, monkeypatch, env, url):
-        if env is None:
-            monkeypatch.delenv(dynamiq_llm.ROUTER_URL_ENV_VAR, raising=False)
-        else:
-            monkeypatch.setenv(dynamiq_llm.ROUTER_URL_ENV_VAR, env)
+    @pytest.mark.parametrize("run_async", [False, True])
+    def test_takes_the_router_address_from_the_connection_only(self, router, run_async):
+        url = "http://synapse.internal:8080/v1"
+        node = make_node(connection=DynamiqConnection(api_key=TOKEN, url=url))
 
-        node = Dynamiq(model=MODEL, connection=DynamiqConnection(api_key=TOKEN))
+        result = run(node, run_async)
 
-        assert node.router_url == url
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        [request] = router.requests
+        assert str(request.url) == f"{url}/chat/completions"
+        assert str(node.client.base_url) == f"{url}/"
+        assert "router_url" not in Dynamiq.model_fields
 
     def test_sends_thinking_as_reasoning_and_top_k_in_the_body(self, router):
         make_node(thinking_enabled=True, budget_tokens=2048, top_k=40).run(input_data={})
@@ -438,7 +438,8 @@ def test_survives_a_yaml_round_trip(router, tmp_path):
     loaded = Workflow.from_yaml_file(str(path), init_components=True).flow.nodes[0]
 
     assert isinstance(loaded, Dynamiq)
-    assert (loaded.model, loaded.router_url, loaded.provider_connection_id) == (MODEL, ROUTER_URL, "conn-1")
+    assert (loaded.model, loaded.provider_connection_id) == (MODEL, "conn-1")
+    assert loaded.connection.url == ROUTER_URL
     assert loaded.model_info.supports_vision is True
     assert loaded.connection.api_key == TOKEN
     loaded.prompt = Prompt(messages=[{"role": "user", "content": "hi"}])
