@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, field_validator
 from dynamiq.components.embedders.base import BaseEmbedder
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.telemetry import emitter as telemetry
 from dynamiq.types import Document
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
@@ -103,6 +104,14 @@ class TextEmbedder(ConnectionNode):
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"text_embedder": True}
 
+    def _report_embedding_meta(self, raw_output: dict, run_kwargs: dict) -> None:
+        """Give the run's span the model and usage that the output leaves out.
+
+        Only telemetry gets them: callbacks already had this run's execute report.
+        """
+        if isinstance(meta := raw_output.get("meta"), dict):
+            telemetry.on_node_execute_run(self, run_kwargs | {"response_data": meta})
+
     def execute(self, input_data: TextEmbedderInputSchema, config: RunnableConfig = None, **kwargs):
         """
         Execute the text embedding process.
@@ -121,6 +130,7 @@ class TextEmbedder(ConnectionNode):
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         raw_output = self.text_embedder.embed_text(input_data.query)
+        self._report_embedding_meta(raw_output, kwargs)
         logger.debug(f"{self.name}: {raw_output['meta']}")
         result = TextEmbeddingOutput(
             embedding=raw_output["embedding"],
@@ -136,6 +146,7 @@ class TextEmbedder(ConnectionNode):
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         raw_output = await self.text_embedder.embed_text_async(input_data.query)
+        self._report_embedding_meta(raw_output, kwargs)
         logger.debug(f"{self.name}: {raw_output['meta']}")
         result = TextEmbeddingOutput(
             embedding=raw_output["embedding"],

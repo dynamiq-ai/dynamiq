@@ -1,0 +1,461 @@
+{
+ "resourceSpans": [
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "dynamiq-golden-fixtures"
+      }
+     }
+    ]
+   },
+   "scopeSpans": [
+    {
+     "scope": {
+      "name": "dynamiq",
+      "version": "0.73.0",
+      "attributes": [
+       {
+        "key": "dynamiq.trace.shape_version",
+        "value": {
+         "intValue": "1"
+        }
+       }
+      ]
+     },
+     "spans": [
+      {
+       "traceId": "3a12fd78505b0ee399429af84a238fbb",
+       "spanId": "9a65379adf679dda",
+       "parentSpanId": "209e16e093ab5b24",
+       "name": "broken",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109918179000",
+       "endTimeUnixNano": "1794496109918707000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "fa7d3610-85c7-43d6-9af0-cd4723607f86"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "broken"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "broken"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "tests.integration.telemetry.Failing"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "utils"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.input",
+         "value": {
+          "stringValue": "{\"value\":1}"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "failed"
+         }
+        },
+        {
+         "key": "error.type",
+         "value": {
+          "stringValue": "RuntimeError"
+         }
+        }
+       ],
+       "events": [
+        {
+         "timeUnixNano": "1794496109918269000",
+         "name": "dynamiq.node.execution",
+         "attributes": [
+          {
+           "key": "dynamiq.execution.id",
+           "value": {
+            "stringValue": "f2f8dbda-ff0d-4101-9f12-cdd008cd8982"
+           }
+          },
+          {
+           "key": "dynamiq.execution.attempt",
+           "value": {
+            "intValue": "1"
+           }
+          },
+          {
+           "key": "dynamiq.execution.status",
+           "value": {
+            "stringValue": "failed"
+           }
+          },
+          {
+           "key": "dynamiq.execution.start_time_unix_nano",
+           "value": {
+            "intValue": "1794496109918231000"
+           }
+          },
+          {
+           "key": "error.type",
+           "value": {
+            "stringValue": "RuntimeError"
+           }
+          },
+          {
+           "key": "exception.message",
+           "value": {
+            "stringValue": "the node broke"
+           }
+          }
+         ]
+        },
+        {
+         "timeUnixNano": "1794496109918706000",
+         "name": "exception",
+         "attributes": [
+          {
+           "key": "exception.type",
+           "value": {
+            "stringValue": "RuntimeError"
+           }
+          },
+          {
+           "key": "exception.message",
+           "value": {
+            "stringValue": "the node broke"
+           }
+          },
+          {
+           "key": "exception.stacktrace",
+           "value": {
+            "stringValue": "Traceback (most recent call last):\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1550, in run_sync\n    output, from_cache = cache(self.execute_with_retry)(transformed_input, config, **merged_kwargs)\n                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/cache/utils.py\", line 74, in wrapper\n    output = func(*args, **kwargs)\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1837, in execute_with_retry\n    raise error\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1807, in execute_with_retry\n    output = self.execute(input_data=input_data, config=config, **merged_kwargs)\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/tests/integration/telemetry/golden_scenarios.py\", line 174, in execute\n    raise RuntimeError(\"the node broke\")\nRuntimeError: the node broke\n"
+           }
+          }
+         ]
+        }
+       ],
+       "status": {
+        "message": "the node broke",
+        "code": 2
+       },
+       "flags": 256
+      },
+      {
+       "traceId": "3a12fd78505b0ee399429af84a238fbb",
+       "spanId": "7e6952f97c266cae",
+       "parentSpanId": "209e16e093ab5b24",
+       "name": "after",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109920385000",
+       "endTimeUnixNano": "1794496109920442000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "5e99f4c6-44d0-407f-92c0-29037e4d1ebb"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "after"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "after"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.operators.Pass"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "operators"
+         }
+        },
+        {
+         "key": "dynamiq.node.depends",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "broken"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.skip",
+         "value": {
+          "stringValue": "{\"failed_dependency\":{\"node\":{\"id\":\"broken\",\"name\":\"broken\",\"type\":\"tests.integration.telemetry.Failing\"},\"option\":null,\"condition\":null,\"trigger\":\"success\"}}"
+         }
+        },
+        {
+         "key": "dynamiq.input",
+         "value": {
+          "stringValue": "{\"value\":1,\"broken\":{\"status\":\"failure\",\"output\":null,\"error\":{\"type\":\"RuntimeError\",\"message\":\"the node broke\",\"recoverable\":false,\"failed_nodes\":[]}}}"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "skipped"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "3a12fd78505b0ee399429af84a238fbb",
+       "spanId": "209e16e093ab5b24",
+       "name": "invoke_workflow Workflow",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109917941000",
+       "endTimeUnixNano": "1794496109922018000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "be93880f-bd3e-4f48-b00a-134b9b8c27d4"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "workflow"
+         }
+        },
+        {
+         "key": "dynamiq.run.is_root",
+         "value": {
+          "boolValue": true
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "invoke_workflow"
+         }
+        },
+        {
+         "key": "gen_ai.workflow.name",
+         "value": {
+          "stringValue": "Workflow"
+         }
+        },
+        {
+         "key": "dynamiq.flow.id",
+         "value": {
+          "stringValue": "flow"
+         }
+        },
+        {
+         "key": "dynamiq.config.run_id",
+         "value": {
+          "stringValue": "f6ea59e9-134a-4359-bf26-0bdac013d082"
+         }
+        },
+        {
+         "key": "dynamiq.workflow.id",
+         "value": {
+          "stringValue": "workflow"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.input",
+         "value": {
+          "stringValue": "{\"value\":1}"
+         }
+        },
+        {
+         "key": "dynamiq.flow.run_id",
+         "value": {
+          "stringValue": "e43d9df4-c1dd-487d-bdf1-cf50a7e94c2f"
+         }
+        },
+        {
+         "key": "dynamiq.failed_nodes",
+         "value": {
+          "stringValue": "[{\"id\":\"broken\",\"name\":\"broken\",\"error_message\":\"the node broke\"}]"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "failed"
+         }
+        },
+        {
+         "key": "error.type",
+         "value": {
+          "stringValue": "FlowNodeFailureException"
+         }
+        }
+       ],
+       "events": [
+        {
+         "timeUnixNano": "1794496109922016000",
+         "name": "exception",
+         "attributes": [
+          {
+           "key": "exception.type",
+           "value": {
+            "stringValue": "FlowNodeFailureException"
+           }
+          },
+          {
+           "key": "exception.message",
+           "value": {
+            "stringValue": "Flow execution failed due to node failures: broken"
+           }
+          },
+          {
+           "key": "exception.stacktrace",
+           "value": {
+            "stringValue": "dynamiq.flows.flow.FlowNodeFailureException: Flow execution failed due to node failures: broken\n"
+           }
+          }
+         ]
+        }
+       ],
+       "status": {
+        "message": "Flow execution failed due to node failures: broken",
+        "code": 2
+       },
+       "flags": 256
+      }
+     ],
+     "schemaUrl": "https://opentelemetry.io/schemas/1.41.1"
+    }
+   ]
+  }
+ ]
+}

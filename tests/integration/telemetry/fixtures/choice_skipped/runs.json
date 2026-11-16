@@ -1,0 +1,755 @@
+[
+  {
+    "id": "3346c8db-6af9-4fc3-8d3a-0774043771aa",
+    "name": "Workflow",
+    "type": "workflow",
+    "trace_id": "4137aeae-70bb-4513-9d72-d6e968d03f50",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.871047+00:00",
+    "end_time": "2026-11-12T15:08:29.882093+00:00",
+    "parent_run_id": null,
+    "status": "succeeded",
+    "input": {
+      "flag": true
+    },
+    "output": {
+      "input": {
+        "status": "success",
+        "input": {
+          "flag": true
+        },
+        "output": {
+          "flag": true
+        }
+      },
+      "choice": {
+        "status": "success",
+        "input": {
+          "flag": true
+        },
+        "output": {
+          "yes": {
+            "status": "success",
+            "input": {
+              "flag": true
+            },
+            "output": true
+          },
+          "no": {
+            "status": "skip",
+            "input": {
+              "flag": true
+            },
+            "output": null
+          }
+        }
+      },
+      "taken": {
+        "status": "success",
+        "input": {
+          "flag": true,
+          "input": {
+            "status": "success",
+            "output": {
+              "flag": true
+            }
+          },
+          "choice": {
+            "status": "success",
+            "output": {
+              "yes": {
+                "status": "success",
+                "input": {
+                  "flag": true
+                },
+                "output": true
+              },
+              "no": {
+                "status": "skip",
+                "input": {
+                  "flag": true
+                },
+                "output": null
+              }
+            }
+          }
+        },
+        "output": {
+          "flag": true,
+          "input": {
+            "status": "success",
+            "output": {
+              "flag": true
+            }
+          },
+          "choice": {
+            "status": "success",
+            "output": {
+              "yes": {
+                "status": "success",
+                "input": {
+                  "flag": true
+                },
+                "output": true
+              },
+              "no": {
+                "status": "skip",
+                "input": {
+                  "flag": true
+                },
+                "output": null
+              }
+            }
+          }
+        }
+      },
+      "skipped": {
+        "status": "skip",
+        "input": {
+          "flag": true,
+          "input": {
+            "status": "success",
+            "output": {
+              "flag": true
+            }
+          },
+          "choice": {
+            "status": "success",
+            "output": {
+              "yes": {
+                "status": "success",
+                "input": {
+                  "flag": true
+                },
+                "output": true
+              },
+              "no": {
+                "status": "skip",
+                "input": {
+                  "flag": true
+                },
+                "output": null
+              }
+            }
+          }
+        },
+        "output": null,
+        "error": {
+          "type": "NodeConditionSkippedException",
+          "message": "Dependency choice option no: skipped",
+          "recoverable": false,
+          "failed_nodes": []
+        }
+      }
+    },
+    "metadata": {
+      "workflow": {
+        "id": "workflow",
+        "version": null
+      }
+    },
+    "error": null,
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "780c55d8-7995-4de3-9125-1870fc0e4b3f",
+    "name": "Flow",
+    "type": "flow",
+    "trace_id": "4137aeae-70bb-4513-9d72-d6e968d03f50",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.871144+00:00",
+    "end_time": "2026-11-12T15:08:29.881898+00:00",
+    "parent_run_id": "3346c8db-6af9-4fc3-8d3a-0774043771aa",
+    "status": "succeeded",
+    "input": {
+      "flag": true
+    },
+    "output": {
+      "input": {
+        "status": "success",
+        "input": {
+          "flag": true
+        },
+        "output": {
+          "flag": true
+        }
+      },
+      "choice": {
+        "status": "success",
+        "input": {
+          "flag": true
+        },
+        "output": {
+          "yes": {
+            "status": "success",
+            "input": {
+              "flag": true
+            },
+            "output": true
+          },
+          "no": {
+            "status": "skip",
+            "input": {
+              "flag": true
+            },
+            "output": null
+          }
+        }
+      },
+      "taken": {
+        "status": "success",
+        "input": {
+          "flag": true,
+          "input": {
+            "status": "success",
+            "output": {
+              "flag": true
+            }
+          },
+          "choice": {
+            "status": "success",
+            "output": {
+              "yes": {
+                "status": "success",
+                "input": {
+                  "flag": true
+                },
+                "output": true
+              },
+              "no": {
+                "status": "skip",
+                "input": {
+                  "flag": true
+                },
+                "output": null
+              }
+            }
+          }
+        },
+        "output": {
+          "flag": true,
+          "input": {
+            "status": "success",
+            "output": {
+              "flag": true
+            }
+          },
+          "choice": {
+            "status": "success",
+            "output": {
+              "yes": {
+                "status": "success",
+                "input": {
+                  "flag": true
+                },
+                "output": true
+              },
+              "no": {
+                "status": "skip",
+                "input": {
+                  "flag": true
+                },
+                "output": null
+              }
+            }
+          }
+        }
+      },
+      "skipped": {
+        "status": "skip",
+        "input": {
+          "flag": true,
+          "input": {
+            "status": "success",
+            "output": {
+              "flag": true
+            }
+          },
+          "choice": {
+            "status": "success",
+            "output": {
+              "yes": {
+                "status": "success",
+                "input": {
+                  "flag": true
+                },
+                "output": true
+              },
+              "no": {
+                "status": "skip",
+                "input": {
+                  "flag": true
+                },
+                "output": null
+              }
+            }
+          }
+        },
+        "output": null,
+        "error": {
+          "type": "NodeConditionSkippedException",
+          "message": "Dependency choice option no: skipped",
+          "recoverable": false,
+          "failed_nodes": []
+        }
+      }
+    },
+    "metadata": {
+      "flow": {
+        "id": "flow"
+      }
+    },
+    "error": null,
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "eabd74e1-4b34-463c-82a9-ea375e64592f",
+    "name": "input",
+    "type": "node",
+    "trace_id": "4137aeae-70bb-4513-9d72-d6e968d03f50",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.871678+00:00",
+    "end_time": "2026-11-12T15:08:29.871824+00:00",
+    "parent_run_id": "780c55d8-7995-4de3-9125-1870fc0e4b3f",
+    "status": "succeeded",
+    "input": {
+      "flag": true
+    },
+    "output": {
+      "flag": true
+    },
+    "metadata": {
+      "node": {
+        "id": "input",
+        "name": "input",
+        "group": "utils",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "transformers": [],
+        "type": "dynamiq.nodes.utils.Input",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {}
+      },
+      "run_depends": [],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "fad49638-1ad0-4dc4-89d7-e421a800a016",
+        "start_time": "2026-11-12T15:08:29.871708+00:00",
+        "end_time": "2026-11-12T15:08:29.871794+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "525fe8cf-4bee-4d4f-9099-0f5311d571c1",
+    "name": "choice",
+    "type": "node",
+    "trace_id": "4137aeae-70bb-4513-9d72-d6e968d03f50",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.875780+00:00",
+    "end_time": "2026-11-12T15:08:29.877459+00:00",
+    "parent_run_id": "780c55d8-7995-4de3-9125-1870fc0e4b3f",
+    "status": "succeeded",
+    "input": {
+      "flag": true
+    },
+    "output": {
+      "yes": {
+        "status": "success",
+        "input": {
+          "flag": true
+        },
+        "output": true
+      },
+      "no": {
+        "status": "skip",
+        "input": {
+          "flag": true
+        },
+        "output": null
+      }
+    },
+    "metadata": {
+      "node": {
+        "id": "choice",
+        "name": "choice",
+        "group": "operators",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "hit_policy": "first",
+        "type": "dynamiq.nodes.operators.Choice",
+        "input_transformer": {
+          "path": null,
+          "selector": {
+            "flag": "$.input.output.flag"
+          }
+        },
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [
+          {
+            "node": {
+              "id": "input",
+              "name": "input",
+              "type": "dynamiq.nodes.utils.Input"
+            },
+            "option": null,
+            "condition": null,
+            "trigger": "success"
+          }
+        ],
+        "input_mapping": {},
+        "options": [
+          {
+            "id": "yes",
+            "name": "yes",
+            "condition": {
+              "variable": "$.flag",
+              "operator": "boolean-equals",
+              "value": true,
+              "is_not": false,
+              "operands": null
+            }
+          },
+          {
+            "id": "no",
+            "name": "no",
+            "condition": null
+          }
+        ]
+      },
+      "run_depends": [],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "73d320f9-3138-4f4b-bc39-b7efe39dea47",
+        "start_time": "2026-11-12T15:08:29.875818+00:00",
+        "end_time": "2026-11-12T15:08:29.877360+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "04873743-ae24-4664-a7de-3909a27114c6",
+    "name": "skipped",
+    "type": "node",
+    "trace_id": "4137aeae-70bb-4513-9d72-d6e968d03f50",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.879109+00:00",
+    "end_time": "2026-11-12T15:08:29.879109+00:00",
+    "parent_run_id": "780c55d8-7995-4de3-9125-1870fc0e4b3f",
+    "status": "skipped",
+    "input": {
+      "flag": true,
+      "input": {
+        "status": "success",
+        "output": {
+          "flag": true
+        }
+      },
+      "choice": {
+        "status": "success",
+        "output": {
+          "yes": {
+            "status": "success",
+            "input": {
+              "flag": true
+            },
+            "output": true
+          },
+          "no": {
+            "status": "skip",
+            "input": {
+              "flag": true
+            },
+            "output": null
+          }
+        }
+      }
+    },
+    "output": null,
+    "metadata": {
+      "node": {
+        "id": "skipped",
+        "name": "skipped",
+        "group": "operators",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "transformers": [],
+        "type": "dynamiq.nodes.operators.Pass",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [
+          {
+            "node": {
+              "id": "choice",
+              "name": "choice",
+              "type": "dynamiq.nodes.operators.Choice"
+            },
+            "option": "no",
+            "condition": null,
+            "trigger": "success"
+          }
+        ],
+        "input_mapping": {}
+      },
+      "run_depends": [],
+      "skip": {
+        "failed_dependency": {
+          "node": {
+            "id": "choice",
+            "name": "choice",
+            "type": "dynamiq.nodes.operators.Choice"
+          },
+          "option": "no",
+          "condition": null,
+          "trigger": "success"
+        }
+      }
+    },
+    "error": null,
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "895f98a1-9eec-4ac6-a582-c7646d15ee41",
+    "name": "taken",
+    "type": "node",
+    "trace_id": "4137aeae-70bb-4513-9d72-d6e968d03f50",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.879318+00:00",
+    "end_time": "2026-11-12T15:08:29.879445+00:00",
+    "parent_run_id": "780c55d8-7995-4de3-9125-1870fc0e4b3f",
+    "status": "succeeded",
+    "input": {
+      "flag": true,
+      "input": {
+        "status": "success",
+        "output": {
+          "flag": true
+        }
+      },
+      "choice": {
+        "status": "success",
+        "output": {
+          "yes": {
+            "status": "success",
+            "input": {
+              "flag": true
+            },
+            "output": true
+          },
+          "no": {
+            "status": "skip",
+            "input": {
+              "flag": true
+            },
+            "output": null
+          }
+        }
+      }
+    },
+    "output": {
+      "flag": true,
+      "input": {
+        "status": "success",
+        "output": {
+          "flag": true
+        }
+      },
+      "choice": {
+        "status": "success",
+        "output": {
+          "yes": {
+            "status": "success",
+            "input": {
+              "flag": true
+            },
+            "output": true
+          },
+          "no": {
+            "status": "skip",
+            "input": {
+              "flag": true
+            },
+            "output": null
+          }
+        }
+      }
+    },
+    "metadata": {
+      "node": {
+        "id": "taken",
+        "name": "taken",
+        "group": "operators",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "transformers": [],
+        "type": "dynamiq.nodes.operators.Pass",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [
+          {
+            "node": {
+              "id": "choice",
+              "name": "choice",
+              "type": "dynamiq.nodes.operators.Choice"
+            },
+            "option": "yes",
+            "condition": null,
+            "trigger": "success"
+          }
+        ],
+        "input_mapping": {}
+      },
+      "run_depends": [],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "7b34e74d-b026-463e-89c9-ce916dcb760a",
+        "start_time": "2026-11-12T15:08:29.879348+00:00",
+        "end_time": "2026-11-12T15:08:29.879406+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  }
+]

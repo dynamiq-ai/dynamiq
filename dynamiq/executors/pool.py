@@ -8,6 +8,7 @@ from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.node import Node, NodeReadyToRun
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
+from dynamiq.telemetry import propagation
 from dynamiq.utils.logger import logger
 
 MAX_WORKERS_THREAD_POOL_EXECUTOR = 8
@@ -193,16 +194,19 @@ class ProcessExecutor(PoolExecutor):
         return jsonpickle.decode(node_data)  # nosec
 
     @classmethod
-    def _run_node(cls, node_data: str, **kwargs) -> RunnableResult:
+    def _run_node(cls, node_data: str, trace_carrier: dict[str, str] | None = None, **kwargs) -> RunnableResult:
         """
         Deserializes node data and runs the node.
 
         Args:
             node_data (str): Serialized node data.
+            trace_carrier (dict[str, str] | None): Trace context of the run that submitted the node, which this
+                process does not share. The node's span continues that trace.
             **kwargs: Additional keyword arguments.
         """
         node_instance = cls.deserialize_node(node_data)
-        return node_instance.run(**kwargs)
+        with propagation.attached_carrier(trace_carrier):
+            return node_instance.run(**kwargs)
 
     def run_node(self, ready_node: NodeReadyToRun, config: RunnableConfig = None, **kwargs):
         """
@@ -216,6 +220,7 @@ class ProcessExecutor(PoolExecutor):
         return self.executor.submit(
             self._run_node,
             node_data=self.serialize_node(ready_node.node),
+            trace_carrier=propagation.carrier_for_run(kwargs.get("parent_run_id")),
             input_data=ready_node.input_data,
             config=config,
             depends_result=ready_node.depends_result,

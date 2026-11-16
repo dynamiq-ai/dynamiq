@@ -714,7 +714,14 @@ class BaseLLM(ConnectionNode):
             result["finish_reason"] = "length"
 
         usage_data = self.get_usage_data(model=self.model, completion=response).model_dump()
-        self.run_on_node_execute_run(callbacks=config.callbacks, usage_data=usage_data, **kwargs)
+        response_data = {
+            "id": getattr(response, "id", None),
+            "model": getattr(response, "model", None),
+            "finish_reasons": [choice.finish_reason for choice in response.choices],
+        }
+        self.run_on_node_execute_run(
+            callbacks=config.callbacks, usage_data=usage_data, response_data=response_data, **kwargs
+        )
 
         # A blocked reply otherwise looks like an empty answer, which agents retry until max_loops.
         if response.choices[0].finish_reason == "content_filter" and not content and not result.get("tool_calls"):

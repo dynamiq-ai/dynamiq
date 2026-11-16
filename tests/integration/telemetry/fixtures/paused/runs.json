@@ -1,0 +1,227 @@
+[
+  {
+    "id": "ab051c04-1f75-45f5-a818-69d58ecad82e",
+    "name": "Workflow",
+    "type": "workflow",
+    "trace_id": "b62596c1-976c-4767-a11f-e02c1a348018",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.899606+00:00",
+    "end_time": "2026-11-12T15:08:29.903577+00:00",
+    "parent_run_id": null,
+    "status": "failed",
+    "input": {
+      "value": 1
+    },
+    "output": null,
+    "metadata": {
+      "workflow": {
+        "id": "workflow",
+        "version": null
+      }
+    },
+    "error": {
+      "message": "Run paused: waiting on gate",
+      "traceback": "NoneType: None\n"
+    },
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "6cea8030-3846-4c9a-ad43-2bc2cad596a0",
+    "name": "Flow",
+    "type": "flow",
+    "trace_id": "b62596c1-976c-4767-a11f-e02c1a348018",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.899762+00:00",
+    "end_time": "2026-11-12T15:08:29.903462+00:00",
+    "parent_run_id": "ab051c04-1f75-45f5-a818-69d58ecad82e",
+    "status": "failed",
+    "input": {
+      "value": 1
+    },
+    "output": null,
+    "metadata": {
+      "flow": {
+        "id": "flow"
+      }
+    },
+    "error": {
+      "message": "Run paused: waiting on gate",
+      "traceback": "NoneType: None\n"
+    },
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "cad33abd-1413-4f5b-b2c0-de223d138f83",
+    "name": "before",
+    "type": "node",
+    "trace_id": "b62596c1-976c-4767-a11f-e02c1a348018",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.899911+00:00",
+    "end_time": "2026-11-12T15:08:29.900021+00:00",
+    "parent_run_id": "6cea8030-3846-4c9a-ad43-2bc2cad596a0",
+    "status": "succeeded",
+    "input": {
+      "value": 1
+    },
+    "output": {
+      "value": 1
+    },
+    "metadata": {
+      "node": {
+        "id": "before",
+        "name": "before",
+        "group": "operators",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "transformers": [],
+        "type": "dynamiq.nodes.operators.Pass",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {}
+      },
+      "run_depends": [],
+      "is_output_from_cache": false,
+      "is_mocked": false
+    },
+    "error": null,
+    "executions": [
+      {
+        "id": "d0c8b273-32f9-4553-b2ab-884262ed480b",
+        "start_time": "2026-11-12T15:08:29.899938+00:00",
+        "end_time": "2026-11-12T15:08:29.899994+00:00",
+        "status": "succeeded",
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "ef0d1b2d-86db-409e-8be4-d6f727aa5197",
+    "name": "gate",
+    "type": "node",
+    "trace_id": "b62596c1-976c-4767-a11f-e02c1a348018",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.901575+00:00",
+    "end_time": "2026-11-12T15:08:29.901679+00:00",
+    "parent_run_id": "6cea8030-3846-4c9a-ad43-2bc2cad596a0",
+    "status": "failed",
+    "input": {
+      "value": 1,
+      "before": {
+        "status": "success",
+        "output": {
+          "value": 1
+        }
+      }
+    },
+    "output": null,
+    "metadata": {
+      "node": {
+        "id": "gate",
+        "name": "gate",
+        "group": "utils",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "type": "tests.integration.telemetry.Pausing",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [
+          {
+            "node": {
+              "id": "before",
+              "name": "before",
+              "type": "dynamiq.nodes.operators.Pass"
+            },
+            "option": null,
+            "condition": null,
+            "trigger": "success"
+          }
+        ],
+        "input_mapping": {}
+      },
+      "run_depends": [],
+      "is_mocked": false
+    },
+    "error": {
+      "message": "waiting for approval",
+      "traceback": "Traceback (most recent call last):\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1550, in run_sync\n    output, from_cache = cache(self.execute_with_retry)(transformed_input, config, **merged_kwargs)\n                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/cache/utils.py\", line 74, in wrapper\n    output = func(*args, **kwargs)\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1807, in execute_with_retry\n    output = self.execute(input_data=input_data, config=config, **merged_kwargs)\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/tests/integration/telemetry/golden_scenarios.py\", line 186, in execute\n    raise RunPausedException(\"waiting for approval\")\ndynamiq.checkpoints.types.RunPausedException: waiting for approval\n"
+    },
+    "executions": [
+      {
+        "id": "681a3bac-d09d-4114-8d6c-38d424422abf",
+        "start_time": "2026-11-12T15:08:29.901602+00:00",
+        "end_time": null,
+        "status": null,
+        "input": null,
+        "output": null,
+        "error": null,
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  }
+]

@@ -1,0 +1,597 @@
+{
+ "resourceSpans": [
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "dynamiq-golden-fixtures"
+      }
+     }
+    ]
+   },
+   "scopeSpans": [
+    {
+     "scope": {
+      "name": "dynamiq",
+      "version": "0.73.0",
+      "attributes": [
+       {
+        "key": "dynamiq.trace.shape_version",
+        "value": {
+         "intValue": "1"
+        }
+       }
+      ]
+     },
+     "spans": [
+      {
+       "traceId": "a0dd90664bbe54accc472052661a90d2",
+       "spanId": "057afddbc81df767",
+       "parentSpanId": "d24178413f1e321b",
+       "name": "input",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109871245000",
+       "endTimeUnixNano": "1794496109871810000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "eabd74e1-4b34-463c-82a9-ea375e64592f"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "input"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "input"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.utils.Input"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "utils"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.input",
+         "value": {
+          "stringValue": "{\"flag\":true}"
+         }
+        },
+        {
+         "key": "dynamiq.node.config",
+         "value": {
+          "stringValue": "{\"id\":\"input\",\"name\":\"input\",\"group\":\"utils\",\"error_handling\":{\"timeout_seconds\":null,\"retry_interval_seconds\":1,\"max_retries\":0,\"backoff_rate\":1,\"max_retry_interval_seconds\":null,\"behavior\":\"raise\"},\"is_postponed_component_init\":false,\"is_optimized_for_agents\":false,\"is_files_allowed\":false,\"is_parallel_execution_allowed\":false,\"is_output_persisted_in_sandbox_allowed\":false,\"input_param_modes\":{},\"callbacks\":[],\"transformers\":[],\"type\":\"dynamiq.nodes.utils.Input\",\"caching\":{\"enabled\":false},\"streaming\":{\"enabled\":false},\"approval\":{\"enabled\":false},\"mock\":{\"enabled\":false},\"depends\":[],\"input_mapping\":{}}"
+         }
+        },
+        {
+         "key": "dynamiq.output",
+         "value": {
+          "stringValue": "{\"flag\":true}"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "a0dd90664bbe54accc472052661a90d2",
+       "spanId": "8313214557071b3b",
+       "parentSpanId": "d24178413f1e321b",
+       "name": "choice",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109873268000",
+       "endTimeUnixNano": "1794496109877436000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "525fe8cf-4bee-4d4f-9099-0f5311d571c1"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "choice"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "choice"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.operators.Choice"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "operators"
+         }
+        },
+        {
+         "key": "dynamiq.node.depends",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "input"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.input",
+         "value": {
+          "stringValue": "{\"flag\":true}"
+         }
+        },
+        {
+         "key": "dynamiq.node.config",
+         "value": {
+          "stringValue": "{\"id\":\"choice\",\"name\":\"choice\",\"group\":\"operators\",\"error_handling\":{\"timeout_seconds\":null,\"retry_interval_seconds\":1,\"max_retries\":0,\"backoff_rate\":1,\"max_retry_interval_seconds\":null,\"behavior\":\"raise\"},\"is_postponed_component_init\":false,\"is_optimized_for_agents\":false,\"is_files_allowed\":false,\"is_parallel_execution_allowed\":false,\"is_output_persisted_in_sandbox_allowed\":false,\"input_param_modes\":{},\"callbacks\":[],\"hit_policy\":\"first\",\"type\":\"dynamiq.nodes.operators.Choice\",\"input_transformer\":{\"path\":null,\"selector\":{\"flag\":\"$.input.output.flag\"}},\"caching\":{\"enabled\":false},\"streaming\":{\"enabled\":false},\"approval\":{\"enabled\":false},\"mock\":{\"enabled\":false},\"depends\":[{\"node\":{\"id\":\"input\",\"name\":\"input\",\"type\":\"dynamiq.nodes.utils.Input\"},\"option\":null,\"condition\":null,\"trigger\":\"success\"}],\"input_mapping\":{},\"options\":[{\"id\":\"yes\",\"name\":\"yes\",\"condition\":{\"variable\":\"$.flag\",\"operator\":\"boolean-equals\",\"value\":true,\"is_not\":false,\"operands\":null}},{\"id\":\"no\",\"name\":\"no\",\"condition\":null}]}"
+         }
+        },
+        {
+         "key": "dynamiq.output",
+         "value": {
+          "stringValue": "{\"yes\":{\"status\":\"success\",\"input\":{\"flag\":true},\"output\":true},\"no\":{\"status\":\"skip\",\"input\":{\"flag\":true},\"output\":null}}"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "a0dd90664bbe54accc472052661a90d2",
+       "spanId": "a045c8d67bb0935f",
+       "parentSpanId": "d24178413f1e321b",
+       "name": "skipped",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109878957000",
+       "endTimeUnixNano": "1794496109879089000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "04873743-ae24-4664-a7de-3909a27114c6"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "skipped"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "skipped"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.operators.Pass"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "operators"
+         }
+        },
+        {
+         "key": "dynamiq.node.depends",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "choice"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.skip",
+         "value": {
+          "stringValue": "{\"failed_dependency\":{\"node\":{\"id\":\"choice\",\"name\":\"choice\",\"type\":\"dynamiq.nodes.operators.Choice\"},\"option\":\"no\",\"condition\":null,\"trigger\":\"success\"}}"
+         }
+        },
+        {
+         "key": "dynamiq.input",
+         "value": {
+          "stringValue": "{\"flag\":true,\"input\":{\"status\":\"success\",\"output\":{\"flag\":true}},\"choice\":{\"status\":\"success\",\"output\":{\"yes\":{\"status\":\"success\",\"input\":{\"flag\":true},\"output\":true},\"no\":{\"status\":\"skip\",\"input\":{\"flag\":true},\"output\":null}}}}"
+         }
+        },
+        {
+         "key": "dynamiq.node.config",
+         "value": {
+          "stringValue": "{\"id\":\"skipped\",\"name\":\"skipped\",\"group\":\"operators\",\"error_handling\":{\"timeout_seconds\":null,\"retry_interval_seconds\":1,\"max_retries\":0,\"backoff_rate\":1,\"max_retry_interval_seconds\":null,\"behavior\":\"raise\"},\"is_postponed_component_init\":false,\"is_optimized_for_agents\":false,\"is_files_allowed\":false,\"is_parallel_execution_allowed\":false,\"is_output_persisted_in_sandbox_allowed\":false,\"input_param_modes\":{},\"callbacks\":[],\"transformers\":[],\"type\":\"dynamiq.nodes.operators.Pass\",\"caching\":{\"enabled\":false},\"streaming\":{\"enabled\":false},\"approval\":{\"enabled\":false},\"mock\":{\"enabled\":false},\"depends\":[{\"node\":{\"id\":\"choice\",\"name\":\"choice\",\"type\":\"dynamiq.nodes.operators.Choice\"},\"option\":\"no\",\"condition\":null,\"trigger\":\"success\"}],\"input_mapping\":{}}"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "skipped"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "a0dd90664bbe54accc472052661a90d2",
+       "spanId": "6d53254b64e64cf6",
+       "parentSpanId": "d24178413f1e321b",
+       "name": "taken",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109879209000",
+       "endTimeUnixNano": "1794496109879431000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "895f98a1-9eec-4ac6-a582-c7646d15ee41"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "node"
+         }
+        },
+        {
+         "key": "dynamiq.node.id",
+         "value": {
+          "stringValue": "taken"
+         }
+        },
+        {
+         "key": "dynamiq.node.name",
+         "value": {
+          "stringValue": "taken"
+         }
+        },
+        {
+         "key": "dynamiq.node.type",
+         "value": {
+          "stringValue": "dynamiq.nodes.operators.Pass"
+         }
+        },
+        {
+         "key": "dynamiq.node.group",
+         "value": {
+          "stringValue": "operators"
+         }
+        },
+        {
+         "key": "dynamiq.node.depends",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "choice"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.input",
+         "value": {
+          "stringValue": "{\"flag\":true,\"input\":{\"status\":\"success\",\"output\":{\"flag\":true}},\"choice\":{\"status\":\"success\",\"output\":{\"yes\":{\"status\":\"success\",\"input\":{\"flag\":true},\"output\":true},\"no\":{\"status\":\"skip\",\"input\":{\"flag\":true},\"output\":null}}}}"
+         }
+        },
+        {
+         "key": "dynamiq.node.config",
+         "value": {
+          "stringValue": "{\"id\":\"taken\",\"name\":\"taken\",\"group\":\"operators\",\"error_handling\":{\"timeout_seconds\":null,\"retry_interval_seconds\":1,\"max_retries\":0,\"backoff_rate\":1,\"max_retry_interval_seconds\":null,\"behavior\":\"raise\"},\"is_postponed_component_init\":false,\"is_optimized_for_agents\":false,\"is_files_allowed\":false,\"is_parallel_execution_allowed\":false,\"is_output_persisted_in_sandbox_allowed\":false,\"input_param_modes\":{},\"callbacks\":[],\"transformers\":[],\"type\":\"dynamiq.nodes.operators.Pass\",\"caching\":{\"enabled\":false},\"streaming\":{\"enabled\":false},\"approval\":{\"enabled\":false},\"mock\":{\"enabled\":false},\"depends\":[{\"node\":{\"id\":\"choice\",\"name\":\"choice\",\"type\":\"dynamiq.nodes.operators.Choice\"},\"option\":\"yes\",\"condition\":null,\"trigger\":\"success\"}],\"input_mapping\":{}}"
+         }
+        },
+        {
+         "key": "dynamiq.output",
+         "value": {
+          "stringValue": "{\"flag\":true,\"input\":{\"status\":\"success\",\"output\":{\"flag\":true}},\"choice\":{\"status\":\"success\",\"output\":{\"yes\":{\"status\":\"success\",\"input\":{\"flag\":true},\"output\":true},\"no\":{\"status\":\"skip\",\"input\":{\"flag\":true},\"output\":null}}}}"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      },
+      {
+       "traceId": "a0dd90664bbe54accc472052661a90d2",
+       "spanId": "d24178413f1e321b",
+       "name": "invoke_workflow Workflow",
+       "kind": 1,
+       "startTimeUnixNano": "1794496109870964000",
+       "endTimeUnixNano": "1794496109882031000",
+       "attributes": [
+        {
+         "key": "dynamiq.run.id",
+         "value": {
+          "stringValue": "3346c8db-6af9-4fc3-8d3a-0774043771aa"
+         }
+        },
+        {
+         "key": "dynamiq.run.type",
+         "value": {
+          "stringValue": "workflow"
+         }
+        },
+        {
+         "key": "dynamiq.run.is_root",
+         "value": {
+          "boolValue": true
+         }
+        },
+        {
+         "key": "gen_ai.operation.name",
+         "value": {
+          "stringValue": "invoke_workflow"
+         }
+        },
+        {
+         "key": "gen_ai.workflow.name",
+         "value": {
+          "stringValue": "Workflow"
+         }
+        },
+        {
+         "key": "dynamiq.flow.id",
+         "value": {
+          "stringValue": "flow"
+         }
+        },
+        {
+         "key": "dynamiq.config.run_id",
+         "value": {
+          "stringValue": "f5bee750-37b4-44bb-b112-048ec611a9af"
+         }
+        },
+        {
+         "key": "dynamiq.workflow.id",
+         "value": {
+          "stringValue": "workflow"
+         }
+        },
+        {
+         "key": "gen_ai.conversation.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "session-golden"
+         }
+        },
+        {
+         "key": "dynamiq.source.id",
+         "value": {
+          "stringValue": "source-golden"
+         }
+        },
+        {
+         "key": "dynamiq.tags",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "golden"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "dynamiq.input",
+         "value": {
+          "stringValue": "{\"flag\":true}"
+         }
+        },
+        {
+         "key": "dynamiq.flow.run_id",
+         "value": {
+          "stringValue": "780c55d8-7995-4de3-9125-1870fc0e4b3f"
+         }
+        },
+        {
+         "key": "dynamiq.output",
+         "value": {
+          "stringValue": "{\"taken\":{\"flag\":true,\"input\":{\"status\":\"success\",\"output\":{\"flag\":true}},\"choice\":{\"status\":\"success\",\"output\":{\"yes\":{\"status\":\"success\",\"input\":{\"flag\":true},\"output\":true},\"no\":{\"status\":\"skip\",\"input\":{\"flag\":true},\"output\":null}}}},\"skipped\":null}"
+         }
+        },
+        {
+         "key": "dynamiq.run.status",
+         "value": {
+          "stringValue": "succeeded"
+         }
+        }
+       ],
+       "status": {},
+       "flags": 256
+      }
+     ],
+     "schemaUrl": "https://opentelemetry.io/schemas/1.41.1"
+    }
+   ]
+  }
+ ]
+}

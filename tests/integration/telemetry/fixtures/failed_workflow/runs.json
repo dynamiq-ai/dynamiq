@@ -1,0 +1,245 @@
+[
+  {
+    "id": "be93880f-bd3e-4f48-b00a-134b9b8c27d4",
+    "name": "Workflow",
+    "type": "workflow",
+    "trace_id": "21cd111d-95fc-4c7f-bb22-f4637701257f",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.918001+00:00",
+    "end_time": "2026-11-12T15:08:29.922056+00:00",
+    "parent_run_id": null,
+    "status": "failed",
+    "input": {
+      "value": 1
+    },
+    "output": null,
+    "metadata": {
+      "workflow": {
+        "id": "workflow",
+        "version": null
+      },
+      "failed_nodes": [
+        {
+          "id": "broken",
+          "name": "broken",
+          "error_message": "the node broke"
+        }
+      ]
+    },
+    "error": {
+      "message": "Flow execution failed due to node failures: broken",
+      "traceback": "NoneType: None\n"
+    },
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "e43d9df4-c1dd-487d-bdf1-cf50a7e94c2f",
+    "name": "Flow",
+    "type": "flow",
+    "trace_id": "21cd111d-95fc-4c7f-bb22-f4637701257f",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.918075+00:00",
+    "end_time": "2026-11-12T15:08:29.921909+00:00",
+    "parent_run_id": "be93880f-bd3e-4f48-b00a-134b9b8c27d4",
+    "status": "failed",
+    "input": {
+      "value": 1
+    },
+    "output": null,
+    "metadata": {
+      "flow": {
+        "id": "flow"
+      },
+      "failed_nodes": [
+        {
+          "id": "broken",
+          "name": "broken",
+          "error_message": "the node broke"
+        }
+      ]
+    },
+    "error": {
+      "message": "Flow execution failed due to node failures: broken",
+      "traceback": "NoneType: None\n"
+    },
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "fa7d3610-85c7-43d6-9af0-cd4723607f86",
+    "name": "broken",
+    "type": "node",
+    "trace_id": "21cd111d-95fc-4c7f-bb22-f4637701257f",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.918216+00:00",
+    "end_time": "2026-11-12T15:08:29.918724+00:00",
+    "parent_run_id": "e43d9df4-c1dd-487d-bdf1-cf50a7e94c2f",
+    "status": "failed",
+    "input": {
+      "value": 1
+    },
+    "output": null,
+    "metadata": {
+      "node": {
+        "id": "broken",
+        "name": "broken",
+        "group": "utils",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "type": "tests.integration.telemetry.Failing",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [],
+        "input_mapping": {}
+      },
+      "run_depends": [],
+      "is_mocked": false
+    },
+    "error": {
+      "message": "the node broke",
+      "traceback": "Traceback (most recent call last):\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1550, in run_sync\n    output, from_cache = cache(self.execute_with_retry)(transformed_input, config, **merged_kwargs)\n                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/cache/utils.py\", line 74, in wrapper\n    output = func(*args, **kwargs)\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1837, in execute_with_retry\n    raise error\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1807, in execute_with_retry\n    output = self.execute(input_data=input_data, config=config, **merged_kwargs)\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/tests/integration/telemetry/golden_scenarios.py\", line 174, in execute\n    raise RuntimeError(\"the node broke\")\nRuntimeError: the node broke\n"
+    },
+    "executions": [
+      {
+        "id": "f2f8dbda-ff0d-4101-9f12-cdd008cd8982",
+        "start_time": "2026-11-12T15:08:29.918243+00:00",
+        "end_time": "2026-11-12T15:08:29.918282+00:00",
+        "status": "failed",
+        "input": null,
+        "output": null,
+        "error": {
+          "message": "the node broke",
+          "traceback": "Traceback (most recent call last):\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/dynamiq/nodes/node.py\", line 1807, in execute_with_retry\n    output = self.execute(input_data=input_data, config=config, **merged_kwargs)\n  File \"/Users/yaroslav/.t3/worktrees/dynamiq/t3-d64be07b-50359cf045847326/tests/integration/telemetry/golden_scenarios.py\", line 174, in execute\n    raise RuntimeError(\"the node broke\")\nRuntimeError: the node broke\n"
+        },
+        "metadata": {}
+      }
+    ],
+    "tags": [
+      "golden"
+    ]
+  },
+  {
+    "id": "5e99f4c6-44d0-407f-92c0-29037e4d1ebb",
+    "name": "after",
+    "type": "node",
+    "trace_id": "21cd111d-95fc-4c7f-bb22-f4637701257f",
+    "source_id": "source-golden",
+    "session_id": "session-golden",
+    "start_time": "2026-11-12T15:08:29.920461+00:00",
+    "end_time": "2026-11-12T15:08:29.920461+00:00",
+    "parent_run_id": "e43d9df4-c1dd-487d-bdf1-cf50a7e94c2f",
+    "status": "skipped",
+    "input": {
+      "value": 1,
+      "broken": {
+        "status": "failure",
+        "output": null,
+        "error": {
+          "type": "RuntimeError",
+          "message": "the node broke",
+          "recoverable": false,
+          "failed_nodes": []
+        }
+      }
+    },
+    "output": null,
+    "metadata": {
+      "node": {
+        "id": "after",
+        "name": "after",
+        "group": "operators",
+        "error_handling": {
+          "timeout_seconds": null,
+          "retry_interval_seconds": 1,
+          "max_retries": 0,
+          "backoff_rate": 1,
+          "max_retry_interval_seconds": null,
+          "behavior": "raise"
+        },
+        "is_postponed_component_init": false,
+        "is_optimized_for_agents": false,
+        "is_files_allowed": false,
+        "is_parallel_execution_allowed": false,
+        "is_output_persisted_in_sandbox_allowed": false,
+        "input_param_modes": {},
+        "callbacks": [],
+        "transformers": [],
+        "type": "dynamiq.nodes.operators.Pass",
+        "caching": {
+          "enabled": false
+        },
+        "streaming": {
+          "enabled": false
+        },
+        "approval": {
+          "enabled": false
+        },
+        "mock": {
+          "enabled": false
+        },
+        "depends": [
+          {
+            "node": {
+              "id": "broken",
+              "name": "broken",
+              "type": "tests.integration.telemetry.Failing"
+            },
+            "option": null,
+            "condition": null,
+            "trigger": "success"
+          }
+        ],
+        "input_mapping": {}
+      },
+      "run_depends": [],
+      "skip": {
+        "failed_dependency": {
+          "node": {
+            "id": "broken",
+            "name": "broken",
+            "type": "tests.integration.telemetry.Failing"
+          },
+          "option": null,
+          "condition": null,
+          "trigger": "success"
+        }
+      }
+    },
+    "error": null,
+    "executions": [],
+    "tags": [
+      "golden"
+    ]
+  }
+]

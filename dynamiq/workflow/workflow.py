@@ -14,6 +14,7 @@ from dynamiq.flows import BaseFlow, Flow
 from dynamiq.nodes import Node
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableFailedNodeInfo, RunnableResultError
+from dynamiq.telemetry import emitter as telemetry
 from dynamiq.types.cancellation import CanceledException
 from dynamiq.utils import format_duration, generate_uuid, merge
 from dynamiq.utils.logger import logger
@@ -224,28 +225,38 @@ class Workflow(BaseModel, Runnable):
         logger.info(f"Workflow {self.id}: execution started.")
 
         merged_kwargs = merge(kwargs, {"run_id": run_id, "wf_run_id": getattr(config, "run_id", None)})
-        self.run_on_workflow_start(input_data, config, **merged_kwargs)
-        time_start = datetime.now()
+        try:
+            self.run_on_workflow_start(input_data, config, **merged_kwargs)
+            time_start = datetime.now()
 
-        flow_kwargs = merge(merged_kwargs, {"parent_run_id": run_id})
-        result = self.flow.run_sync(input_data, config, resume_from=resume_from, **flow_kwargs)
-        if result.status == RunnableStatus.SUCCESS:
-            self.run_on_workflow_end(result.output, config, **merged_kwargs)
-            logger.info(f"Workflow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
-        elif result.status == RunnableStatus.CANCELED:
-            self.run_on_workflow_canceled(config, **merged_kwargs)
-            logger.info(f"Workflow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
-            return RunnableResult(status=RunnableStatus.CANCELED, input=None, output=None, error=result.error)
-        else:
-            error = result.error.type(result.error.message)
-            failed_nodes: list[RunnableFailedNodeInfo] = result.error.failed_nodes
-            self.run_on_workflow_error(error, config, failed_nodes=failed_nodes, **merged_kwargs)
-            if isinstance(error, RunPausedException):
+            flow_kwargs = merge(merged_kwargs, {"parent_run_id": run_id})
+            result = self.flow.run_sync(input_data, config, resume_from=resume_from, **flow_kwargs)
+            if result.status == RunnableStatus.SUCCESS:
+                self.run_on_workflow_end(result.output, config, **merged_kwargs)
                 logger.info(
-                    f"Workflow {self.id}: execution paused after {format_duration(time_start, datetime.now())}."
+                    f"Workflow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}."
                 )
+            elif result.status == RunnableStatus.CANCELED:
+                self.run_on_workflow_canceled(config, **merged_kwargs)
+                logger.info(f"Workflow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
+                return RunnableResult(status=RunnableStatus.CANCELED, input=None, output=None, error=result.error)
             else:
-                logger.error(f"Workflow {self.id}: execution failed in {format_duration(time_start, datetime.now())}.")
+                error = result.error.type(result.error.message)
+                failed_nodes: list[RunnableFailedNodeInfo] = result.error.failed_nodes
+                self.run_on_workflow_error(error, config, failed_nodes=failed_nodes, **merged_kwargs)
+                if isinstance(error, RunPausedException):
+                    logger.info(
+                        f"Workflow {self.id}: execution paused after {format_duration(time_start, datetime.now())}."
+                    )
+                else:
+                    logger.error(
+                        f"Workflow {self.id}: execution failed in {format_duration(time_start, datetime.now())}."
+                    )
+        except BaseException as e:
+            # The workflow span has no other way to end when the run raises instead of returning a result, as a
+            # flow does that cannot find the checkpoint to resume from.
+            telemetry.ensure_run_ended(run_id, e)
+            raise
 
         return RunnableResult(status=result.status, input=input_data, output=result.output, error=result.error)
 
@@ -272,54 +283,63 @@ class Workflow(BaseModel, Runnable):
         logger.info(f"Workflow {self.id}: execution started.")
 
         merged_kwargs = merge(kwargs, {"run_id": run_id, "wf_run_id": getattr(config, "run_id", None)})
-        self.run_on_workflow_start(input_data, config, **merged_kwargs)
-        time_start = datetime.now()
-
-        flow_kwargs = merge(merged_kwargs, {"parent_run_id": run_id})
         try:
-            result = await self.flow.run_async(input_data, config, resume_from=resume_from, **flow_kwargs)
-        except asyncio.CancelledError:
-            if config and config.cancellation and config.cancellation.token:
-                config.cancellation.token.cancel()
-            current = asyncio.current_task()
-            if current is not None and hasattr(current, "uncancel"):
-                try:
-                    current.uncancel()
-                except Exception:  # nosec
-                    pass
-            self.run_on_workflow_canceled(config, **merged_kwargs)
-            logger.info(f"Workflow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
-            return RunnableResult(
-                status=RunnableStatus.CANCELED,
-                input=None,
-                output=None,
-                error=RunnableResultError(
-                    type=CanceledException,
-                    message=f"Workflow '{self.name}' was canceled during execution",
-                ),
-            )
+            self.run_on_workflow_start(input_data, config, **merged_kwargs)
+            time_start = datetime.now()
 
-        if result.status == RunnableStatus.SUCCESS:
-            self.run_on_workflow_end(result.output, config, **merged_kwargs)
-            logger.info(f"Workflow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
-        elif result.status == RunnableStatus.CANCELED:
-            self.run_on_workflow_canceled(config, **merged_kwargs)
-            logger.info(f"Workflow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
-            return RunnableResult(status=RunnableStatus.CANCELED, input=None, output=None, error=result.error)
-        else:
-            if result.error:
-                error = result.error.type(result.error.message)
-                failed_nodes: list[RunnableFailedNodeInfo] = result.error.failed_nodes
-            else:
-                error = RuntimeError("Workflow execution failed with unknown error")
-                failed_nodes: list[RunnableFailedNodeInfo] = []
-            self.run_on_workflow_error(error, config, failed_nodes=failed_nodes, **merged_kwargs)
-            if isinstance(error, RunPausedException):
-                logger.info(
-                    f"Workflow {self.id}: execution paused after {format_duration(time_start, datetime.now())}."
+            flow_kwargs = merge(merged_kwargs, {"parent_run_id": run_id})
+            try:
+                result = await self.flow.run_async(input_data, config, resume_from=resume_from, **flow_kwargs)
+            except asyncio.CancelledError:
+                if config and config.cancellation and config.cancellation.token:
+                    config.cancellation.token.cancel()
+                current = asyncio.current_task()
+                if current is not None and hasattr(current, "uncancel"):
+                    try:
+                        current.uncancel()
+                    except Exception:  # nosec
+                        pass
+                self.run_on_workflow_canceled(config, **merged_kwargs)
+                logger.info(f"Workflow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
+                return RunnableResult(
+                    status=RunnableStatus.CANCELED,
+                    input=None,
+                    output=None,
+                    error=RunnableResultError(
+                        type=CanceledException,
+                        message=f"Workflow '{self.name}' was canceled during execution",
+                    ),
                 )
+
+            if result.status == RunnableStatus.SUCCESS:
+                self.run_on_workflow_end(result.output, config, **merged_kwargs)
+                logger.info(
+                    f"Workflow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}."
+                )
+            elif result.status == RunnableStatus.CANCELED:
+                self.run_on_workflow_canceled(config, **merged_kwargs)
+                logger.info(f"Workflow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
+                return RunnableResult(status=RunnableStatus.CANCELED, input=None, output=None, error=result.error)
             else:
-                logger.error(f"Workflow {self.id}: execution failed in {format_duration(time_start, datetime.now())}.")
+                if result.error:
+                    error = result.error.type(result.error.message)
+                    failed_nodes: list[RunnableFailedNodeInfo] = result.error.failed_nodes
+                else:
+                    error = RuntimeError("Workflow execution failed with unknown error")
+                    failed_nodes: list[RunnableFailedNodeInfo] = []
+                self.run_on_workflow_error(error, config, failed_nodes=failed_nodes, **merged_kwargs)
+                if isinstance(error, RunPausedException):
+                    logger.info(
+                        f"Workflow {self.id}: execution paused after {format_duration(time_start, datetime.now())}."
+                    )
+                else:
+                    logger.error(
+                        f"Workflow {self.id}: execution failed in {format_duration(time_start, datetime.now())}."
+                    )
+        except BaseException as e:
+            # As in run_sync: a run that raises instead of returning a result reports no outcome.
+            telemetry.ensure_run_ended(run_id, e)
+            raise
 
         return RunnableResult(status=result.status, input=input_data, output=result.output, error=result.error)
 
@@ -331,6 +351,7 @@ class Workflow(BaseModel, Runnable):
             config (RunnableConfig, optional): Configuration for the run. Defaults to None.
             **kwargs: Additional keyword arguments.
         """
+        telemetry.on_workflow_start(self, input_data, config, kwargs)
         if config and config.callbacks:
             for callback in config.callbacks:
                 dict_kwargs = {}
@@ -348,6 +369,7 @@ class Workflow(BaseModel, Runnable):
             config (RunnableConfig, optional): Configuration for the run. Defaults to None.
             **kwargs: Additional keyword arguments.
         """
+        telemetry.on_workflow_end(self, output, kwargs)
         if config and config.callbacks:
             for callback in config.callbacks:
                 dict_kwargs = {}
@@ -365,6 +387,7 @@ class Workflow(BaseModel, Runnable):
             config (RunnableConfig, optional): Configuration for the run. Defaults to None.
             **kwargs: Additional keyword arguments.
         """
+        telemetry.on_workflow_error(self, error, kwargs)
         if config and config.callbacks:
             for callback in config.callbacks:
                 dict_kwargs = {}
@@ -379,6 +402,7 @@ class Workflow(BaseModel, Runnable):
             config (RunnableConfig, optional): Configuration for the run. Defaults to None.
             **kwargs: Additional keyword arguments.
         """
+        telemetry.on_workflow_canceled(self, kwargs)
         if config and config.callbacks:
             for callback in config.callbacks:
                 dict_kwargs = {}

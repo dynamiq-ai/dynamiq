@@ -13,6 +13,7 @@ from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.telemetry import propagation
 from dynamiq.types.mocking import MockConfig
 from dynamiq.utils import is_called_from_async_context
 from dynamiq.utils.logger import logger
@@ -556,7 +557,11 @@ class MCPTool(ConnectionNode):
                 read, write = result[:2]
                 async with ClientSession(read, write) as session:
                     await session.initialize()
-                    result = await session.call_tool(self.name, input_dict)
+                    # The request carries the trace context in its _meta. A call outside a trace passes no meta
+                    # at all, so it is the same call as before tracing existed.
+                    trace_meta = propagation.mcp_request_meta()
+                    call_kwargs = {"meta": trace_meta} if trace_meta else {}
+                    result = await session.call_tool(self.name, input_dict, **call_kwargs)
         except Exception as e:
             error = format_exception(e)
             logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {error}")

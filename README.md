@@ -56,6 +56,7 @@ This installs agents, workflows, every LLM provider, the built-in tools and memo
 | `gcp` | Vertex AI RAG search and the Document AI converter |
 | `evals` | The BLEU, ROUGE and string similarity metrics |
 | `cua` | The CUA desktop tool (Python 3.12 and 3.13) |
+| `otel` | The OpenTelemetry SDK and the OTLP/HTTP exporter for [tracing](#opentelemetry-tracing) |
 | `all` | Every extra except `cua` |
 
 ```sh
@@ -70,6 +71,25 @@ git clone https://github.com/dynamiq-ai/dynamiq.git
 cd dynamiq
 uv sync --extra all
 ```
+
+## OpenTelemetry tracing
+
+Dynamiq emits OpenTelemetry spans for every workflow, flow and node run, following the OpenTelemetry Generative AI semantic conventions. Nothing is recorded until your application installs an OpenTelemetry SDK `TracerProvider`; `pip install "dynamiq[otel]"` adds the SDK and the OTLP/HTTP exporter. Dynamiq never sets the global provider and ships no exporter of its own.
+
+```python
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+provider = TracerProvider()
+provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))  # reads the OTEL_EXPORTER_OTLP_* variables
+trace.set_tracer_provider(provider)
+
+workflow.run(input_data={"input": "..."})  # traced
+```
+
+The span names, attributes and per-run settings are described in the [OpenTelemetry tracing reference](https://github.com/dynamiq-ai/dynamiq/blob/main/docs/reference/opentelemetry-tracing.md). Runnable examples are in `examples/components/core/tracing/`. The run-based `TracingCallbackHandler` keeps working alongside it.
 
 ## Documentation
 For more examples and detailed guides, please refer to our [documentation](https://dynamiq-ai.github.io/dynamiq).

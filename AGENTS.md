@@ -11,7 +11,8 @@ YAML and run by the Dynamiq platform. It supports Python 3.11 and later, uses Py
 - `make prepare` runs the pre-commit hooks on every file: darker with isort, flake8 at 120 columns, pyupgrade for
   Python 3.10 and bandit.
 - The default install, without extras, has a CI job of its own: `uv sync --frozen`, then `uv run pytest
-  tests/unit/utils/test_lazy_imports.py tests/unit/test_lazy_loading.py tests/unit/nodes/tools/test_file_tools.py`.
+  tests/unit/utils/test_lazy_imports.py tests/unit/test_lazy_loading.py tests/unit/nodes/tools/test_file_tools.py
+  tests/unit/telemetry/test_api_only.py`.
 - `make build-mkdocs` builds the API docs, which CI builds too.
 
 `tests/unit` and `tests/integration` run without credentials. Mock LLMs and embedders with the fixtures in
@@ -86,6 +87,16 @@ providers and needs their keys. Smoke tests are slow and paid, and run only thro
 - Session state on a shared database connection, such as a Postgres `SET`, needs the same lock as the query that
   depends on it.
 - Async code makes no blocking calls (`time.sleep`, `requests`, file I/O): use async clients or `asyncio.to_thread()`.
+
+### Telemetry
+
+- Spans are emitted through `dynamiq.telemetry`. A node reports data to its span with the keywords of
+  `run_on_node_execute_run(...)`, or with `dynamiq.telemetry.emitter.on_node_execute_run(...)` when callbacks must
+  not receive it, and never calls OpenTelemetry itself.
+- Nothing in `dynamiq.telemetry` serializes a node or formats content unless a span is recording, and nothing there
+  may raise into a run.
+- A change to emitted span names, attributes or events updates `docs/reference/opentelemetry-tracing.md`. One that
+  is not additive needs a new shape version.
 
 ### Security
 

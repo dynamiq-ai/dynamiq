@@ -57,6 +57,8 @@ dependencies = [
     "tiktoken==0.12.0",
     "neo4j>=6.0.3,<7.0.0",
     "typing-extensions>=4.12.2",
+    # The API only: spans are no-ops until the application installs an SDK TracerProvider (the otel extra).
+    "opentelemetry-api>=1.30.0,<2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -123,8 +125,13 @@ evals = [
 cua = ["cua-computer==0.4.19 ; python_version >= '3.12' and python_version < '3.14'"]
 # Kept for existing installs; sandboxes includes it.
 monty = ["pydantic-monty>=1.3.0,<2.0.0"]
+# An OpenTelemetry SDK and the OTLP/HTTP exporter, to record the spans the core emits through the API.
+otel = [
+    "opentelemetry-sdk>=1.30.0,<2.0.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.30.0,<2.0.0",
+]
 # Every extra except cua, which stays opt-in.
-all = ["dynamiq[files,data,vectorstores,sql,browser,sandboxes,gcp,evals]"]
+all = ["dynamiq[files,data,vectorstores,sql,browser,sandboxes,gcp,evals,otel]"]
 
 [project.scripts]
 dynamiq = "dynamiq.cli:main"

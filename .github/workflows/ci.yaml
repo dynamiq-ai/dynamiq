@@ -161,7 +161,7 @@ jobs:
       - name: Run tests
         run: >-
           uv run --frozen pytest tests/unit/utils/test_lazy_imports.py tests/unit/test_lazy_loading.py
-          tests/unit/nodes/tools/test_file_tools.py
+          tests/unit/nodes/tools/test_file_tools.py tests/unit/telemetry/test_api_only.py
 
   build-mkdocs:
     runs-on: ubuntu-latest

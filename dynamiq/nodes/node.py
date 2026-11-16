@@ -49,6 +49,7 @@ from dynamiq.nodes.types import ActionType, Behavior, ChoiceCondition, Dependenc
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
 from dynamiq.storages.vector.base import BaseVectorStoreParams
+from dynamiq.telemetry import emitter as telemetry
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.types.feedback import (
@@ -1514,6 +1515,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
         mock = self.resolve_mock(config)
 
+        # Directly before the try: its finally is what ends the span and restores the context.
+        span_scope = telemetry.start_node_run(self, config, merged_kwargs)
         try:
             try:
                 self.validate_depends(depends_result)
@@ -1554,6 +1557,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         except Exception as e:
             return self._handle_failure(e, transformed_input, config, time_start, "", **merged_kwargs)
         finally:
+            telemetry.finish_node_run(span_scope)
             reset_node_run_id(token)
 
     async def _run_async_native(
@@ -1580,6 +1584,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
         mock = self.resolve_mock(config)
 
+        # Directly before the try: its finally is what ends the span and restores the context.
+        span_scope = telemetry.start_node_run(self, config, merged_kwargs)
         try:
             try:
                 self.validate_depends(depends_result)
@@ -1631,6 +1637,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         except Exception as e:
             return self._handle_failure(e, transformed_input, config, time_start, "async ", **merged_kwargs)
         finally:
+            telemetry.finish_node_run(span_scope)
             reset_node_run_id(token)
 
     @staticmethod
@@ -2074,6 +2081,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             input_data (dict[str, Any]): Input data for the node.
             **kwargs: Additional keyword arguments.
         """
+        telemetry.on_node_start(self, input_data, kwargs)
 
         for callback in callbacks + self.callbacks:
             try:
@@ -2099,6 +2107,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             output_data (dict[str, Any]): Output data from the node.
             **kwargs: Additional keyword arguments.
         """
+        telemetry.on_node_end(self, output_data, kwargs)
         for callback in callbacks + self.callbacks:
             try:
                 dict_kwargs = {}
@@ -2125,6 +2134,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             error (BaseException): The error that occurred.
             **kwargs: Additional keyword arguments.
         """
+        telemetry.on_node_error(self, error, kwargs)
         for callback in callbacks + self.callbacks:
             try:
                 dict_kwargs = {}
@@ -2151,6 +2161,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             input_data (dict[str, Any]): Input data for the node.
             **kwargs: Additional keyword arguments.
         """
+        telemetry.on_node_skip(self, skip_data, input_data, human_feedback, kwargs)
         for callback in callbacks + self.callbacks:
             try:
                 dict_kwargs = {}
@@ -2175,6 +2186,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             callbacks (list[BaseCallbackHandler]): List of callback handlers.
             **kwargs: Additional keyword arguments.
         """
+        telemetry.on_node_canceled(self, kwargs)
         for callback in callbacks + self.callbacks:
             try:
                 dict_kwargs = {}
@@ -2198,6 +2210,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             input_data (dict[str, Any]): Input data for the node.
             **kwargs: Additional keyword arguments.
         """
+        telemetry.on_node_execute_start(self, kwargs)
         if isinstance(input_data, BaseModel):
             input_data = dict(input_data)
 
@@ -2225,6 +2238,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             output_data (dict[str, Any]): Output data from the node.
             **kwargs: Additional keyword arguments.
         """
+        telemetry.on_node_execute_end(self, output_data, kwargs)
         for callback in callbacks + self.callbacks:
             try:
                 dict_kwargs = {}
@@ -2251,6 +2265,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             error (BaseException): The error that occurred.
             **kwargs: Additional keyword arguments.
         """
+        telemetry.on_node_execute_error(self, error, kwargs)
         for callback in callbacks + self.callbacks:
             try:
                 dict_kwargs = {}
@@ -2272,6 +2287,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             callbacks (list[BaseCallbackHandler]): List of callback handlers.
             **kwargs: Additional keyword arguments.
         """
+        telemetry.on_node_execute_run(self, kwargs)
         for callback in callbacks + self.callbacks:
             try:
                 dict_kwargs = {}
