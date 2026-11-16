@@ -29,7 +29,7 @@ from dynamiq.utils.litellm import (
     supports_pdf_input,
 )
 from dynamiq.utils.litellm import supports_prompt_caching as litellm_supports_prompt_caching
-from dynamiq.utils.litellm import supports_vision
+from dynamiq.utils.litellm import supports_response_schema, supports_vision
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -102,6 +102,7 @@ class ModelInfo(BaseModel):
     supports_pdf_input: bool | None = None
     supports_video_input: bool | None = None
     supports_function_calling: bool | None = None
+    supports_response_schema: bool | None = None
 
 
 class FallbackTrigger(str, Enum):
@@ -545,6 +546,21 @@ class BaseLLM(ConnectionNode):
         return True
 
     @property
+    def is_response_schema_supported(self) -> bool:
+        """Check if the LLM supports a JSON schema ``response_format``, as LiteLLM reports it.
+
+        A model LiteLLM cannot say anything about counts as supporting it.
+        """
+        if self.model_info and self.model_info.supports_response_schema is not None:
+            return self.model_info.supports_response_schema
+        if "response_format" not in (get_supported_openai_params(model=self.model) or []):
+            return False
+        try:
+            return bool(supports_response_schema(model=self.model))
+        except Exception:
+            return True
+
+    @property
     def is_pdf_input_supported(self) -> bool:
         """Check if the LLM supports PDF input."""
         if self.model_info and self.model_info.supports_pdf_input is not None:
@@ -618,8 +634,6 @@ class BaseLLM(ConnectionNode):
         Returns:
             BaseLLMUsageData: A model containing the usage data for the LLM.
         """
-        from litellm import cost_per_token
-
         usage = cls._extract_usage(completion=completion)
         prompt_tokens = cls._usage_value(usage, "prompt_tokens", 0) or 0
         completion_tokens = cls._usage_value(usage, "completion_tokens", 0) or 0
@@ -636,23 +650,17 @@ class BaseLLM(ConnectionNode):
 
         cache_read_input_tokens = min(cache_read_input_tokens or 0, prompt_tokens)
 
-        try:
-            cost_kwargs: dict[str, Any] = {
-                "model": model,
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "cache_read_input_tokens": cache_read_input_tokens,
-            }
-            if cache_creation_input_tokens is not None:
-                cost_kwargs["cache_creation_input_tokens"] = cache_creation_input_tokens
-
-            prompt_tokens_cost_usd, completion_tokens_cost_usd = cost_per_token(**cost_kwargs)
-            total_tokens_cost_usd = prompt_tokens_cost_usd + completion_tokens_cost_usd
-        except Exception:
-            prompt_tokens_cost_usd, completion_tokens_cost_usd, total_tokens_cost_usd = None, None, None
-            # A model missing from litellm's price map, as most OpenRouter models are, may still have its cost
-            # reported by the provider.
-            total_tokens_cost_usd = cls._reported_cost(completion, usage)
+        cost_kwargs: dict[str, Any] = {
+            "model": model,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "cache_read_input_tokens": cache_read_input_tokens,
+        }
+        if cache_creation_input_tokens is not None:
+            cost_kwargs["cache_creation_input_tokens"] = cache_creation_input_tokens
+        prompt_tokens_cost_usd, completion_tokens_cost_usd, total_tokens_cost_usd = cls._usage_costs(
+            completion, usage, **cost_kwargs
+        )
 
         return BaseLLMUsageData(
             prompt_tokens=prompt_tokens,
@@ -664,6 +672,23 @@ class BaseLLM(ConnectionNode):
             cache_read_input_tokens=cache_read_input_tokens,
             cache_creation_input_tokens=cache_creation_input_tokens,
         )
+
+    @classmethod
+    def _usage_costs(
+        cls, completion: "ModelResponse", usage: Any, **tokens: Any
+    ) -> tuple[float | None, float | None, float | None]:
+        """The call's prompt, completion and total cost in USD, from LiteLLM's price map for the model.
+
+        `tokens` are LiteLLM's `cost_per_token` arguments. A model missing from the price map, as most OpenRouter
+        models are, gets only the total cost the provider reported, or no cost at all.
+        """
+        from litellm import cost_per_token  # deferred: importing litellm takes seconds
+
+        try:
+            prompt_cost, completion_cost = cost_per_token(**tokens)
+        except Exception:
+            return None, None, cls._reported_cost(completion, usage)
+        return prompt_cost, completion_cost, prompt_cost + completion_cost
 
     @classmethod
     def _reported_cost(cls, completion: "ModelResponse", usage: Any) -> float | None:
