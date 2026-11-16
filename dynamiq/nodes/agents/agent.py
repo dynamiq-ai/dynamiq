@@ -943,6 +943,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                                 role=MessageRole.ASSISTANT,
                                 content=f"Calling: {called_names}",
                                 tool_calls=payload,
+                                # The model's reasoning before these calls, which the next call continues from.
+                                reasoning_details=llm_result.output.get("reasoning_details"),
                                 static=True,
                             )
                         )

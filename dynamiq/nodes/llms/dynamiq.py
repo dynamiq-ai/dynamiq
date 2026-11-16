@@ -6,6 +6,7 @@ from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections.connections import _openai_http_client
 from dynamiq.nodes.llms.anthropic import AnthropicCacheControl
 from dynamiq.nodes.llms.base import LLM_DEFAULT_MAX_TOKENS, BaseLLM, BaseLLMUsageData, ModelInfo
+from dynamiq.runnables import RunnableConfig
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -52,21 +53,37 @@ def _with_cache_breakpoint(message: dict, control: dict) -> dict | None:
     return None
 
 
+class DynamiqCacheControl(AnthropicCacheControl):
+    """Prompt caching config for the Dynamiq router node.
+
+    Attributes:
+        automatic: Ask the provider to place the rolling breakpoint itself, through one top-level
+            ``cache_control``, instead of marking the message at ``cache_injection_point_index``. The provider
+            puts it on the last block it can cache and moves it forward as the conversation grows. The system
+            breakpoint still goes in the messages when ``cache_system`` is set. The model's provider must support
+            automatic caching: Anthropic's API does, and the router turns it into a cache point on Bedrock.
+    """
+
+    automatic: bool = False
+
+
 def _with_cache_breakpoints(messages: list[dict], cache_control: AnthropicCacheControl) -> list[dict]:
     """A copy of `messages` with prompt caching breakpoints, as the Anthropic node has LiteLLM place them.
 
     The last system message with text gets one when `cache_system` is set, and the message at
     `cache_injection_point_index` gets the rolling one, or the nearest message before it with text, such as the one
     before an assistant turn that only calls tools. The system breakpoint comes first, so it is the one kept when the
-    request has no room left for both.
+    request has no room left for both. With automatic caching, the rolling breakpoint is the provider's, and it takes
+    one of the request's breakpoints.
     """
     control = cache_control.model_dump(exclude_none=True, include={"type", "ttl"})
-    room = _MAX_CACHE_BREAKPOINTS - sum(_cache_breakpoints(message) for message in messages)
+    automatic = isinstance(cache_control, DynamiqCacheControl) and cache_control.automatic
+    room = _MAX_CACHE_BREAKPOINTS - sum(_cache_breakpoints(message) for message in messages) - (1 if automatic else 0)
     starts = []
     if cache_control.cache_system:
         systems = [index for index, message in enumerate(messages) if message.get("role") == "system"]
         starts += [index for index in systems if _with_cache_breakpoint(messages[index], control)][-1:]
-    if -len(messages) <= cache_control.cache_injection_point_index < len(messages):
+    if not automatic and -len(messages) <= cache_control.cache_injection_point_index < len(messages):
         starts.append(cache_control.cache_injection_point_index % len(messages))
 
     marked = list(messages)
@@ -100,10 +117,15 @@ class Dynamiq(BaseLLM):
             of Dynamiq's.
         model_info (ModelInfo | None): What the model supports. Unset fields take `DEFAULT_MODEL_INFO`, since
             LiteLLM does not know the router's slugs.
-        cache_control (AnthropicCacheControl | Literal[False] | None): Prompt caching config, as on the Anthropic
-            node: breakpoints on the system message and on a rolling message, placed in the messages themselves.
-            None chooses nothing, leaving an Agent free to turn caching on for a model that `supports_prompt_caching`;
-            False opts out.
+        cache_control (DynamiqCacheControl | AnthropicCacheControl | Literal[False] | None): Prompt caching config,
+            as on the Anthropic node: breakpoints on the system message and on a rolling message, placed in the
+            messages themselves, or the rolling one left to the provider with `automatic`. None chooses nothing,
+            leaving an Agent free to turn caching on for a model that `supports_prompt_caching`; False opts out.
+
+    An assistant message's `reasoning_details`, which the node returns with a reply, go back to the router with the
+    message, so a model keeps its reasoning across the calls of a tool loop. OpenAI stores nothing for the router's
+    calls, so its reasoning models need them to continue from their earlier reasoning; Claude's signed thinking needs
+    them too.
     """
 
     connection: DynamiqConnection
@@ -111,7 +133,10 @@ class Dynamiq(BaseLLM):
         default=None,
         description="A connection of the project whose provider key the router uses instead of Dynamiq's.",
     )
-    cache_control: AnthropicCacheControl | Literal[False] | None = None
+    # DynamiqCacheControl first: an Agent turning caching on builds the first config type listed.
+    cache_control: DynamiqCacheControl | AnthropicCacheControl | Literal[False] | None = None
+
+    REPLAYS_REASONING_DETAILS: ClassVar[bool] = True
 
     # Input beyond text stays off until `model_info` turns it on. Tools and JSON schema output are on, as BaseLLM
     # assumes for a model it does not know: off, an agent would refuse function calling for every router model.
@@ -234,6 +259,8 @@ class Dynamiq(BaseLLM):
         if self.cache_control and request.get("messages"):
             # In the messages, since the router drops LiteLLM's cache_control_injection_points.
             request["messages"] = _with_cache_breakpoints(request["messages"], self.cache_control)
+            if isinstance(self.cache_control, DynamiqCacheControl) and self.cache_control.automatic:
+                request["cache_control"] = self.cache_control.model_dump(exclude_none=True, include={"type", "ttl"})
         if "max_tokens" in request:
             request.setdefault("max_completion_tokens", request.pop("max_tokens"))
         thinking = request.pop("thinking", None)
@@ -259,6 +286,14 @@ class Dynamiq(BaseLLM):
 
         request, emit_usage = self._router_request(params)
         return await _openai_sdk.asend(await self._async_client(), request, emit_usage)
+
+    def _handle_completion_response(self, response: Any, config: RunnableConfig = None, **kwargs) -> dict:
+        """The reply, with the `reasoning_details` it came with, which an agent sends back with the turn."""
+        result = super()._handle_completion_response(response=response, config=config, **kwargs)
+        details = getattr(response.choices[0].message, "reasoning_details", None)
+        if isinstance(details, list) and details:
+            result["reasoning_details"] = details
+        return result
 
     def _build_streamed_response(self, chunks: list, messages: list[dict], stream: Any = None) -> Any:
         return stream.build_response(messages, self.model)

@@ -12,9 +12,10 @@ from openai.types.chat import ChatCompletion
 from dynamiq import Workflow
 from dynamiq.callbacks.streaming import BaseStreamingCallbackHandler, StreamingIteratorCallbackHandler
 from dynamiq.connections import Dynamiq as DynamiqConnection
+from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.llms import AnthropicCacheControl, Dynamiq
+from dynamiq.nodes.llms import AnthropicCacheControl, Dynamiq, DynamiqCacheControl, OpenAI
 from dynamiq.nodes.llms import dynamiq as dynamiq_llm
 from dynamiq.nodes.llms.base import LLM_DEFAULT_MAX_TOKENS, FallbackConfig, FallbackTrigger, ModelInfo
 from dynamiq.nodes.node import ErrorHandling, is_retryable_error
@@ -59,7 +60,8 @@ def chunk(model: str, delta: dict, finish_reason: str | None = None, usage: dict
 def stream_of(message: dict, model: str) -> list[dict]:
     """`message` as the router streams it: reasoning, content and tool calls in pieces, usage on the last chunk.
 
-    Reasoning text comes under both of its spellings, and the signature of a thinking block in a delta of its own.
+    Reasoning text comes under both of its spellings, the signature of a thinking block in a delta of its own, and
+    encrypted reasoning whole, as the router streams it when a reasoning item finishes.
     """
     chunks = [chunk(model, {"role": "assistant"})]
     reasoning = message.get("reasoning") or ""
@@ -70,6 +72,8 @@ def stream_of(message: dict, model: str) -> list[dict]:
         if detail.get("signature"):
             signature = {"index": detail["index"], "type": detail["type"], "signature": detail["signature"]}
             chunks.append(chunk(model, {"reasoning_details": [signature]}))
+        if detail.get("data"):
+            chunks.append(chunk(model, {"reasoning_details": [detail]}))
     content = message.get("content") or ""
     for piece in (content[:3], content[3:]) if content else ():
         chunks.append(chunk(model, {"content": piece}))
@@ -309,6 +313,7 @@ class TestResponse:
         assert message.content == "Hello"
         assert message.reasoning == THINKING["reasoning"]
         assert message.reasoning_details == THINKING["reasoning_details"]
+        assert result.output["reasoning_details"] == THINKING["reasoning_details"]
 
 
 class TestErrors:
@@ -475,6 +480,29 @@ class TestPromptCaching:
         assert request["messages"][0]["content"] == [text("Be brief.", EPHEMERAL)]
         assert request["messages"][-1]["content"] == "last"
 
+    def test_leaves_the_rolling_breakpoint_to_the_provider_with_automatic_caching(self, router):
+        prompt = Prompt(messages=[SYSTEM, {"role": "user", "content": "hi"}])
+
+        make_node(prompt=prompt, cache_control=DynamiqCacheControl(automatic=True)).run(input_data={})
+
+        [body] = router.bodies
+        assert body["cache_control"] == EPHEMERAL
+        assert body["messages"] == [
+            {"role": "system", "content": [text("Be brief.", EPHEMERAL)]},
+            {"role": "user", "content": "hi"},
+        ]
+
+    def test_automatic_caching_takes_one_of_the_four_breakpoints(self):
+        marked = [{"role": "user", "content": [text(f"turn {n}", EPHEMERAL)]} for n in range(3)]
+        messages = [SYSTEM, *marked, {"role": "user", "content": "last"}]
+
+        request, _ = make_node(cache_control=DynamiqCacheControl(automatic=True))._router_request(
+            {"model": MODEL, "messages": messages}
+        )
+
+        assert request["messages"][0] == SYSTEM
+        assert request["extra_body"]["cache_control"] == EPHEMERAL
+
     def test_reads_cache_reads_and_writes_as_the_router_reports_them(self):
         details = {"cached_tokens": 4334, "cached_read_tokens": 4334, "cache_write_tokens": 120}
         usage = {"prompt_tokens": 4487, "completion_tokens": 30, "total_tokens": 4517, "prompt_tokens_details": details}
@@ -506,7 +534,7 @@ class TestPromptCaching:
     def test_an_agent_turns_caching_on_for_models_that_need_breakpoints(self, model, model_info, cached):
         agent = Agent(name="agent", llm=make_node(model=model, model_info=model_info), tools=[SearchTool()])
 
-        assert agent.llm.cache_control == (AnthropicCacheControl() if cached else None)
+        assert agent.llm.cache_control == (DynamiqCacheControl() if cached else None)
 
     def test_an_agent_on_a_claude_slug_sends_breakpoints(self, router):
         router.replies = [
@@ -533,6 +561,57 @@ class TestPromptCaching:
             assert body["messages"][0]["content"][-1]["cache_control"] == EPHEMERAL
             assert body["messages"][-1]["content"][-1]["cache_control"] == EPHEMERAL
         assert router.bodies[-1]["messages"][-1]["role"] == "tool"
+
+
+ENCRYPTED = [{"id": "rs_1", "index": 0, "type": "reasoning.encrypted", "data": "enc-1"}]
+
+
+class TestReasoningReplay:
+    @pytest.mark.parametrize("streaming", [False, True])
+    def test_an_agent_sends_the_reasoning_back_with_its_tool_calls(self, router, streaming):
+        router.replies = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [tool_call("call_1", "search", thought="t", query="kyiv")],
+                "reasoning_details": ENCRYPTED,
+            },
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [tool_call("call_2", "provide_final_answer", thought="done", answer="Sunny")],
+            },
+        ]
+        agent = Agent(
+            name="agent",
+            llm=make_node(model="openai/gpt-6-sol"),
+            tools=[SearchTool()],
+            inference_mode=InferenceMode.FUNCTION_CALLING,
+            max_loops=3,
+            streaming=StreamingConfig(enabled=streaming),
+        )
+
+        result = agent.run(
+            input_data={"input": "Weather in Kyiv?"},
+            config=RunnableConfig(callbacks=[StreamingIteratorCallbackHandler()]),
+        )
+
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        calling = next(m for m in router.bodies[1]["messages"] if m.get("tool_calls"))
+        assert calling["reasoning_details"] == ENCRYPTED
+        assert "reasoning_details" not in router.bodies[0]["messages"][-1]
+
+    def test_other_nodes_drop_the_reasoning(self):
+        node = OpenAI(model="gpt-6-sol", connection=OpenAIConnection(api_key="sk-test"))
+        calling = {"role": "assistant", "content": "Calling: search", "tool_calls": [tool_call("call_1", "search")]}
+        messages = [{"role": "user", "content": "hi"}, calling | {"reasoning_details": ENCRYPTED}]
+
+        params = node._build_completion_params(
+            messages=messages, config=RunnableConfig(callbacks=[]), prompt=Prompt(messages=messages)
+        )
+
+        assert params["messages"] == [{"role": "user", "content": "hi"}, calling]
+        assert messages[1]["reasoning_details"] == ENCRYPTED
 
 
 @pytest.mark.parametrize("streaming", [False, True])

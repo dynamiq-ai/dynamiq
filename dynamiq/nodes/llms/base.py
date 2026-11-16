@@ -143,6 +143,20 @@ class FallbackConfig(BaseModel):
         return self
 
 
+def _without_reasoning_details(messages: list[dict]) -> list[dict]:
+    """`messages` without the `reasoning_details` of their assistant turns, copying only the messages that had some."""
+    if not any("reasoning_details" in message for message in messages):
+        return messages
+    return [
+        (
+            {key: value for key, value in message.items() if key != "reasoning_details"}
+            if "reasoning_details" in message
+            else message
+        )
+        for message in messages
+    ]
+
+
 class BaseLLMUsageData(BaseModel):
     """Model for LLM usage data.
 
@@ -280,6 +294,9 @@ class BaseLLM(ConnectionNode):
 
     Attributes:
         MODEL_PREFIX (ClassVar[str | None]): Optional model prefix.
+        REPLAYS_REASONING_DETAILS (ClassVar[bool]): Whether the node sends an assistant message's
+            ``reasoning_details`` back to the model. Off, the node drops them from its requests, since
+            only a provider that returned them can read them.
         name (str | None): Name of the LLM node. Defaults to "LLM".
         model (str): Model to use for the LLM.
         prompt (Prompt | None): Prompt to use for the LLM.
@@ -305,6 +322,7 @@ class BaseLLM(ConnectionNode):
     """
 
     MODEL_PREFIX: ClassVar[str | None] = None
+    REPLAYS_REASONING_DETAILS: ClassVar[bool] = False
     name: str | None = "LLM"
     model: str
     prompt: Prompt | None = None
@@ -1148,6 +1166,8 @@ class BaseLLM(ConnectionNode):
         Returns:
             Dict of params ready to pass to _completion or _acompletion.
         """
+        if not self.REPLAYS_REASONING_DETAILS:
+            messages = _without_reasoning_details(messages)
         extra = copy.deepcopy(self.__pydantic_extra__)
         params = self.connection.completion_params.copy()
         if include_sync_client and self.client and not isinstance(self.connection, HttpApiKey):
