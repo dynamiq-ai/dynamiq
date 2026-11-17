@@ -101,15 +101,20 @@ class FileSystem(CheckpointBackend):
         return self._flow_dir(flow_id) / f"{self._format_timestamp(created_at)}__{self._safe_id(effective)}"
 
     def _find_existing_run_dir(self, flow_id: str, run_id: str, wf_run_id: str | None = None) -> Path | None:
-        """Find an existing run directory by matching the run ID suffix via glob."""
+        """Find an existing run directory by matching the run ID suffix via glob.
+
+        Falls back to the legacy layout so a run started before the digest layout keeps one directory.
+        """
         effective = self._effective_run_id(run_id, wf_run_id)
-        pattern = f"*__{self._safe_id(effective)}"
-        flow_dir = self._flow_dir(flow_id)
-        if not flow_dir.exists():
-            return None
-        for match in flow_dir.glob(pattern):
-            if match.is_dir():
-                return match
+        for flow_dir, run_name in (
+            (self._flow_dir(flow_id), self._safe_id(effective)),
+            (self._base_dir / self._legacy_id(flow_id), self._legacy_id(effective)),
+        ):
+            if flow_dir.is_symlink() or not flow_dir.is_dir():
+                continue
+            for match in flow_dir.glob(f"*__{run_name}"):
+                if not match.is_symlink() and match.is_dir():
+                    return match
         return None
 
     def _get_or_create_run_dir(

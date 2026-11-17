@@ -364,3 +364,23 @@ def test_corrupt_record_in_unrelated_flow_does_not_block_queries_or_retention(ba
         with pytest.raises(ValueError, match="Invalid checkpoint"):
             query()
     assert path.exists()
+
+
+def test_new_checkpoint_for_a_legacy_run_reuses_its_directory(backend, tmp_path):
+    started = FlowCheckpoint(id="started", flow_id="flow/a", run_id="run", wf_run_id="workflow:run")
+    legacy_path = legacy_file(tmp_path, started)
+    resumed = FlowCheckpoint(
+        id="resumed",
+        flow_id="flow/a",
+        run_id="next",
+        wf_run_id="workflow:run",
+        parent_checkpoint_id=started.id,
+        created_at=started.created_at + timedelta(seconds=1),
+    )
+    backend.save(resumed)
+    assert {path.name for path in legacy_path.parent.glob("*.json")} == {
+        legacy_path.name,
+        backend._checkpoint_filename(resumed.id, resumed.created_at),
+    }
+    assert not (tmp_path / backend._safe_id("flow/a")).exists()
+    assert [cp.id for cp in backend.get_list_by_run("workflow:run")] == [resumed.id, started.id]
