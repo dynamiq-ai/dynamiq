@@ -34,7 +34,7 @@ from dynamiq.connections import BaseConnection
 if TYPE_CHECKING:
     from dynamiq.checkpoints.checkpoint import BaseCheckpointState
 
-from dynamiq.connections.managers import ConnectionManager, ConnectionManagerException
+from dynamiq.connections.managers import ConnectionClientInitType, ConnectionManager, ConnectionManagerException
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.nodes.exceptions import (
@@ -2513,11 +2513,15 @@ class ConnectionNode(Node, ABC):
     Attributes:
         connection (BaseConnection | None): The connection to use.
         client (Any | None): The client instance.
+        CLIENT_INIT_TYPE (ClassVar[ConnectionClientInitType]): Which of the connection's clients the node gets from
+            the connection manager.
     """
 
     connection: BaseConnection | None = None
     client: Any | None = None
     _connection_manager: ConnectionManager | None = PrivateAttr(default=None)
+
+    CLIENT_INIT_TYPE: ClassVar[ConnectionClientInitType] = ConnectionClientInitType.DEFAULT
 
     @model_validator(mode="after")
     def validate_connection_client(self):
@@ -2538,7 +2542,7 @@ class ConnectionNode(Node, ABC):
         super().init_components(connection_manager)
         if self.client is None:
             self.client = connection_manager.get_connection_client(
-                connection=self.connection
+                connection=self.connection, init_type=self.CLIENT_INIT_TYPE
             )
 
     def is_client_closed(self) -> bool:
@@ -2593,7 +2597,9 @@ class ConnectionNode(Node, ABC):
             connection_manager = self._connection_manager or ConnectionManager()
 
             try:
-                self.client = connection_manager.get_connection_client(connection=self.connection)
+                self.client = connection_manager.get_connection_client(
+                    connection=self.connection, init_type=self.CLIENT_INIT_TYPE
+                )
                 logger.info(self._node_run_log("Client reinitialized successfully."))
             except Exception as e:
                 logger.error(self._node_run_log(f"Failed to reinitialize client: {e}"))

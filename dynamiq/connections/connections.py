@@ -235,6 +235,21 @@ class Dynamiq(HttpApiKey):
         self.headers.setdefault("User-Agent", USER_AGENT)
         return self
 
+    def connect_router(self) -> "OpenAIClient":
+        """An OpenAI SDK client for the router at `router_url`, which sends the connection's headers.
+
+        `connect()` returns the requests module for the platform API's clients, so the Dynamiq LLM node gets this one
+        from the connection manager instead.
+        """
+        from openai import OpenAI as OpenAIClient  # deferred: importing the connection must not load the OpenAI SDK
+
+        return OpenAIClient(
+            api_key=self.api_key,
+            base_url=self.router_url,
+            default_headers=self.headers,
+            http_client=_openai_http_client(),
+        )
+
     @property
     def conn_params(self) -> dict:
         params = super().conn_params.copy()

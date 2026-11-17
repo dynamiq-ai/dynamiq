@@ -13,10 +13,12 @@ from dynamiq import Workflow
 from dynamiq.callbacks.streaming import BaseStreamingCallbackHandler, StreamingIteratorCallbackHandler
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.connections import connections
+from dynamiq.connections.managers import ConnectionManager
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents.utils import SummarizationConfig
 from dynamiq.nodes.llms import AnthropicCacheControl, Dynamiq, DynamiqCacheControl, OpenAI
-from dynamiq.nodes.llms import dynamiq as dynamiq_llm
 from dynamiq.nodes.llms.base import LLM_DEFAULT_MAX_TOKENS, FallbackConfig, FallbackTrigger, ModelInfo
 from dynamiq.nodes.node import ErrorHandling, is_retryable_error
 from dynamiq.nodes.types import InferenceMode
@@ -140,7 +142,7 @@ def router(monkeypatch) -> FakeRouter:
     """A FakeRouter that every node built in the test calls, sync and async."""
     fake = FakeRouter()
     transport = httpx.MockTransport(fake.handler)
-    monkeypatch.setattr(dynamiq_llm, "_openai_http_client", lambda: httpx.Client(transport=transport))
+    monkeypatch.setattr(connections, "_openai_http_client", lambda: httpx.Client(transport=transport))
     monkeypatch.setattr(
         DynamiqConnection, "connect_async", AsyncMock(side_effect=lambda: httpx.AsyncClient(transport=transport))
     )
@@ -313,7 +315,9 @@ class TestResponse:
         assert message.content == "Hello"
         assert message.reasoning == THINKING["reasoning"]
         assert message.reasoning_details == THINKING["reasoning_details"]
-        assert result.output["reasoning_details"] == THINKING["reasoning_details"]
+        assert result.output["reasoning_details"] == [
+            detail | {"model": MODEL} for detail in THINKING["reasoning_details"]
+        ]
 
 
 class TestErrors:
@@ -503,6 +507,18 @@ class TestPromptCaching:
         assert request["messages"][0] == SYSTEM
         assert request["extra_body"]["cache_control"] == EPHEMERAL
 
+    @pytest.mark.parametrize("existing, automatic", [(3, True), (4, False)])
+    def test_automatic_caching_is_left_out_when_the_messages_use_every_breakpoint(self, existing, automatic):
+        marked = [{"role": "user", "content": [text(f"turn {n}", EPHEMERAL)]} for n in range(existing)]
+        messages = [*marked, {"role": "user", "content": [text("new turn")]}]
+
+        request, _ = make_node(
+            model="anthropic/claude-sonnet-5", cache_control=DynamiqCacheControl(automatic=True)
+        )._router_request({"model": "anthropic/claude-sonnet-5", "messages": messages})
+
+        assert request["messages"] == messages
+        assert ("cache_control" in request.get("extra_body", {})) is automatic
+
     def test_reads_cache_reads_and_writes_as_the_router_reports_them(self):
         details = {"cached_tokens": 4334, "cached_read_tokens": 4334, "cache_write_tokens": 120}
         usage = {"prompt_tokens": 4487, "completion_tokens": 30, "total_tokens": 4517, "prompt_tokens_details": details}
@@ -601,6 +617,78 @@ class TestReasoningReplay:
         assert calling["reasoning_details"] == ENCRYPTED
         assert "reasoning_details" not in router.bodies[0]["messages"][-1]
 
+    def test_a_fallback_to_another_model_gets_no_reasoning_from_the_first(self, router):
+        router.replies = [
+            {
+                "role": "assistant",
+                "content": "",
+                "reasoning_details": ENCRYPTED,
+                "tool_calls": [tool_call("call_1", "search")],
+            },
+            HELLO,
+        ]
+        primary = make_node(model="openai/gpt-6-sol")
+        calling = primary.run(input_data={}).output
+        messages = [
+            {"role": "user", "content": "Weather?"},
+            {
+                "role": "assistant",
+                "content": "Calling search",
+                "tool_calls": [tool_call("call_1", "search")],
+                "reasoning_details": calling["reasoning_details"],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "Sunny"},
+        ]
+        router.errors = [429]
+        primary = make_node(
+            model="openai/gpt-6-sol",
+            prompt=Prompt(messages=messages),
+            fallback=FallbackConfig(
+                llm=make_node(model="anthropic/claude-sonnet-5"), enabled=True, triggers=[FallbackTrigger.RATE_LIMIT]
+            ),
+        )
+
+        assert primary.run(input_data={}).status == RunnableStatus.SUCCESS
+
+        _, failed, fallback = router.bodies
+        assert failed["messages"][1]["reasoning_details"] == ENCRYPTED
+        assert "reasoning_details" not in fallback["messages"][1]
+
+    def test_an_agent_compacts_its_history_when_the_reasoning_it_sends_back_fills_the_context(self, router):
+        details = [{"index": 0, "type": "reasoning.text", "text": "ponder " * 20000, "signature": "sig-1"}]
+        router.replies = [
+            {
+                "role": "assistant",
+                "content": "",
+                "reasoning_details": details,
+                "tool_calls": [tool_call("call_1", "search", thought="t", query="x")],
+            },
+            {"role": "assistant", "content": "Searched for x."},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [tool_call("call_2", "provide_final_answer", answer="y")],
+            },
+        ]
+        agent = Agent(
+            name="agent",
+            llm=make_node(model="anthropic/claude-sonnet-5"),
+            tools=[SearchTool()],
+            inference_mode=InferenceMode.FUNCTION_CALLING,
+            max_loops=3,
+            summarization_config=SummarizationConfig(enabled=True, max_token_context_length=10000),
+        )
+
+        result = agent.run(input_data={"input": "Find x."})
+
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        calling, summarizing, answering = router.bodies
+        assert not any("reasoning_details" in message for message in calling["messages"])
+        assert "Provide a concise summary" in json.dumps(summarizing["messages"])
+        assert any(
+            str(message.get("content")).startswith("Observation: Searched for x.") for message in answering["messages"]
+        )
+
     def test_other_nodes_drop_the_reasoning(self):
         node = OpenAI(model="gpt-6-sol", connection=OpenAIConnection(api_key="sk-test"))
         calling = {"role": "assistant", "content": "Calling: search", "tool_calls": [tool_call("call_1", "search")]}
@@ -645,6 +733,47 @@ def test_runs_an_agent_that_calls_a_tool(router, streaming):
     assert "allowed_openai_params" not in first
     assert {"role": "tool", "tool_call_id": "call_1"}.items() <= second["messages"][-1].items()
     assert "results for kyiv" in second["messages"][-1]["content"]
+
+
+class TestClient:
+    def test_the_connection_manager_closes_the_router_client(self, router):
+        manager = ConnectionManager()
+        node = make_node(is_postponed_component_init=True)
+        node.init_components(manager)
+        assert node.run(input_data={}).status == RunnableStatus.SUCCESS
+        client = node.client
+
+        manager.close()
+
+        assert client.is_closed()
+
+    def test_reconnects_to_the_router_after_its_client_closes(self, router):
+        node = make_node()
+        assert node.run(input_data={}).status == RunnableStatus.SUCCESS
+        node.client.close()
+
+        result = node.run(input_data={})
+
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        assert len(router.requests) == 2
+
+    def test_nodes_sharing_a_client_send_their_own_project_connection(self, router):
+        manager = ConnectionManager()
+        connection = DynamiqConnection(api_key=TOKEN, url=PLATFORM_URL, router_url=ROUTER_URL)
+        nodes = [
+            make_node(connection=connection, provider_connection_id=connection_id, is_postponed_component_init=True)
+            for connection_id in ("conn-1", None)
+        ]
+        for node in nodes:
+            node.init_components(manager)
+
+        for node in nodes:
+            node.run(input_data={})
+
+        assert nodes[0].client is nodes[1].client
+        first, second = router.requests
+        assert first.headers["dynamiq-connection-id"] == "conn-1"
+        assert "dynamiq-connection-id" not in second.headers
 
 
 def test_survives_a_yaml_round_trip(router, tmp_path):

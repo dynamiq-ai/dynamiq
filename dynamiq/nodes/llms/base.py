@@ -487,6 +487,10 @@ class BaseLLM(ConnectionNode):
         except Exception:
             return None
 
+    def replayed_reasoning_details(self, details: list[dict] | None) -> list[dict]:
+        """The part of an assistant message's `reasoning_details` that the node sends back to the model."""
+        return list(details or ()) if self.REPLAYS_REASONING_DETAILS else []
+
     def get_token_limit(self) -> int:
         """Returns token limits of a llm.
 
