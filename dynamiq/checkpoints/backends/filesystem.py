@@ -15,6 +15,7 @@ from dynamiq.checkpoints.backends._filesystem_lock import directory_lock
 from dynamiq.checkpoints.backends.base import CheckpointBackend
 from dynamiq.checkpoints.types import CheckpointStatus
 from dynamiq.utils import decode_reversible, encode_reversible
+from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
     from dynamiq.checkpoints.checkpoint import FlowCheckpoint
@@ -37,9 +38,10 @@ class FileSystem(CheckpointBackend):
     existing file even when a resume changes its run IDs. Queries use the stored data.
     Legacy paths remain readable and are updated in place. Duplicate legacy records
     raise on reads; saving an authoritative checkpoint consolidates those copies.
-    Listings fail on invalid records rather than silently resuming an older snapshot:
-    an unreadable payload cannot safely be assigned to a flow or run. Queries scan
-    the store because a record's current scope may differ from its initial directory.
+    Listings fail on invalid records under the queried flow (or run) directory, current
+    or legacy name, rather than silently resuming an older snapshot. Invalid records
+    elsewhere are logged and skipped so one bad file cannot block other flows. Queries
+    scan the store because a record's current scope may differ from its initial directory.
     All processes writing this directory must use this backend's locking protocol.
     """
 
@@ -70,6 +72,19 @@ class FileSystem(CheckpointBackend):
         # 128 digest bits keep names collision-resistant without tripling path
         # length for UUID identities on Windows installations with MAX_PATH limits.
         return f"{sha256(raw_id.encode('utf-8')).hexdigest()[:32]}__{slug}"
+
+    @staticmethod
+    def _legacy_id(raw_id: str) -> str:
+        """Name used for IDs by the pre-digest layout."""
+        return re.sub(r"[^a-zA-Z0-9_\-]", "_", raw_id)
+
+    def _in_flow_dir(self, flow_id: str) -> Callable[[Path], bool]:
+        names = {self._safe_id(flow_id), self._legacy_id(flow_id)}
+        return lambda path: path.parent.parent.name in names
+
+    def _in_run_dir(self, run_id: str) -> Callable[[Path], bool]:
+        suffixes = (f"__{self._safe_id(run_id)}", f"__{self._legacy_id(run_id)}")
+        return lambda path: path.parent.name.endswith(suffixes)
 
     def _format_timestamp(self, dt: datetime) -> str:
         raw = dt.strftime(self.TIMESTAMP_FORMAT)
@@ -131,7 +146,7 @@ class FileSystem(CheckpointBackend):
                         yield cp_file
 
     def _matching_paths(self, checkpoint_id: str) -> list[Path]:
-        legacy_id = re.sub(r"[^a-zA-Z0-9_\-]", "_", checkpoint_id)
+        legacy_id = self._legacy_id(checkpoint_id)
         suffixes = (f"__{self._safe_id(checkpoint_id)}.json", f"__{legacy_id}.json")
         paths = []
         for path in self._checkpoint_paths():
@@ -201,12 +216,21 @@ class FileSystem(CheckpointBackend):
             path.unlink()
         return bool(paths)
 
-    def _list(self, matches: Callable[[FlowCheckpoint], bool]) -> list[FlowCheckpoint]:
+    def _list(
+        self, matches: Callable[[FlowCheckpoint], bool], in_scope: Callable[[Path], bool]
+    ) -> list[FlowCheckpoint]:
         checkpoints = {}
         seen = set()
         duplicates = set()
         for path in self._checkpoint_paths():
-            checkpoint = self._load_file(path)
+            try:
+                checkpoint = self._load_file(path)
+            except ValueError:
+                # Fail closed only where the unreadable record could belong to the query.
+                if in_scope(path):
+                    raise
+                logger.warning(f"Skipping invalid checkpoint outside the queried scope: {path}")
+                continue
             if checkpoint.id in seen:
                 duplicates.add(checkpoint.id)
             seen.add(checkpoint.id)
@@ -230,7 +254,8 @@ class FileSystem(CheckpointBackend):
             checkpoints = self._list(
                 lambda cp: cp.flow_id == flow_id
                 and (status is None or cp.status == status)
-                and (before is None or cp.created_at < before)
+                and (before is None or cp.created_at < before),
+                self._in_flow_dir(flow_id),
             )
         return checkpoints[:limit] if limit is not None else checkpoints
 
@@ -240,7 +265,7 @@ class FileSystem(CheckpointBackend):
 
     def get_list_by_run(self, run_id: str, *, limit: int | None = None) -> list[FlowCheckpoint]:
         with directory_lock(self._base_dir):
-            checkpoints = self._list(lambda cp: cp.run_id == run_id or cp.wf_run_id == run_id)
+            checkpoints = self._list(lambda cp: cp.run_id == run_id or cp.wf_run_id == run_id, self._in_run_dir(run_id))
         return checkpoints[:limit] if limit is not None else checkpoints
 
     def get_list_by_flow_and_run(
@@ -260,14 +285,17 @@ class FileSystem(CheckpointBackend):
             checkpoints = self._list(
                 lambda cp: cp.flow_id == flow_id
                 and (status is None or cp.status == status)
-                and (cp.run_id in ids_to_match or cp.wf_run_id in ids_to_match)
+                and (cp.run_id in ids_to_match or cp.wf_run_id in ids_to_match),
+                self._in_flow_dir(flow_id),
             )
         return checkpoints[:limit] if limit is not None else checkpoints
 
     def cleanup_by_flow(self, flow_id: str, *, keep_count: int = 10, max_ttl_minutes: int | None = None) -> int:
         # A resumed checkpoint must not be deleted between retention's query and delete.
         with directory_lock(self._base_dir):
-            checkpoints = self._list(lambda cp: cp.flow_id == flow_id)[: self.max_cleanup_results]
+            checkpoints = self._list(lambda cp: cp.flow_id == flow_id, self._in_flow_dir(flow_id))[
+                : self.max_cleanup_results
+            ]
             continued_from = {cp.parent_checkpoint_id for cp in checkpoints}
             deleted = 0
             now = datetime.now(timezone.utc)

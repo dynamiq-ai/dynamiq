@@ -339,3 +339,28 @@ def test_persisted_core_fields_cannot_be_recreated_from_model_defaults(backend, 
     with pytest.raises(ValueError, match="Invalid checkpoint"):
         backend.delete(checkpoint.id)
     assert path.exists()
+
+
+@pytest.mark.parametrize("layout", ["current", "legacy"])
+def test_corrupt_record_in_unrelated_flow_does_not_block_queries_or_retention(backend, tmp_path, layout):
+    kept = FlowCheckpoint(id="kept", flow_id="flowA", run_id="runA")
+    expired = kept.model_copy(update={"id": "expired", "created_at": kept.created_at - timedelta(seconds=1)})
+    backend.save(kept)
+    backend.save(expired)
+    other = FlowCheckpoint(id="other", flow_id="flowB", run_id="runB")
+    if layout == "current":
+        backend.save(other)
+        path = next((tmp_path / backend._safe_id("flowB")).glob("*/*.json"))
+    else:
+        path = legacy_file(tmp_path, other)
+    path.write_text("{trunc", encoding="utf-8")
+
+    assert backend.get_latest_by_flow("flowA").id == kept.id
+    assert [cp.id for cp in backend.get_list_by_run("runA")] == [kept.id, expired.id]
+    assert [cp.id for cp in backend.get_list_by_flow_and_run("flowA", "runA")] == [kept.id, expired.id]
+    assert backend.cleanup_by_flow("flowA", keep_count=1) == 1
+    assert backend.load(expired.id) is None
+    for query in (lambda: backend.get_list_by_flow("flowB"), lambda: backend.get_list_by_run("runB")):
+        with pytest.raises(ValueError, match="Invalid checkpoint"):
+            query()
+    assert path.exists()
