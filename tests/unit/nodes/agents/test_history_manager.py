@@ -161,21 +161,86 @@ class TestSplitHistory:
 
     def test_token_limit_exceeded_forces_summarize_all(self):
         """When conversation fits in max_preserved_tokens but the total prompt
-        exceeds the token limit, all messages must go to to_summarize so that
-        compaction makes progress instead of looping as a no-op."""
-        msgs = [_system(), _user("Hello"), _assistant("Hi there"), _user("How are you?")]
+        exceeds the token limit, everything the model already answered is summarized
+        so that compaction makes progress instead of looping as a no-op. The question
+        it has not answered yet stays, with the reply before it."""
+        msgs = [_system(), _user("Hello " * 40), _assistant("Hi there " * 40), _user("How are you?")]
         agent = FakeAgent(
             messages=msgs,
             max_preserved_tokens=10_000,
-            max_token_context_length=1,
+            max_token_context_length=60,
         )
 
         assert agent.is_token_limit_exceeded()
+        assert not agent.is_fixed_context_over_limit()
 
         to_summarize, to_preserve = agent._split_history()
 
-        assert len(to_summarize) == 3
+        assert [m.content for m in to_summarize] == ["Hello " * 40]
+        assert [m.content for m in to_preserve] == ["Hi there " * 40, "How are you?"]
+
+    def test_results_the_model_has_not_read_are_never_summarized(self):
+        msgs = [
+            _system(),
+            _user("Find the totals."),
+            _assistant_tc(
+                "Calling: search",
+                tool_calls=[{"id": "c1", "type": "function", "function": {"name": "search", "arguments": "{}"}}],
+            ),
+            _tool_reply("MARKER " + "result " * 400, "c1", "search"),
+        ]
+        agent = FakeAgent(messages=msgs, max_preserved_tokens=50)
+
+        to_summarize, to_preserve = agent._split_history()
+
+        assert [m.role for m in to_preserve] == [MessageRole.ASSISTANT, MessageRole.TOOL]
+        assert to_preserve[1].content.startswith("MARKER")
+
+    def test_results_are_not_summarized_when_the_history_starts_with_the_reply_that_asked_for_them(self):
+        msgs = [
+            _system(),
+            _user("Find the totals."),
+            _assistant_tc(
+                "Calling: search",
+                tool_calls=[{"id": "c1", "type": "function", "function": {"name": "search", "arguments": "{}"}}],
+            ),
+            _tool_reply("MARKER " + "result " * 40, "c1", "search"),
+        ]
+        agent = FakeAgent(messages=msgs, history_offset=2, max_preserved_tokens=10_000, max_token_context_length=60)
+
+        to_summarize, to_preserve = agent._split_history()
+
+        assert to_summarize == []
+        assert [m.role for m in to_preserve] == [MessageRole.ASSISTANT, MessageRole.TOOL]
+
+    def test_results_the_models_context_window_cannot_hold_are_summarized(self):
+        """Kept whole, they would make a request the provider rejects."""
+        msgs = [
+            _system(),
+            _user("Find the totals."),
+            _assistant_tc(
+                "Calling: search",
+                tool_calls=[{"id": "c1", "type": "function", "function": {"name": "search", "arguments": "{}"}}],
+            ),
+            _tool_reply("result " * 400, "c1", "search"),
+        ]
+        agent = FakeAgent(messages=msgs, history_offset=2, max_preserved_tokens=50, max_token_context_length=60)
+        agent.llm = FakeLLM(token_limit=300)
+
+        to_summarize, to_preserve = agent._split_history()
+
+        assert [m.role for m in to_summarize] == [MessageRole.ASSISTANT, MessageRole.TOOL]
         assert to_preserve == []
+
+    def test_history_is_not_summarized_whole_when_the_fixed_prompt_alone_is_over_the_limit(self):
+        """Summarizing everything cannot help then, and it would repeat on every loop."""
+        msgs = [_system(), _user("Hello"), _assistant("Hi there"), _user("How are you?")]
+        agent = FakeAgent(messages=msgs, max_preserved_tokens=10_000, max_token_context_length=1)
+
+        to_summarize, to_preserve = agent._split_history()
+
+        assert to_summarize == []
+        assert len(to_preserve) == 3
 
 
 class TestCompactHistory:
@@ -405,8 +470,8 @@ class TestSplitHistoryFCSafety:
 
         to_summarize, to_preserve = agent._split_history()
 
-        for m in to_preserve:
-            assert m.role != MessageRole.TOOL
+        announced = {call["id"] for m in to_preserve if m.role == MessageRole.ASSISTANT for call in m.tool_calls or []}
+        assert all(m.tool_call_id in announced for m in to_preserve if m.role == MessageRole.TOOL)
 
 
 class TestAggregateHistory:
