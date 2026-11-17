@@ -611,20 +611,21 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             self.tools.extend(sandbox_tools)
 
         elif self.file_store_backend:
-            self.tools.extend(
-                [
-                    FileReadTool(file_store=self.file_store_backend, llm=self.llm),
-                    FileSearchTool(file_store=self.file_store_backend),
-                    FileListTool(file_store=self.file_store_backend),
-                ]
-            )
+            file_tools = [
+                FileReadTool(file_store=self.file_store_backend, llm=self.llm),
+                FileSearchTool(file_store=self.file_store_backend),
+                FileListTool(file_store=self.file_store_backend),
+            ]
             if self.file_store.agent_file_write_enabled:
-                self.tools.append(FileWriteTool(file_store=self.file_store_backend))
+                file_tools.append(FileWriteTool(file_store=self.file_store_backend))
             elif self.artifacts_backend:
                 logger.warning(
                     f"Agent {self.name} - {self.id}: artifacts move as files, but agent_file_write_enabled is off, "
                     "so the agent can publish only files already in its file store and cannot edit loaded ones."
                 )
+            # The agent recreates these tools from its file_store config on load, so they are not serialized.
+            self._excluded_tool_ids.update(t.id for t in file_tools)
+            self.tools.extend(file_tools)
 
         if self._skills_should_init():
             self._init_skills()
@@ -2283,7 +2284,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         def screen(text: str) -> str:
             return self._run_hooks(HookPoint.ON_INPUT, text, config, runner=screening, **kwargs).value if text else text
 
-        if (hooked := map_strings(context, screen, keys=True)) != context:
+        if (hooked := map_strings(context, screen)) != context:
             self.system_prompt_manager.update_variables({"context": hooked})
 
     def _run_tool(
@@ -2954,13 +2955,14 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         had_artifacts = bool(self.artifacts_backend)
         self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
         self._file_store_auto_created = True
-        self.tools.extend(
-            [
-                FileReadTool(file_store=self.file_store_backend, llm=self.llm),
-                FileSearchTool(file_store=self.file_store_backend),
-                FileListTool(file_store=self.file_store_backend),
-            ]
-        )
+        file_tools = [
+            FileReadTool(file_store=self.file_store_backend, llm=self.llm),
+            FileSearchTool(file_store=self.file_store_backend),
+            FileListTool(file_store=self.file_store_backend),
+        ]
+        # The agent recreates these tools from its file_store config on load, so they are not serialized.
+        self._excluded_tool_ids.update(t.id for t in file_tools)
+        self.tools.extend(file_tools)
         new_tool_description = self.tool_description
         self.system_prompt_manager.set_initial_variable("tool_description", new_tool_description)
         gained_artifacts = bool(self.artifacts_backend) and not had_artifacts

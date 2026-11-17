@@ -126,9 +126,8 @@ async def test_http_api_call_execute_async_input_overrides():
         )
 
     call_kwargs = mock_client.request.await_args.kwargs
-    assert call_kwargs["url"] == "https://override.example.com/x"
+    assert call_kwargs["url"] == "https://override.example.com/x?q=1"
     assert call_kwargs["headers"]["extra"] == "v"
-    assert call_kwargs["params"] == {"q": "1"}
     assert call_kwargs["data"] == {"k": "v"}
 
 
