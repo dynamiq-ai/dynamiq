@@ -149,23 +149,26 @@ def test_delegating_hands_the_page_over_without_closing_anything():
 def test_multiple_waiters_are_served_one_at_a_time():
     ss = SharedSession(share_browser=True)
     order = []
+    took_control = threading.Semaphore(0)
     ss.acquire_page_control("runA")
 
     def wait_and_take(key):
         ss.acquire_page_control(key, timeout=3.0)
         order.append(key)
+        took_control.release()
 
     threads = [threading.Thread(target=wait_and_take, args=(k,)) for k in ("runB", "runC")]
     for t in threads:
         t.start()
-    time.sleep(0.1)
-    assert order == []
+    assert not took_control.acquire(timeout=0.1)
 
     ss.release_page_control("runA")
-    time.sleep(0.1)
-    assert len(order) == 1  # one waiter got it; the other is still queued
+    assert took_control.acquire(timeout=3.0)
+    assert not took_control.acquire(timeout=0.1)  # one waiter got it; the other is still queued
+    assert len(order) == 1
 
     ss.release_page_control(order[0])
+    assert took_control.acquire(timeout=3.0)
     for t in threads:
         t.join(timeout=3.0)
     assert sorted(order) == ["runB", "runC"]

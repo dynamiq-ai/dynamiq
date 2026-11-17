@@ -65,6 +65,9 @@ class TestDetection:
             "claude-haiku-5-5",
             "us.anthropic.claude-haiku-5-5",
             "claude-haiku-6",
+            # OpenRouter writes the minor version with a dot.
+            "openrouter/anthropic/claude-opus-4.7",
+            "openrouter/anthropic/claude-haiku-5.5",
         ],
     )
     def test_unsupported_models_detected(self, model):
@@ -90,6 +93,7 @@ class TestDetection:
             "claude-opus-4-6",
             "claude-sonnet-4-6",
             "claude-haiku-4-5",
+            "openrouter/anthropic/claude-sonnet-4.5",
             # Dated full id for Opus 4.0 — the date must not be read as a minor version above the cutoff.
             "claude-opus-4-20250514",
             "claude-haiku-5",
@@ -305,6 +309,19 @@ class TestToolChoiceBackstop:
         exc = Exception("litellm.BadRequestError: tool_choice is set but no tools were provided")
         assert custom._recover_completion_params(exc, common) is None
 
+    @pytest.mark.parametrize(
+        "error",
+        [
+            'AnthropicException - {"type":"error","error":{"type":"invalid_request_error",'
+            '"message":"Thinking may not be enabled when tool_choice forces tool use."}}',
+            "litellm.BadRequestError: tool_choice 'specified' is incompatible with thinking enabled",
+        ],
+        ids=["anthropic-thinking", "kimi-thinking"],
+    )
+    def test_falls_back_to_auto_when_thinking_rules_out_a_forced_call(self, custom, error):
+        common = {"model": custom.model, "tools": [{}], "tool_choice": "required", "max_tokens": 100}
+        assert custom._recover_completion_params(Exception(error), common)["tool_choice"] == "auto"
+
 
 class TestBedrockBackstop:
     @pytest.fixture
@@ -349,6 +366,58 @@ class TestBedrockBackstop:
         recovered = bedrock._recover_completion_params(exc, common)
         assert recovered is not None
         assert "stop" not in recovered
+
+
+def test_bedrock_drops_text_beside_tool_calls_for_a_model_that_rejects_it():
+    tool_call = {"id": "c1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}
+    messages = [
+        {"role": "user", "content": "Look up A."},
+        {"role": "assistant", "content": "Calling: lookup", "tool_calls": [tool_call]},
+        {"role": "tool", "content": "A = 42", "tool_call_id": "c1", "name": "lookup"},
+    ]
+    sent = []
+
+    def fake_completion(**params):
+        sent.append(params["messages"])
+        if any(m.get("tool_calls") and m.get("content") for m in params["messages"]):
+            raise Exception(
+                "BedrockException - messages.1.content: Conversation blocks and tool use blocks cannot be "
+                "provided in the same turn."
+            )
+        return _mock_response("A is 42")
+
+    with patch("litellm.completion"), patch("litellm.stream_chunk_builder"):
+        node = Bedrock(
+            name="b",
+            model="bedrock/us.meta.llama4-maverick-17b-instruct-v1:0",
+            connection=AWSConnection(access_key_id="x", secret_access_key="y", region_name="us-east-1"),
+            prompt=Prompt(messages=messages),
+        )
+        node._completion = fake_completion
+        first = node.execute(MagicMock(messages=None, files=None), config=RunnableConfig(callbacks=[]))
+        second = node.execute(MagicMock(messages=None, files=None), config=RunnableConfig(callbacks=[]))
+
+    assert first["content"] == second["content"] == "A is 42"
+    assert len(sent) == 3
+    assert [m["content"] for m in sent[-1]] == ["Look up A.", "", "A = 42"]
+
+
+def test_bedrock_retries_tool_use_without_streaming_for_a_model_that_cannot_stream_it():
+    tool = {"type": "function", "function": {"name": "lookup", "parameters": {"type": "object", "properties": {}}}}
+    node = Bedrock(
+        name="b",
+        model="bedrock/us.meta.llama4-maverick-17b-instruct-v1:0",
+        connection=AWSConnection(access_key_id="x", secret_access_key="y", region_name="us-east-1"),
+    )
+    common = {"model": node.model, "stream": True, "stream_options": {"include_usage": True}, "tools": [tool]}
+    exc = Exception('BedrockException - b\'{"message":"This model doesn\\\'t support tool use in streaming mode."}\'')
+
+    recovered = node._recover_completion_params(exc, common)
+    node._persist_completion_recovery(common, recovered)
+
+    assert recovered["stream"] is False and "stream_options" not in recovered
+    assert node.update_completion_params(dict(common))["stream"] is False
+    assert node.update_completion_params({"model": node.model, "stream": True})["stream"] is True
 
 
 class TestRecoveryLoop:

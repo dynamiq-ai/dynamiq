@@ -40,7 +40,7 @@ def run_openai_img_url(prompt):
     openai_output = openai_node.execute(
         input_data={
             "user_message": "What’s in this image?",
-            "img_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg",
+            "img_url": "https://raw.githubusercontent.com/dynamiq-ai/dynamiq/main/examples/components/data/img.jpeg",
         }
     )
     print(openai_output)
@@ -59,7 +59,7 @@ def run_gemini(prompt):
     gemini_output = gemini_node.execute(
         input_data={
             "user_message": "What’s in this image?",
-            "img_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg",
+            "img_url": "https://raw.githubusercontent.com/dynamiq-ai/dynamiq/main/examples/components/data/img.jpeg",
         }
     )
 
@@ -79,7 +79,7 @@ def run_anthropic_bedrock(prompt):
     anthropic_output = anthropic_bedrock_node.execute(
         input_data={
             "user_message": "What’s in this image?",
-            "img_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg",
+            "img_url": "https://raw.githubusercontent.com/dynamiq-ai/dynamiq/main/examples/components/data/img.jpeg",
         }
     )
 

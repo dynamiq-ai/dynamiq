@@ -5,11 +5,10 @@ import pytest
 
 from dynamiq import ROOT_PATH, Workflow
 from dynamiq.callbacks import TracingCallbackHandler
-from dynamiq.connections import Gemini as GeminiConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.llms import Gemini, OpenAI
+from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.storages.file import FileStoreConfig
@@ -84,25 +83,10 @@ def openai_connection():
 
 
 @pytest.fixture(scope="module")
-def gemini_connection():
-    return GeminiConnection()
-
-
-@pytest.fixture(scope="module")
 def openai_llm(openai_connection):
     return OpenAI(
         connection=openai_connection,
         model="gpt-4o-mini",
-        max_tokens=3000,
-        temperature=0.1,
-    )
-
-
-@pytest.fixture(scope="module")
-def gemini_llm(gemini_connection):
-    return Gemini(
-        connection=gemini_connection,
-        model="gemini-3.0-flash-exp",
         max_tokens=3000,
         temperature=0.1,
     )

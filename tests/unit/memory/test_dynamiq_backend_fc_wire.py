@@ -138,3 +138,32 @@ def test_items_to_messages_reads_tool_calls_from_first_class_data(mocker):
     assert messages[1].role == MessageRole.TOOL
     assert messages[1].tool_call_id == "call_1"
     assert messages[1].name == "f"
+
+
+def test_a_function_calling_conversation_is_written_whole(mocker):
+    # The API rejects a blank text part; a replace that hit one after deleting the stored history lost the rest.
+    from dynamiq.memory import Memory
+
+    backend = _make_backend(mocker)
+    stored = []
+
+    def request(method, path, **kwargs):
+        if kwargs.get("json"):
+            parts = kwargs["json"]["data"]["content"]
+            if any(part.get("type") == "text" and not part.get("text", "").strip() for part in parts):
+                raise RuntimeError('400 {"content": {"0": {"text": "cannot be blank"}}}')
+            stored.append(kwargs["json"]["data"])
+
+    mocker.patch.object(backend, "_request", side_effect=request)
+    call = {"id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": "{}"}}
+    conversation = [
+        Message(role=MessageRole.USER, content="Weather in Paris?"),
+        Message(role=MessageRole.ASSISTANT, content="", tool_calls=[call]),
+        Message(role=MessageRole.TOOL, content="18C, sunny", tool_call_id="call_1", name="get_weather"),
+        Message(role=MessageRole.ASSISTANT, content="It is 18C and sunny in Paris."),
+    ]
+
+    Memory(backend=backend).replace_messages({"user_id": "u1", "session_id": "s1"}, conversation)
+
+    assert [data["role"] for data in stored] == ["user", "assistant", "tool", "assistant"]
+    assert stored[1]["content"] == [] and stored[1]["tool_calls"] == [call]

@@ -5,7 +5,54 @@ from pydantic import field_validator
 from dynamiq.connections import Cohere as CohereConnection
 from dynamiq.nodes.llms._strict import to_strict_subset_function
 from dynamiq.nodes.llms.base import BaseLLM
+from dynamiq.utils.litellm import on_litellm_import
 from dynamiq.utils.logger import logger
+
+
+def _patch_litellm_cohere_streamed_tool_calls() -> bool:
+    """Make LiteLLM read the tool calls of a streamed Cohere (Chat API V2) response.
+
+    LiteLLM's parser looks for them under ``delta.tool_calls`` of "tool-call-delta" events and skips
+    "tool-call-start", but Cohere sends the call's id and name in "tool-call-start" and its arguments
+    in "tool-call-delta", both under ``delta.message.tool_calls``. A streamed call therefore came back
+    with no tool calls. Returns False, leaving LiteLLM untouched, if its internals have changed.
+    """
+    try:
+        from litellm.llms.cohere import common_utils
+    except Exception as exc:
+        logger.debug("LiteLLM Cohere stream patch: import failed: %s", exc)
+        return False
+
+    iterator = getattr(common_utils, "CohereV2ModelResponseIterator", None)
+    original = getattr(iterator, "chunk_parser", None)
+    if original is None:
+        logger.warning("LiteLLM Cohere stream patch: CohereV2ModelResponseIterator.chunk_parser not found; skipping.")
+        return False
+    if getattr(original, "__dynamiq_patch__", False):
+        return True
+
+    def _patched(self, chunk: dict):
+        parsed = original(self, chunk)
+        if chunk.get("type") not in ("tool-call-start", "tool-call-delta"):
+            return parsed
+        call = ((chunk.get("delta") or {}).get("message") or {}).get("tool_calls")
+        if not isinstance(call, dict):
+            return parsed
+        function = call.get("function") or {}
+        parsed["tool_use"] = {
+            "id": call.get("id"),
+            "type": "function",
+            "function": {"name": function.get("name"), "arguments": function.get("arguments") or ""},
+            "index": int(chunk.get("index", 0)),
+        }
+        return parsed
+
+    _patched.__dynamiq_patch__ = True
+    iterator.chunk_parser = _patched
+    return True
+
+
+on_litellm_import(_patch_litellm_cohere_streamed_tool_calls)
 
 
 class Cohere(BaseLLM):
