@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from .gemini import GeminiDocumentEmbedder, GeminiTextEmbedder
     from .huggingface import HuggingFaceDocumentEmbedder, HuggingFaceTextEmbedder
     from .mistral import MistralDocumentEmbedder, MistralTextEmbedder
+    from .ollama import OllamaDocumentEmbedder, OllamaTextEmbedder
     from .openai import OpenAIDocumentEmbedder, OpenAITextEmbedder
     from .vertexai import VertexAIDocumentEmbedder, VertexAITextEmbedder
     from .watsonx import WatsonXDocumentEmbedder, WatsonXTextEmbedder
@@ -23,6 +24,8 @@ _LAZY_EXPORTS = {
     "HuggingFaceTextEmbedder": ".huggingface",
     "MistralDocumentEmbedder": ".mistral",
     "MistralTextEmbedder": ".mistral",
+    "OllamaDocumentEmbedder": ".ollama",
+    "OllamaTextEmbedder": ".ollama",
     "OpenAIDocumentEmbedder": ".openai",
     "OpenAITextEmbedder": ".openai",
     "VertexAIDocumentEmbedder": ".vertexai",
@@ -44,6 +47,8 @@ __all__ = [
     "HuggingFaceTextEmbedder",
     "MistralDocumentEmbedder",
     "MistralTextEmbedder",
+    "OllamaDocumentEmbedder",
+    "OllamaTextEmbedder",
     "OpenAIDocumentEmbedder",
     "OpenAITextEmbedder",
     "VertexAIDocumentEmbedder",

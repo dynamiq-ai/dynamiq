@@ -1,11 +1,15 @@
 import base64
 import binascii
+import hashlib
 import io
+import itertools
 import json
 import mimetypes
+import posixpath
 import re
 import threading
 import weakref
+from collections import Counter
 from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
@@ -28,6 +32,7 @@ from pydantic import (
 )
 
 from dynamiq.artifacts import ArtifactBackend, ArtifactConfig
+from dynamiq.connections.connections import merge_mcp_http_headers
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy, MemorySaveMode
 from dynamiq.memory.long_term import LongTermMemoryConfig
@@ -67,7 +72,6 @@ from dynamiq.nodes.agents.shared_session import (
 )
 from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
-    ToolCacheEntry,
     ToolOutputSandboxPersistenceConfig,
     bytes_to_data_url,
     convert_bytesio_to_file_info,
@@ -83,14 +87,21 @@ from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.nodes.schema_utils import strip_inaccessible_fields
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
-from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileSearchTool, FileWriteTool
-from dynamiq.nodes.tools.mcp import MCP_HTTP_HEADERS_FIELD, MCPServer
+from dynamiq.nodes.tools.file_tools import (
+    RESERVED_AGENT_PATH_PREFIX,
+    FileListTool,
+    FileReadTool,
+    FileSearchTool,
+    FileWriteTool,
+)
+from dynamiq.nodes.tools.mcp import MCP_HTTP_HEADERS_FIELD, MCPServer, MCPTool
 from dynamiq.nodes.tools.memory_store_tool import MemoryStoreTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.nodes.tools.skills_tool import SkillsTool
 from dynamiq.nodes.tools.todo_tools import TodoWriteTool
+from dynamiq.nodes.tools.utils import sanitize_filename
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import (
     Message,
@@ -117,6 +128,28 @@ from dynamiq.types.feedback import ApprovalConfig, FeedbackMethod
 from dynamiq.types.streaming import InputStreamingTimeoutError, StreamingMode
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import TRACING_REDACTED_KEYS, TRACING_REDACTED_PLACEHOLDER, deep_merge
+
+# Longest function name OpenAI, Anthropic and Gemini accept.
+MAX_TOOL_NAME_LENGTH = 64
+
+
+def _fit_tool_name(name: str, max_length: int | None) -> str:
+    """``name`` cut to ``max_length`` characters, ending in a hash of the whole name so two long names stay apart."""
+    if max_length is None or len(name) <= max_length:
+        return name
+    digest = hashlib.sha256(name.encode()).hexdigest()[:8]
+    return f"{name[: max_length - len(digest) - 1]}_{digest}"
+
+
+def _mcp_server_of(tool: MCPTool) -> tuple[str | None, str | None]:
+    """The id and name of the server that listed ``tool``: its owner, else the metadata saved with the tool."""
+    if (owner := tool._owner_server) is not None:
+        return owner.id, owner.name
+    metadata = tool.server_metadata
+    if isinstance(metadata, dict):  # the field defaults to a plain dict
+        return metadata.get("id"), metadata.get("name")
+    return metadata.id, metadata.name
+
 
 _APPROVAL_LOCKS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 _APPROVAL_LOCKS_GUARD = threading.Lock()
@@ -213,6 +246,28 @@ class StreamChunk(BaseModel):
     """Model for streaming chunks with choices containing delta updates."""
 
     choices: list[StreamChunkChoice]
+
+
+# Errors the sandbox SDKs raise for a path that does not exist, matched by name since the SDKs are optional.
+# E2B raises FileNotFoundException, a NotFoundException. Its sibling SandboxNotFoundException is a sandbox
+# that is gone, so the family is not matched as a whole.
+_MISSING_FILE_ERROR_NAMES = frozenset({"FileNotFoundException", "NotFoundException", "DaytonaNotFoundError"})
+# Daytona raises its base DaytonaError for a failed download, with this code from the sandbox's daemon in it.
+_DAYTONA_MISSING_FILE_CODE = "FILE_NOT_FOUND"
+
+
+def _is_missing_file_error(error: BaseException) -> bool:
+    """Whether reading a sandbox file failed because the file does not exist.
+
+    The model can correct a wrong path; an expired sandbox or a network failure it cannot, so those
+    still end the run instead of sending the model looking for another path.
+    """
+    name = type(error).__name__
+    return (
+        isinstance(error, (FileNotFoundError, KeyError))
+        or name in _MISSING_FILE_ERROR_NAMES
+        or (name == "DaytonaError" and _DAYTONA_MISSING_FILE_CODE in str(error))
+    )
 
 
 class AgentStatus(str, Enum):
@@ -415,7 +470,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
     _excluded_tool_ids: set[str] = PrivateAttr(default_factory=set)
     _own_sandbox_tool_ids: set[str] = PrivateAttr(default_factory=set)
-    _tool_cache: dict[ToolCacheEntry, Any] = {}
+    # Set when a run's uploads made this agent create its own in-memory file store.
+    _file_store_auto_created: bool = PrivateAttr(default=False)
+    _file_store_owner: tuple[str | None, str | None] | None = PrivateAttr(default=None)
+    _file_store_restored: bool = PrivateAttr(default=False)
     _run_artifacts: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
     _history_offset: int = PrivateAttr(
         default=DEFAULT_HISTORY_OFFSET,
@@ -429,6 +487,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     _sandbox_is_shared: bool = PrivateAttr(default=False)
     _restored_hook_state: dict[str, Any] | None = PrivateAttr(default=None)
     _hook_tools_checked: bool = PrivateAttr(default=False)
+    # (server id, tool name, offered name) of each MCP tool offered under another name, so that is logged once.
+    _renamed_tool_notices: set[tuple[str, str, str]] = PrivateAttr(default_factory=set)
     # A borrowed per-agent view of an owner's shared sandbox; when set it is this
     # agent's effective sandbox_backend for the whole run (tools, uploads, output).
     _shared_sandbox_view: Sandbox | None = PrivateAttr(default=None)
@@ -867,6 +927,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         Executes the agent with the given input data.
         """
         self.reset_run_state()
+        self._keep_uploads_within_conversation((input_data.user_id, input_data.session_id))
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -1701,7 +1762,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         if debug_info is None:
             debug_info = []
         for key, value in params.items():
-            if key in merged_input and isinstance(value, dict) and isinstance(merged_input[key], dict):
+            if key == MCP_HTTP_HEADERS_FIELD and isinstance(value, dict) and isinstance(merged_input.get(key), dict):
+                # Merged by header name whatever its case, as for listing the tools: a dict merge keeps both
+                # spellings, and the server then authenticates the call as whichever one it reads.
+                merged_input[key] = merge_mcp_http_headers(merged_input[key], value) or {}
+                debug_info.append(f"  - From {source}: Merged nested {key}")
+            elif key in merged_input and isinstance(value, dict) and isinstance(merged_input[key], dict):
                 merged_nested = merged_input[key].copy()
                 merged_input[key] = deep_merge(value, merged_nested)
                 debug_info.append(f"  - From {source}: Merged nested {key}")
@@ -1774,10 +1840,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 "tools. Rename the servers, or key the params by server id instead."
             )
         layers.append(tool_params.by_id_params.get(server.id))
-        headers: dict[str, Any] = {}
+        headers: dict[str, Any] | None = None
         for layer in layers:
             if isinstance(layer, dict) and isinstance(layer.get(MCP_HTTP_HEADERS_FIELD), dict):
-                headers.update(layer[MCP_HTTP_HEADERS_FIELD])
+                headers = merge_mcp_http_headers(headers, layer[MCP_HTTP_HEADERS_FIELD])
         return headers or None
 
     def _owner_server_name_is_unambiguous(self, owner: Any) -> bool:
@@ -1893,7 +1959,16 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         file_paths = self._extract_file_paths_from_input(tool, merged_input)
 
         if self.sandbox_backend and file_paths:
-            files = self.sandbox_backend.collect_files(file_paths=file_paths)
+            try:
+                files = self.sandbox_backend.collect_files(file_paths=file_paths)
+            except FileNotFoundError as e:
+                if not _is_missing_file_error(e.__cause__ or e):
+                    raise
+                # A mistyped or not-yet-created path is the model's to fix, not a reason to end the run.
+                raise ToolExecutionException(
+                    f"{e}. Pass the path of a file that exists in the sandbox and call '{tool.name}' again.",
+                    recoverable=True,
+                ) from e
             files_map = {path: file for path, file in zip(file_paths, files)}
         elif self.file_store_backend:
             files = self.file_store_backend.list_files_bytes()
@@ -2147,8 +2222,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 text = f"{prompt}\n{arguments}\nPress Enter to approve, or type your feedback to decline: "
                 with self._one_approval_at_a_time(config):
                     answer = self.send_console_approval_message(text, config=config)
-        except InputStreamingTimeoutError:
-            raise  # as for a node-level approval: the run stops with a resumable checkpoint
+        except InputStreamingTimeoutError as e:
+            # As for a node-level approval, the run stops with a resumable checkpoint. Retrying the agent would
+            # run every earlier tool again and ask the human a second time.
+            e.retryable = False
+            raise
         except (EOFError, ValueError) as e:
             logger.warning(f"Agent {self.name} - {self.id}: no approval for '{tool_name}' ({type(e).__name__}): {e}")
             self.run_on_node_execute_run(config.callbacks, hook_events=[{**event, "outcome": "unavailable"}], **kwargs)
@@ -2470,6 +2548,15 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     raise ToolExecutionException(error_message)
                 elif issubclass(tool_result.error.type, HookStopException):
                     raise HookStopException(error_message)
+                elif issubclass(tool_result.error.type, InputStreamingTimeoutError):
+                    # Kept as a timeout, it is what pauses the run. Retrying the agent would run every earlier
+                    # tool again to reach the same wait, so it is not retried; the inner wait's message is kept.
+                    override = ensure_config(config).nodes_override.get(tool.id)
+                    streaming = getattr(override, "streaming", None) or tool.streaming
+                    timeout_error = InputStreamingTimeoutError(node_id=tool.id, timeout=streaming.timeout)
+                    timeout_error.args = (tool_result.error.message,)
+                    timeout_error.retryable = False
+                    raise timeout_error
                 else:
                     raise ValueError(error_message)
 
@@ -2517,13 +2604,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             output_files = tool_result.output.get("files", [])
             self._record_artifact(tool_output_meta)
 
-            from dynamiq.nodes.tools.artifact_tool import ArtifactTool
-
-            if not isinstance(tool, (ContextManagerTool, ArtifactTool, MemoryStoreTool)):
-                self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = (
-                    tool_result_content_processed,
-                    tool_output_meta,
-                )
             if collect_dependency:
                 return tool_result_content_processed, output_files, tool_output_meta, dependency_dict
 
@@ -2717,7 +2797,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         stored_files = []
         for file in tool_files:
             if isinstance(file, io.BytesIO):
-                file_name = getattr(file, "name", f"file_{id(file)}.bin")
+                file_name = self._workspace_file_name(getattr(file, "name", None), default=f"file_{id(file)}.bin")
                 file_description = getattr(file, "description", "Tool-generated file")
                 content_type = getattr(file, "content_type", "application/octet-stream")
 
@@ -2769,6 +2849,22 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s)")
             logger.debug(f"Tool '{tool.name}' generated file(s): {stored_files}")
         return stored_files
+
+    @staticmethod
+    def _workspace_file_name(name: str | None, default: str) -> str:
+        """Where a file a tool generated goes, relative to the workspace.
+
+        The name keeps its folders, so files that share a file name stay apart: ``charts/q3.png`` stays
+        as it is and ``/tmp/emea/result.csv`` becomes ``tmp/emea/result.csv``. A drive letter, a leading
+        ``/`` and any ``..`` that would climb out of the workspace are dropped, and a file aimed at the
+        agent's own ``._agent/`` folder keeps only its file name, so a tool cannot write outside the
+        workspace or over the agent's todo list.
+        """
+        path = re.sub(r"^[A-Za-z]:", "", (name or "").replace("\\", "/"))
+        parts = [part for part in posixpath.normpath(path).split("/") if part not in ("", ".", "..")]
+        if parts and parts[0] == RESERVED_AGENT_PATH_PREFIX:
+            return sanitize_filename(parts[-1], default=default)
+        return "/".join(parts) or sanitize_filename(name, default=default)
 
     def _upload_files_to_sandbox(self, normalized_files: list) -> list[str]:
         """Upload file-like objects to the sandbox backend."""
@@ -2832,6 +2928,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         """Create in-memory file store and file tools when files are uploaded and no sandbox/file store exists."""
         had_artifacts = bool(self.artifacts_backend)
         self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
+        self._file_store_auto_created = True
         self.tools.extend(
             [
                 FileReadTool(file_store=self.file_store_backend, llm=self.llm),
@@ -2842,13 +2939,36 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         new_tool_description = self.tool_description
         self.system_prompt_manager.set_initial_variable("tool_description", new_tool_description)
         gained_artifacts = bool(self.artifacts_backend) and not had_artifacts
-        if self.system_prompt_manager._prompt_blocks.get("tools") == "" or gained_artifacts:
-            from dynamiq.nodes.agents.agent import Agent
+        from dynamiq.nodes.agents.agent import Agent
 
-            if isinstance(self, Agent):
+        if isinstance(self, Agent):
+            # FUNCTION_CALLING and STRUCTURED_OUTPUT send the tool schemas built at init: without a
+            # rebuild the prompt names the file tools while the request does not let the model call them.
+            self._tools, self._response_format = self._build_inference_schemas(self._offered_tools(self.tools))
+            if self.system_prompt_manager._prompt_blocks.get("tools") == "" or gained_artifacts:
                 # The canonical config, not a second copy: the tools added above make
                 # `has_tools` true on their own, and fields added later cannot be missed here.
                 self.system_prompt_manager.build_react_prompt(self._react_prompt_config())
+
+    def _keep_uploads_within_conversation(self, owner: tuple[str | None, str | None]) -> None:
+        """Empty the store created for uploads when this run belongs to another user or session.
+
+        One instance can serve many conversations, so a store kept from another one would show its
+        files, possibly another user's, to this run. Later turns of the same conversation keep them,
+        since its memory still names them. A resumed run keeps the files its checkpoint restored.
+        """
+        previous_owner, self._file_store_owner = self._file_store_owner, owner
+        restored, self._file_store_restored = self._file_store_restored, False
+        if previous_owner != owner and not restored:
+            self._empty_auto_created_file_store()
+
+    def _empty_auto_created_file_store(self) -> None:
+        """Delete every file in the store created for uploads; a store the caller configured is left alone."""
+        store = self.file_store_backend if self._file_store_auto_created else None
+        if store is None:
+            return
+        for info in store.list_files(recursive=True):
+            store.delete(info.path)
 
     def _inject_attached_files_into_message(
         self,
@@ -3240,25 +3360,86 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             )
         ]
 
+    def _offered_tool_names(self, tools: list[Node]) -> list[str]:
+        """The name the model is offered each of ``tools`` under, in the same order.
+
+        That is ``sanitize_tool_name(tool.name)``, cut in function calling to the length providers accept, except for
+        an MCP tool whose name another offered tool also has, or that keeps no character a provider accepts: it gets a
+        name of its own (``github_search``). The names belong to this agent only. Tool objects are shared (a server's
+        ``get_mcp_tools`` returns the same ones to every agent) and keep their own names, which hooks, tool_params,
+        tracing and the MCP server go by. The agent's own tools are named first, so tools listed for one run never
+        change the names the others get.
+        """
+        named: dict[int, str] = {}
+        taken: set[str] = set()
+        for group in (self._offered_tools(self.tools), tools):
+            fresh = list({id(tool): tool for tool in group if id(tool) not in named}.values())
+            named.update(zip(map(id, fresh), self._assign_offered_names(fresh, taken)))
+        return [named[id(tool)] for tool in tools]
+
+    def _assign_offered_names(self, tools: list[Node], taken: set[str]) -> list[str]:
+        """Names for ``tools`` that differ from each other and from ``taken``, which gets them added."""
+        function_calling = getattr(self, "inference_mode", None) == InferenceMode.FUNCTION_CALLING
+        max_length = MAX_TOOL_NAME_LENGTH if function_calling else None
+        bases = [_fit_tool_name(self.sanitize_tool_name(tool.name), max_length) for tool in tools]
+        counts = Counter(bases)
+        clashing = {base for base in bases if counts[base] > 1 or base in taken}
+        taken.update(bases)
+        names = []
+        for tool, base in zip(tools, bases):
+            if isinstance(tool, MCPTool) and (not base or base in clashing):
+                base = self._mcp_tool_name_apart(tool, taken, max_length)
+                taken.add(base)
+            names.append(base)
+        return names
+
+    def _mcp_tool_name_apart(self, tool: MCPTool, taken: set[str], max_length: int | None) -> str:
+        """A name for ``tool`` that is not in ``taken``: its server's name and its own, then a hash while taken."""
+        server_id, server_name = _mcp_server_of(tool)
+        prefix = self.sanitize_tool_name(server_name or "") or "mcp"
+        own = self.sanitize_tool_name(tool.name)
+        name = _fit_tool_name(f"{prefix}_{own}" if own else prefix, max_length)
+        if not own or name in taken:
+            # Servers left at the default name share the prefix; the server id sets them apart, and the attempt
+            # number covers servers that share an id too.
+            seed = f"{server_id or tool.id}:{tool.name}"
+            for attempt in itertools.count():
+                digest = hashlib.sha256(f"{seed}:{attempt}".encode()).hexdigest()[:8]
+                candidate = _fit_tool_name(f"{name}_{digest}", max_length)
+                if candidate not in taken:
+                    name = candidate
+                    break
+        notice = (server_id or tool.id, tool.name, name)
+        if notice not in self._renamed_tool_notices:
+            self._renamed_tool_notices.add(notice)
+            reason = "another tool has the same name" if own else "its name has no character a provider accepts"
+            logger.warning(
+                f"Agent {self.name} - {self.id}: MCP tool '{tool.name}' of server '{server_name or prefix}' is "
+                f"offered to the model as '{name}': {reason}."
+            )
+        return name
+
     @property
     def tool_description(self) -> str:
         """Returns a description of the tools available to the agent."""
         tools = self._runtime_tools
-        return (
-            "\n".join([f"- {tool.name}: {(tool.description or '').strip()}" for tool in tools])
-            if tools
-            else ""
-        )
+        lines = []
+        for name, tool in zip(self._offered_tool_names(tools), tools):
+            # Unless it had to be renamed, a tool is listed by its own name, as before.
+            shown = tool.name if name == self.sanitize_tool_name(tool.name) else name
+            lines.append(f"- {shown}: {(tool.description or '').strip()}")
+        return "\n".join(lines)
 
     @property
     def tool_names(self) -> str:
         """Returns a comma-separated list of tool names available to the agent."""
-        return ",".join([self.sanitize_tool_name(tool.name) for tool in self._runtime_tools])
+        return ",".join(self._offered_tool_names(self._runtime_tools))
 
     @property
     def tool_by_names(self) -> dict[str, Node]:
-        """Returns a dictionary mapping tool names to their corresponding Node objects."""
-        return {self.sanitize_tool_name(tool.name): tool for tool in self._runtime_tools}
+        """Returns a dictionary mapping the names the model is offered to their Node objects."""
+        tools = self._runtime_tools
+        return dict(zip(self._offered_tool_names(tools), tools))
 
     def _record_artifact(self, tool_output_meta: dict[str, Any]) -> None:
         """Keep the latest ref per artifact created or updated this run; the run output returns them.
@@ -3278,7 +3459,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         SubAgentTool call counts are preserved on resume so the per-run limit stays correct.
         """
         self._run_depends = []
-        self._tool_cache: dict[ToolCacheEntry, Any] = {}
         self._run_artifacts: dict[str, dict[str, Any]] = {}
         self._completed_loops = 0
         self.system_prompt_manager.reset()

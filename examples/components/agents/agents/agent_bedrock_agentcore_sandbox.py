@@ -63,7 +63,7 @@ def setup_agent(region: str = None) -> tuple[Agent, BedrockAgentCoreSandbox]:
     if not aws_connection.region:
         raise ValueError("AWS region is required. Set AWS_DEFAULT_REGION environment variable or pass it directly.")
 
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=0.2)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-6.1-sol", temperature=0.2)
 
     # Create AgentCore sandbox backend
     agentcore_sandbox = BedrockAgentCoreSandbox(

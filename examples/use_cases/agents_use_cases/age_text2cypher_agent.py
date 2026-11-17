@@ -14,8 +14,8 @@ from dynamiq.nodes.types import InferenceMode  # noqa: E402
 
 def build_llm() -> OpenAI:
     return OpenAI(
-        name="gpt-5",
-        model="gpt-5",
+        name="gpt-6.1-sol",
+        model="gpt-6.1-sol",
         temperature=0,
         max_tokens=2048,
     )

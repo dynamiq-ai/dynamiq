@@ -12,7 +12,7 @@ nodes:
       id: sandbox-agent-llm
       type: dynamiq.nodes.llms.OpenAI
       connection: openai-conn
-      model: gpt-4o
+      model: gpt-6.1-sol
     role: "a helpful assistant that can execute shell commands in a sandbox environment."
     sandbox:
       enabled: true

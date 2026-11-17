@@ -15,7 +15,7 @@ nodes:
       id: agent-rag-llm
       type: dynamiq.nodes.llms.OpenAI
       connection: openai-conn
-      model: gpt-4o
+      model: gpt-6.1-sol
     tools:
       - id: agent-rag-tool
         type: dynamiq.nodes.retrievers.VectorStoreRetriever

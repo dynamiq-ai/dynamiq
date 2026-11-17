@@ -29,7 +29,7 @@ from dynamiq.prompts import (
 # Point this at a local video file before running.
 VIDEO_FILE = ""
 
-MODEL_NAME = "gemini/gemini-3.5-flash"
+MODEL_NAME = "gemini/gemini-3.8-flash"
 
 
 def encode_video(video_path: str) -> str:

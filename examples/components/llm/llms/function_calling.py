@@ -49,7 +49,7 @@ def main():
 
     openai_node = OpenAI(
         name="openAI",
-        model="gpt-5.6-terra",
+        model="gpt-6.1-terra",
         prompt=Prompt(
             messages=[
                 Message(

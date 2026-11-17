@@ -27,7 +27,7 @@ def setup_agent() -> Agent:
         is_optimized_for_agents=True,
     )
 
-    llm = setup_llm(model_name="gpt-5-mini")
+    llm = setup_llm(model_name="gpt-6.1-terra")
 
     agent = Agent(
         name="React Agent",

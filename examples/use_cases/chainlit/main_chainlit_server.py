@@ -29,7 +29,7 @@ def start_chat():
             nodes=[
                 llms.OpenAI(
                     name="OpenAI",
-                    model="gpt-5.6-terra",
+                    model="gpt-6.1-terra",
                     connection=connections.OpenAI(
                         api_key=openai_api_key,
                     ),

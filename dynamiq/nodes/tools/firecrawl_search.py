@@ -17,16 +17,17 @@ from dynamiq.utils.logger import logger
 DESCRIPTION_FIRECRAWL_SEARCH = """Search the internet and returns SERP results.
 
 Key capabilities:
-- Category biasing for focused searches (github, research, pdf)
+- Category biasing for focused searches (developer, research, pdf)
 - Geo and time filtering with country, location, and tbs parameters
 
 Usage strategy:
-- Use categories to focus on GitHub repos, research papers, or PDFs
+- Use categories to focus on GitHub repos and READMEs (developer, which takes no other category),
+  research papers, or PDFs
 - Use tbs for time-based filtering (e.g. qdr:d for past day, qdr:w for past week)
 
 Examples:
 {"query": "firecrawl docs", "limit": 5}
-{"query": "langchain github", "categories": ["github"], "tbs": "qdr:w"}
+{"query": "langchain", "categories": ["developer"], "tbs": "qdr:w"}
 {"query": "coffee shops", "location": "San Francisco,California,United States", "country": "US"}"""
 
 
@@ -51,7 +52,8 @@ class SourceNews(BaseModel):
 SourceType = SourceWeb | SourceImages | SourceNews
 
 
-CategoryType = Literal["github", "research", "pdf"]
+# Firecrawl replaced "github" with "developer"; "github" is still accepted and sent as "developer".
+CategoryType = Literal["developer", "github", "research", "pdf"]
 
 
 class FirecrawlSearchInputSchema(BaseModel):
@@ -68,7 +70,7 @@ class FirecrawlSearchInputSchema(BaseModel):
     )
     categories: list[CategoryType] | None = Field(
         default=None,
-        description="Optional category filters for GitHub/research/PDF focused searches.",
+        description="Optional category filters for developer (GitHub, alone), research or PDF focused searches.",
     )
     tbs: str | None = Field(
         default=None,
@@ -135,6 +137,12 @@ class FirecrawlSearchTool(ConnectionNode):
             return text
         return text[:limit].rsplit(" ", 1)[0].rstrip("\n") + "..."
 
+    @staticmethod
+    def _api_categories(categories: list[str] | None) -> list[str] | None:
+        if not categories:
+            return categories
+        return list(dict.fromkeys("developer" if c == "github" else c for c in categories))
+
     def _build_search_payload(self, query: str, overrides: FirecrawlSearchInputSchema) -> dict[str, Any]:
         """Construct the payload for the Firecrawl search API."""
 
@@ -155,7 +163,7 @@ class FirecrawlSearchTool(ConnectionNode):
                 source.model_dump(exclude_none=True, by_alias=True) if isinstance(source, BaseModel) else source
                 for source in sources
             ],
-            "categories": resolve("categories"),
+            "categories": self._api_categories(resolve("categories")),
             "location": resolve("location"),
             "tbs": resolve("tbs"),
             "country": resolve("country"),

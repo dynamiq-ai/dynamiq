@@ -94,7 +94,7 @@ class TimeWeightedDocumentRanker(Node):
             **kwargs: Additional keyword arguments.
 
         Returns:
-            dict[str, Any]: A dictionary containing the original query and the ranked documents.
+            dict[str, Any]: A dictionary containing the top_k documents ranked by adjusted score.
 
         Example:
 
@@ -123,7 +123,7 @@ class TimeWeightedDocumentRanker(Node):
         )
 
         return {
-            "documents": ranked_documents,
+            "documents": ranked_documents[: self.top_k],
         }
 
     @staticmethod

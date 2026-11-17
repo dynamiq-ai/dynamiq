@@ -137,6 +137,17 @@ def encode(mode: InferenceMode, step: tuple, index: int) -> dict[str, Any]:
     return {"content": content}
 
 
+def use_mode(agent: Agent, mode: InferenceMode) -> None:
+    """Switch a built agent to ``mode`` the way building it in that mode would: rebuild the prompt and the
+    tool or structured-output schemas the mode sends. Setting the field alone keeps those of the old mode."""
+    if agent.inference_mode == mode:
+        return
+    agent.inference_mode = mode
+    agent._init_prompt_blocks()
+    if agent._skills_should_init():
+        agent._apply_skills_to_prompt()
+
+
 class Recorder:
     """What the (scripted) LLM was sent, call by call."""
 
@@ -155,7 +166,7 @@ class Recorder:
 @contextmanager
 def scripted(agent: Agent, mode: InferenceMode, steps: list[tuple]):
     """Make ``agent``'s LLM follow ``steps`` in ``mode``. Yields a Recorder of the prompts it was sent."""
-    agent.inference_mode = mode
+    use_mode(agent, mode)
     recorder = Recorder()
     counter = {"n": 0}
 
@@ -213,7 +224,7 @@ def scripted_stateless(mode: InferenceMode, steps: list[tuple], agents: list[Age
     number of tool results already in its own prompt, so concurrent runs cannot disturb each other."""
     prompts: list[list[Message]] = []
     for agent in agents or []:
-        agent.inference_mode = mode
+        use_mode(agent, mode)
 
     def run(self, **kwargs):
         messages = list(kwargs["prompt"].messages)
@@ -234,7 +245,7 @@ def scripted_streaming(agent: Agent, mode: InferenceMode, steps: list[tuple]):
     """Like ``scripted`` but the final reply is also fed, char by char, to the callbacks the agent attached to
     its LLM (as a real streaming LLM would). Yields ``(recorder, streamed)``, ``streamed`` being the
     ``(step, content)`` pairs the agent handed to ``stream_content``."""
-    agent.inference_mode = mode
+    use_mode(agent, mode)
     recorder = Recorder()
     streamed: list[tuple[str, Any]] = []
     counter = {"n": 0}

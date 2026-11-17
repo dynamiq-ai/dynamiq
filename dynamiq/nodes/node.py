@@ -1448,6 +1448,9 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         self.run_on_node_error(callbacks=config.callbacks, error=e, input_data=transformed_input, **merged_kwargs)
         if isinstance(e, RunPausedException):
             logger.info(self._node_run_log(f"{log_prefix}execution paused the run. {e}"))
+        elif isinstance(e, InputStreamingTimeoutError):
+            # No reply from a human in time: with checkpoints this is how a run pauses, and it is never a fault.
+            logger.warning(self._node_run_log(f"{log_prefix}execution stopped waiting for input. {e}"))
         else:
             logger.error(
                 self._node_run_log(
@@ -1771,7 +1774,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 try:
                     self.ensure_client()
                 except Exception as conn_error:
-                    logger.error(self._node_run_log(f"Failed to ensure client connection: {conn_error}"))
+                    logger.warning(self._node_run_log(f"Failed to ensure client connection: {conn_error}"))
                     error = conn_error
                     if attempt < n_attempt - 1:
                         time_to_sleep = self._retry_backoff_seconds(attempt)
@@ -1809,7 +1812,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 except Exception as e:
                     error = e
                     self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
-                    logger.error(self._node_run_log(f"execution error: {e}"))
+                    logger.warning(self._node_run_log(f"execution error: {e}"))
 
                 # a permanent failure fails the same way on every attempt
                 if not is_retryable_error(error):
@@ -1822,7 +1825,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                     logger.info(self._node_run_log(f"retrying in {time_to_sleep:.2f} seconds."))
                     time.sleep(time_to_sleep)
 
-            logger.error(self._node_run_log(f"execution failed after {attempt + 1} attempts."))
+            # The run logs the failure at error level, once.
+            logger.warning(self._node_run_log(f"execution failed after {attempt + 1} attempts."))
             raise error
         finally:
             if executor is not None:
@@ -1894,7 +1898,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 # Offload blocking client initialization to a thread to avoid blocking the event loop
                 await self._offload_to_executor(executor, self.ensure_client)
             except Exception as conn_error:
-                logger.error(self._node_run_log(f"Failed to ensure client connection: {conn_error}"))
+                logger.warning(self._node_run_log(f"Failed to ensure client connection: {conn_error}"))
                 error = conn_error
                 if attempt < n_attempt - 1:
                     time_to_sleep = self._retry_backoff_seconds(attempt)
@@ -1929,7 +1933,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             except Exception as e:
                 error = e
                 self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
-                logger.error(self._node_run_log(f"execution error: {e}"))
+                logger.warning(self._node_run_log(f"execution error: {e}"))
 
             # a permanent failure fails the same way on every attempt
             if not is_retryable_error(error):
@@ -1941,7 +1945,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 logger.info(self._node_run_log(f"retrying in {time_to_sleep:.2f} seconds."))
                 await asyncio.sleep(time_to_sleep)
 
-        logger.error(self._node_run_log(f"execution failed after {attempt + 1} attempts."))
+        # The run logs the failure at error level, once.
+        logger.warning(self._node_run_log(f"execution failed after {attempt + 1} attempts."))
         raise error
 
     def get_context_for_input_schema(self) -> dict:

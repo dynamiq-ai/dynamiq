@@ -19,11 +19,11 @@ def run_workflow(input: str) -> str:
     connection = OpenAIConnection()
     llm = OpenAI(
         connection=connection,
-        model="gpt-4o-mini",
+        model="gpt-6-luna",
         temperature=0.01,
     )
 
-    text_embedder = OpenAITextEmbedder(model="text-embedding-ada-002")
+    text_embedder = OpenAITextEmbedder(model="text-embedding-3-small")
     document_retriever = PineconeDocumentRetriever(
         index_name="default",
         top_k=3,

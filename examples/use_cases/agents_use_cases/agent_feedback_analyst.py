@@ -51,7 +51,7 @@ def _create_agent() -> Agent:
         "TOGETHER_API_KEY",
     )
 
-    model_name = "zai-org/GLM-4.5-Air-FP8"  # "openai/gpt-oss-120b"
+    model_name = "zai-org/GLM-5.3-Flash"  # "openai/gpt-oss-120b"
     connection = TogetherAIConnection(api_key=TOGETHER_API_KEY)
     llm = TogetherAI(
         model=model_name,

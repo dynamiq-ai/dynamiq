@@ -156,7 +156,7 @@ def initialize_workflow(endpoint_url, api_key):
 
     llm_model = OpenAI(
         connection=openai_connection,
-        model="gpt-4o-mini",
+        model="gpt-6-luna",
         temperature=0.01,
     )
 
@@ -174,7 +174,7 @@ def initialize_workflow(endpoint_url, api_key):
     generate_report_node = OpenAI(
         id="generate_report_node",
         name="generate-report",
-        model="gpt-4o-mini",
+        model="gpt-6-luna",
         connection=OpenAIConnection(),
         prompt=Prompt(messages=[Message(role="user", content=WRITE_REPORT_PROMPT)]),
         temperature=0.35,

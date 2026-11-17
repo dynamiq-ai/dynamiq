@@ -77,3 +77,16 @@ def test_empty_response_with_normal_stop_is_returned(llm):
     result = llm._handle_completion_response(_mock_response("", "stop"), config=RunnableConfig(callbacks=[]))
 
     assert result["content"] == ""
+
+
+@pytest.mark.parametrize("finish_reason", ["stop", "tool_calls", None])
+def test_a_complete_reply_keeps_its_output_shape(llm, finish_reason):
+    result = llm._handle_completion_response(_mock_response("done", finish_reason), config=RunnableConfig(callbacks=[]))
+
+    assert result == {"content": "done"}
+
+
+def test_a_reply_cut_off_at_max_tokens_says_so(llm):
+    result = llm._handle_completion_response(_mock_response("partial", "length"), config=RunnableConfig(callbacks=[]))
+
+    assert result == {"content": "partial", "finish_reason": "length"}

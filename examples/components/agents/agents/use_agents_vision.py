@@ -12,7 +12,7 @@ IMAGE_FILE = ""
 
 def run_files_with_images_workflow():
     """Example workflow that automatically detects images in the files field"""
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4.5-preview-2025-02-27", temperature=1)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-6.1-sol")
     agent = Agent(
         name="FilesImageAgent",
         id="files_image_agent",
