@@ -1188,8 +1188,15 @@ class Stagehand(ConnectionNode):
                     lambda p: session.act(input=input_data.instruction, **p), "act", payload
                 )
                 result = response_obj.data.result.model_dump()
-                zip_data = await self.get_downloads_via_sdk(self._session_id, config=config)
-                files = self.extract_files_from_zip(zip_data) if zip_data else []
+                try:
+                    zip_data = await self.get_downloads_via_sdk(self._session_id, config=config)
+                    files = self.extract_files_from_zip(zip_data) if zip_data else []
+                except CanceledException:
+                    raise
+                except Exception as exc:
+                    # The act already ran: a retryable error here would make the agent repeat it
+                    # (e.g. resubmit a form), so return its result without the files instead.
+                    logger.warning(f"Tool {self.name} - {self.id}: failed to fetch downloads after act: {exc}")
             elif input_data.action_type == StagehandActionType.GOTO:
                 if input_data.url is None:
                     raise ToolExecutionException(

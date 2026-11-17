@@ -727,3 +727,24 @@ class TestBrowserUse:
         monkeypatch.delenv("BROWSER_USE_API_KEY", raising=False)
         with pytest.raises(ValueError, match="BROWSER_USE_API_KEY"):
             BrowserUseConnection(model_api_key="mk")
+
+    def test_download_failure_after_act_returns_the_act_result(self):
+        """The act already ran: a retryable error would make the agent repeat it (e.g. resubmit a form)."""
+        api = _browser_use_api([], lambda request: httpx.Response(500, json={"detail": "boom"}))
+        tool = bare_stagehand(
+            connection=BrowserUseConnection(api_key="bu-key", model_api_key="mk"),
+            _session_id="bu-1",
+            _browser_use_client=api,
+        )
+        session = MagicMock()
+        act_response = MagicMock()
+        act_response.data.result.model_dump.return_value = {"success": True}
+        session.act = AsyncMock(return_value=act_response)
+        tool._stagehand_session = session
+        _stub_execute_scaffolding(tool)
+
+        data = StagehandInputSchema(action_type=StagehandActionType.ACT, instruction="click submit")
+        result = asyncio.run(tool.execute_async(data))
+
+        assert result == {"content": {"success": True}}
+        session.act.assert_awaited_once()
