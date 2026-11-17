@@ -84,7 +84,10 @@ class PIIDetector(ConnectionNode):
         response = requests.post(api_url, headers=headers, json=payload, timeout=self.timeout)
 
         if response.status_code == 200:
-            result = [item.get("entity_group", item.get("entity")) for item in response.json()]
+            result = [
+                item.get("entity_group", item.get("entity")) if isinstance(item, dict) else None
+                for item in response.json()
+            ]
             if None in result:
                 # A text classifier, such as one endpoint shared with the prompt-injection detector, labels the whole
                 # text; read as entities, its labels would flag every message.

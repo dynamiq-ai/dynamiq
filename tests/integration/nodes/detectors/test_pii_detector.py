@@ -64,8 +64,13 @@ def test_workflow_with_piidetector(requests_mock, connection, url, mock_request_
     assert call_mock.last_request.url == url
 
 
-def test_huggingface_pii_detector_fails_on_a_text_classifier(requests_mock):
-    requests_mock.post("http://tei.internal:8080/predict", json=[{"label": "SAFE", "score": 0.99}])
+@pytest.mark.parametrize(
+    "reply",
+    [[{"label": "SAFE", "score": 0.99}], [[{"label": "SAFE", "score": 0.99}]]],
+    ids=["flat", "nested"],
+)
+def test_huggingface_pii_detector_fails_on_a_text_classifier(requests_mock, reply):
+    requests_mock.post("http://tei.internal:8080/predict", json=reply)
     detector = PIIDetector(connection=HuggingFace(api_key="k", url="http://tei.internal:8080/predict"))
 
     result = detector.run(input_data={"message": "My card is 4111 1111 1111 1111."})
