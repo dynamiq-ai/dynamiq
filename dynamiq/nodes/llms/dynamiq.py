@@ -81,7 +81,9 @@ class DynamiqCacheControl(AnthropicCacheControl):
     automatic: bool = False
 
 
-def _with_cache_breakpoints(messages: list[dict], cache_control: AnthropicCacheControl) -> tuple[list[dict], bool]:
+def _with_cache_breakpoints(
+    messages: list[dict], cache_control: AnthropicCacheControl, other_breakpoints: int = 0
+) -> tuple[list[dict], bool]:
     """A copy of `messages` with prompt caching breakpoints, as the Anthropic node has LiteLLM place them, and whether
     the request also asks the provider for the automatic one.
 
@@ -89,10 +91,11 @@ def _with_cache_breakpoints(messages: list[dict], cache_control: AnthropicCacheC
     `cache_injection_point_index` gets the rolling one, or the nearest message before it with text, such as the one
     before an assistant turn that only calls tools. The system breakpoint comes first, so it is the one kept when the
     request has no room left for both. With automatic caching, the rolling breakpoint is the provider's, and it takes
-    one of the request's breakpoints, so it is left out when the messages already carry all of them.
+    one of the request's breakpoints, so it is left out when the request already carries all of them.
+    `other_breakpoints` counts those outside the messages, such as on tool definitions.
     """
     control = cache_control.model_dump(exclude_none=True, include={"type", "ttl"})
-    existing = sum(_cache_breakpoints(message) for message in messages)
+    existing = other_breakpoints + sum(_cache_breakpoints(message) for message in messages)
     automatic = isinstance(cache_control, DynamiqCacheControl) and cache_control.automatic
     automatic = automatic and existing < _MAX_CACHE_BREAKPOINTS
     room = _MAX_CACHE_BREAKPOINTS - existing - (1 if automatic else 0)
@@ -291,12 +294,19 @@ class Dynamiq(BaseLLM):
             request["messages"] = [self._replayable(message) for message in request["messages"]]
         if self.cache_control and request.get("messages"):
             # In the messages, since the router drops LiteLLM's cache_control_injection_points.
-            request["messages"], automatic = _with_cache_breakpoints(request["messages"], self.cache_control)
+            tool_breakpoints = sum(
+                1 for tool in request.get("tools") or () if isinstance(tool, dict) and tool.get("cache_control")
+            )
+            request["messages"], automatic = _with_cache_breakpoints(
+                request["messages"], self.cache_control, tool_breakpoints
+            )
             if automatic:
                 request["cache_control"] = self.cache_control.model_dump(exclude_none=True, include={"type", "ttl"})
         if self.provider_connection_id:
             # Per request: nodes with different project connections share the connection's client.
-            request["extra_headers"] = {CONNECTION_ID_HEADER: self.provider_connection_id}
+            request["extra_headers"] = (request.get("extra_headers") or {}) | {
+                CONNECTION_ID_HEADER: self.provider_connection_id
+            }
         if "max_tokens" in request:
             request.setdefault("max_completion_tokens", request.pop("max_tokens"))
         thinking = request.pop("thinking", None)

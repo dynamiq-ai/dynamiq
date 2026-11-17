@@ -227,6 +227,19 @@ class TestRequest:
         assert "dynamiq-synapse-handler" not in request.headers
 
     @pytest.mark.parametrize("run_async", [False, True])
+    def test_sends_the_project_connection_with_the_caller_s_extra_headers(self, router, run_async):
+        headers = {"X-Request-Id": "request-123", "Dynamiq-Connection-Id": "caller-value"}
+        node = make_node(provider_connection_id="conn-1", extra_headers=headers)
+
+        result = run(node, run_async)
+
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        [request] = router.requests
+        assert request.headers["dynamiq-connection-id"] == "conn-1"
+        assert request.headers["x-request-id"] == "request-123"
+        assert headers == {"X-Request-Id": "request-123", "Dynamiq-Connection-Id": "caller-value"}
+
+    @pytest.mark.parametrize("run_async", [False, True])
     def test_calls_the_connection_s_router_url_not_its_url(self, router, run_async):
         url = "http://synapse.internal:8080/v1"
         node = make_node(connection=DynamiqConnection(api_key=TOKEN, url=PLATFORM_URL, router_url=url))
@@ -615,6 +628,21 @@ class TestPromptCaching:
 
         assert request["messages"][0] == SYSTEM
         assert request["extra_body"]["cache_control"] == EPHEMERAL
+
+    @pytest.mark.parametrize("automatic", [False, True])
+    def test_counts_cache_markers_on_tools_toward_the_four_breakpoints(self, automatic):
+        tool = {"type": "function", "function": {"name": "search", "parameters": {"type": "object"}}}
+        messages = [{"role": "user", "content": [text(f"turn {n}", EPHEMERAL)]} for n in range(3)]
+        messages.append({"role": "user", "content": [text("new turn")]})
+
+        request, _ = make_node(
+            model="anthropic/claude-sonnet-5", cache_control=DynamiqCacheControl(automatic=automatic)
+        )._router_request(
+            {"model": "anthropic/claude-sonnet-5", "messages": messages, "tools": [tool | {"cache_control": EPHEMERAL}]}
+        )
+
+        assert request["messages"] == messages
+        assert "cache_control" not in request.get("extra_body", {})
 
     @pytest.mark.parametrize("existing, automatic", [(3, True), (4, False)])
     def test_automatic_caching_is_left_out_when_the_messages_use_every_breakpoint(self, existing, automatic):
