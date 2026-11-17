@@ -85,7 +85,7 @@ class Message(BaseModel):
     message_type: ClassVar[MessageType] = MessageType.MESSAGE
 
     def format_message(self, **kwargs) -> "Message":
-        "Returns formated copy of message"
+        "Returns a formatted copy of the message."
         return Message(
             role=self.role,
             content=compile_template(self.content).render(**kwargs),
