@@ -74,7 +74,17 @@ class ContextSearchTool(ConnectionNode):
 
     def _format_response(self, response: Any) -> dict[str, Any]:
         if response.status_code >= 300:
-            raise ToolExecutionException(f"Context.dev returned HTTP {response.status_code}.", recoverable=True)
+            message = f"Context.dev returned HTTP {response.status_code}."
+            guidance = {
+                401: "Check your Context.dev API key.",
+                403: "Check your key permissions and account access.",
+                429: "Retry later and check your account limits.",
+            }.get(response.status_code)
+            if response.status_code >= 500:
+                guidance = "Retry the search later."
+            if guidance:
+                message += f" {guidance}"
+            raise ToolExecutionException(message, recoverable=True)
         response.raise_for_status()
         raw_response = response.json()
         try:
