@@ -2436,6 +2436,48 @@ class SteelBrowser(BaseConnection):
         pass
 
 
+class BrowserUse(BaseConnection):
+    """
+    Browser Use Cloud connection configuration for Stagehand.
+
+    The browser is created through the Browser Use Cloud API (``POST /browsers``) and driven over
+    CDP by Stagehand's bundled local server, which inherits the process environment. With
+    ``anthropic/*`` models, leave ``ANTHROPIC_BASE_URL`` unset or include the ``/v1`` suffix.
+    """
+
+    api_key: str = Field(default_factory=partial(get_env_var, "BROWSER_USE_API_KEY"))
+    url: str = Field(default="https://api.browser-use.com/api/v4", description="Browser Use Cloud API base URL.")
+    model_api_key: str = Field(..., description="API key for the LLM model.")
+    session_config: dict[str, Any] = Field(
+        default_factory=lambda: {"timeout": 60},
+        description=(
+            "Request body for browser creation (e.g. proxyCountryCode, profileId, enableRecording). "
+            "timeout is in minutes (max 240) so the browser outlasts a full agent run."
+        ),
+    )
+    extra_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Additional Stagehand session start options (e.g. self_heal, system_prompt, "
+            "dom_settle_timeout_ms, verbose)."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_api_key(self):
+        """Fail at construction rather than with an opaque header error on the first tool call."""
+        if not self.api_key:
+            raise ValueError("api_key is required: pass it or set BROWSER_USE_API_KEY")
+        return self
+
+    @property
+    def conn_params(self) -> dict:
+        return {"X-Browser-Use-API-Key": self.api_key, "Content-Type": "application/json"}
+
+    def connect(self):
+        pass
+
+
 class CuaOperatingSystemType(enum.Enum):
     """Operating system types supported by CUA."""
 
