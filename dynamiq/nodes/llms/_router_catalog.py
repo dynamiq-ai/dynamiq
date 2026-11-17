@@ -163,11 +163,14 @@ class RouterCatalog:
             f"Failed to list the models of the router at {_redacted(router_url)}, keeping the last list: "
             f"{type(error).__name__}" + (f" {status}" if isinstance(status, int) else "")
         )
+        now = _now()
         with self._lock:
             if _refused(error):
-                self._refused[(router_url, caller)] = _now()
+                # Kept only while it holds a caller back, so revoked or rotated keys do not pile up.
+                self._refused = {key: at for key, at in self._refused.items() if now - at < MODEL_LIST_RETRY_SECONDS}
+                self._refused[(router_url, caller)] = now
             else:
-                self._routers.setdefault(router_url, _RouterModels()).failed_at = _now()
+                self._routers.setdefault(router_url, _RouterModels()).failed_at = now
 
     def _store(self, router_url: str, caller: str, models: list[Any]) -> None:
         parsed = _parsed(models)

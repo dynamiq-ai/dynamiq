@@ -589,6 +589,16 @@ class TestModelCatalog:
 
         assert len(router.model_requests) == 1
 
+    def test_forgets_refused_keys_once_they_no_longer_wait(self, router, monkeypatch):
+        now = [0.0]
+        monkeypatch.setattr(router_catalog, "_now", lambda: now[0])
+        router.models_status = 401
+        for n in range(3):
+            make_node(connection=DynamiqConnection(api_key=f"revoked-{n}", router_url=ROUTER_URL)).is_vision_supported
+            now[0] += router_catalog.MODEL_LIST_RETRY_SECONDS
+
+        assert len(router_catalog.ROUTER_CATALOG._refused) == 1
+
     @pytest.mark.parametrize("explicit", [False, True])
     @pytest.mark.parametrize("run_async", [False, True])
     @pytest.mark.parametrize(
