@@ -203,7 +203,8 @@ class TestExecuteToolsSplit:
         ]
         agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
 
-        assert mock_single.call_count == 2
+        assert [c.args[0] for c in mock_single.call_args_list] == ["ToolA", "ToolX"]
+        assert all(c.kwargs.get("is_parallel", False) is False for c in mock_single.call_args_list)
 
     def test_empty_tools_data_returns_empty(self, openai_node, mock_llm_executor):
         agent = _build_agent(openai_node, mock_llm_executor, [])

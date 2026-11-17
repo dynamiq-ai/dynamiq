@@ -1,8 +1,11 @@
 """Model-specific prompts for OpenAI GPT models.
 """
 
+from dynamiq.nodes.agents.prompts.overrides._sections import DEFAULT_SECTIONS, XML_SECTIONS, with_base_sections
+from dynamiq.nodes.agents.prompts.react import instructions as base
+
 # Prompts optimized for GPT-5.1
-REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
+_REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
 
 Thought: [Your detailed reasoning about what to do next - include progress status (what's done, what remains) and brief summaries for clarity]
 Action: [Tool name from ONLY [{{ tools_name }}]]
@@ -58,7 +61,7 @@ IMPORTANT RULES:
 """  # noqa: E501
 
 
-REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
+_REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
 
 <output>
     <thought>
@@ -149,3 +152,12 @@ IMPORTANT RULES:
 - Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
 - If you want to return files, include an <output_files> tag after </answer> (but still inside <output>) listing absolute file paths (comma-separated). This tag is optional — omit it if there are no files to return.
 """  # noqa: E501
+
+
+# The rules the parser and the agent loop rely on come from the base prompts, so a fix there reaches this model.
+REACT_BLOCK_INSTRUCTIONS_SINGLE = with_base_sections(
+    _REACT_BLOCK_INSTRUCTIONS_SINGLE, base.REACT_BLOCK_INSTRUCTIONS_SINGLE, DEFAULT_SECTIONS
+)
+REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = with_base_sections(
+    _REACT_BLOCK_XML_INSTRUCTIONS_SINGLE, base.REACT_BLOCK_XML_INSTRUCTIONS_SINGLE, XML_SECTIONS
+)
