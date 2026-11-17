@@ -329,3 +329,26 @@ def test_an_agent_reads_a_json_answer_in_cyrillic_as_text(requests_mock, body):
     observation, _, _ = agent._run_tool(tool, {"data": {}}, config=None)
 
     assert "Олена Петренко" in observation
+
+
+def test_an_agent_observation_of_a_json_answer_with_a_lone_surrogate_can_be_sent_to_the_llm(requests_mock):
+    """An SMS cut inside an emoji parses to a lone surrogate, which no UTF-8 request body can carry."""
+    url = "https://api.example.com/messages/7"
+    tool = HttpApiCall(connection=connections.Http(method=connections.HTTPMethod.GET, url=url), name="api-call")
+    requests_mock.get(
+        url,
+        content=b'{"holder": "\xd0\x9e\xd0\xbb\xd0\xb5\xd0\xbd\xd0\xb0", "sms": "Thanks \\ud83d"}',
+        headers={"content-type": "application/json; charset=utf-8"},
+    )
+    agent = Agent(
+        name="Agent",
+        llm=OpenAI(connection=connections.OpenAI(api_key="k"), model="gpt-4o"),
+        role="r",
+        tools=[tool],
+    )
+
+    observation, _, _ = agent._run_tool(tool, {"data": {}}, config=None)
+
+    observation.encode("utf-8")
+    assert "Олена" in observation
+    assert "Thanks \\ud83d" in observation
