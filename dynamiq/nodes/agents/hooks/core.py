@@ -60,6 +60,8 @@ class HookPoint(str, Enum):
 
 
 TOOL_POINTS = (HookPoint.BEFORE_TOOL, HookPoint.AFTER_TOOL)
+# Where a server puts what tells its tenants apart in ``RunnableConfig.trusted_context``.
+TRUSTED_SCOPE_KEY = "dynamiq"
 REVERSED_POINTS = (HookPoint.AFTER_MODEL, HookPoint.AFTER_TOOL, HookPoint.ON_OUTPUT)
 
 

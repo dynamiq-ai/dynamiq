@@ -57,7 +57,11 @@ class RunnableConfig(BaseModel):
         description=(
             "Facts about the caller that the server vouches for, e.g. {'user_id': ..., 'metadata': {'role': 'admin'}}. "
             "Unlike the run input, which the client sends, agent hooks read access rules (`tool_policy` `allow_if`, "
-            "`approval_unless`) from here. Never saved in a checkpoint: pass it again when resuming."
+            "`approval_unless`) from here. Never saved in a checkpoint: pass it again when resuming. A server with "
+            "several tenants puts what tells them apart under 'dynamiq', e.g. {'dynamiq': {'org_id': ...}}: state "
+            "hooks keep across runs, such as the `pii` hook's placeholders, then follows that scope and `user_id`. "
+            "Beyond those it follows only the run's own user and session ids, so a backend that reuses them across "
+            "its own tenants must make them unique or put its tenant in the scope."
         ),
     )
 

@@ -1280,6 +1280,65 @@ def test_pii_values_are_not_shared_across_runs_without_a_trusted_scope_or_across
         assert hook._restore(second, f"Contacts on file: {alice}") == f"Contacts on file: {alice}"
 
 
+def session_turn(**trusted):
+    from dynamiq.nodes.agents.hooks.core import HookContext
+
+    return HookContext(hook_key="agent:pii:1", user_id="1", session_id="default", trusted=trusted)
+
+
+def reads_the_others_value(first, second) -> bool:
+    hook = PIIHook(restore_in_output=True)
+    alice = hook._mask(first, "alice@a.com", "input")
+    hook._mask(second, "bob@b.com", "input")
+    return hook._restore(second, f"Contacts on file: {alice}") == "Contacts on file: alice@a.com"
+
+
+def test_pii_placeholders_keep_their_meaning_when_what_the_server_says_of_the_caller_changes_between_turns(
+    session_placeholders,
+):
+    hook = PIIHook(restore_in_output=True)
+    tenant = {"org_id": "acme", "app_id": "support"}
+    turn1 = session_turn(dynamiq=tenant, user_id="u-7", role="viewer", request_id="r-1")
+    turn2 = session_turn(dynamiq=tenant, user_id="u-7", role="admin", request_id="r-2")
+    alice = hook._mask(turn1, "alice@a.com", "input")
+    bob = hook._mask(turn2, "bob@b.com", "input")
+    assert alice.endswith("_1>") and bob == alice[:-3] + "_2>"
+    assert hook._restore(turn2, f"Contacts on file: {alice}") == "Contacts on file: alice@a.com"
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (
+            dict(dynamiq={"org_id": "acme", "app_id": "support"}, role="admin"),
+            dict(dynamiq={"org_id": "globex", "app_id": "support"}, role="admin"),
+        ),
+        (
+            dict(dynamiq={"org_id": "acme", "app_id": "support"}, role="admin"),
+            dict(dynamiq={"org_id": "acme", "app_id": "billing"}, role="admin"),
+        ),
+        (
+            dict(dynamiq={"org_id": "acme"}, user_id="u-7"),
+            dict(dynamiq={"org_id": "acme"}, user_id="u-8"),
+        ),
+        (dict(dynamiq={"org_id": "acme"}), dict(org_id="acme")),
+        (dict(dynamiq={}, tenant="acme"), dict(dynamiq={}, tenant="globex")),
+        (dict(org="acme", role="viewer"), dict(org="acme", role="admin")),
+    ],
+    ids=[
+        "two organizations",
+        "two apps of one organization",
+        "two users the server tells apart",
+        "a scope and a context that only reads like it",
+        "an empty scope, which names nothing",
+        "no scope: the whole context, as before",
+    ],
+)
+def test_pii_values_are_never_shared_across_what_the_server_keeps_apart(session_placeholders, first, second):
+    # Both sides share the agent and the client-chosen user and session ids.
+    assert not reads_the_others_value(session_turn(**first), session_turn(**second))
+
+
 def test_a_pending_approval_in_one_run_does_not_block_another_run(monkeypatch):
     from dynamiq.nodes.agents import Agent
     from dynamiq.types.feedback import ApprovalInputData, FeedbackMethod
