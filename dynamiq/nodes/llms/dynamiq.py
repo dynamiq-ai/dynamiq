@@ -1,9 +1,11 @@
+import asyncio
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pydantic import Field
 
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections.managers import ConnectionClientInitType
+from dynamiq.nodes.llms._router_catalog import MODEL_LIST_TIMEOUT_SECONDS, ROUTER_CATALOG
 from dynamiq.nodes.llms.anthropic import AnthropicCacheControl
 from dynamiq.nodes.llms.base import LLM_DEFAULT_MAX_TOKENS, BaseLLM, BaseLLMUsageData, ModelInfo
 from dynamiq.runnables import RunnableConfig
@@ -55,6 +57,14 @@ def _with_cache_breakpoint(message: dict, control: dict) -> dict | None:
                 parts[index] = part | {"cache_control": control}
                 return message | {"content": parts}
     return None
+
+
+def _in_event_loop() -> bool:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
 
 
 class DynamiqCacheControl(AnthropicCacheControl):
@@ -122,8 +132,11 @@ class Dynamiq(BaseLLM):
         model (str): The model's slug in the router's catalog, such as "anthropic/claude-sonnet-5".
         provider_connection_id (str | None): A connection of the project whose provider key the router uses instead
             of Dynamiq's.
-        model_info (ModelInfo | None): What the model supports. Unset fields take `DEFAULT_MODEL_INFO`, since
-            LiteLLM does not know the router's slugs.
+        model_info (ModelInfo | None): What the model supports, overriding the router's catalog field by field,
+            since LiteLLM does not know the router's slugs. Unset fields take the catalog's values, from the router's
+            model list, which the process fetches on first use and every 10 minutes after. A field the catalog does
+            not give, or that cannot be fetched, takes `DEFAULT_MODEL_INFO`'s. In a running event loop a capability
+            is read from the last list fetched, and only an async run fetches it, so a lookup never blocks the loop.
         cache_control (DynamiqCacheControl | AnthropicCacheControl | Literal[False] | None): Prompt caching config,
             as on the Anthropic node: breakpoints on the system message and on a rolling message, placed in the
             messages themselves, or the rolling one left to the provider with `automatic`. None chooses nothing,
@@ -184,9 +197,32 @@ class Dynamiq(BaseLLM):
         ]
 
     def _model_capability(self, name: str) -> Any:
-        """`model_info`'s value for `name`, or `DEFAULT_MODEL_INFO`'s when it has none."""
+        """`model_info`'s value for `name`, else the router catalog's, else `DEFAULT_MODEL_INFO`'s."""
         value = getattr(self.model_info, name, None) if self.model_info else None
+        if value is None and (catalog := self._catalog_model_info()) is not None:
+            value = getattr(catalog, name, None)
         return getattr(self.DEFAULT_MODEL_INFO, name) if value is None else value
+
+    def _catalog_model_info(self) -> ModelInfo | None:
+        if self.connection is None:
+            return None
+        if self.client is None or _in_event_loop():
+            return ROUTER_CATALOG.lookup(self.connection.router_url, self.model)
+        return ROUTER_CATALOG.get(self.connection.router_url, self.model, self._list_models)
+
+    def _list_models(self) -> list[dict[str, Any]]:
+        client = self.client.with_options(timeout=MODEL_LIST_TIMEOUT_SECONDS, max_retries=0)
+        return [model.model_dump() for model in client.models.list()]
+
+    async def _alist_models(self) -> list[dict[str, Any]]:
+        client = (await self._async_client()).with_options(timeout=MODEL_LIST_TIMEOUT_SECONDS, max_retries=0)
+        return [model.model_dump() async for model in client.models.list()]
+
+    async def execute_async(self, input_data, config: RunnableConfig = None, **kwargs):
+        # Fetched here: in an event loop, a capability lookup only reads the last list fetched.
+        if self.connection is not None:
+            await ROUTER_CATALOG.aget(self.connection.router_url, self.model, self._alist_models)
+        return await super().execute_async(input_data, config=config, **kwargs)
 
     def get_token_limit(self) -> int:
         return self._model_capability("max_input_tokens")

@@ -19,6 +19,7 @@ from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.utils import SummarizationConfig
 from dynamiq.nodes.llms import AnthropicCacheControl, Dynamiq, DynamiqCacheControl, OpenAI
+from dynamiq.nodes.llms import _router_catalog as router_catalog
 from dynamiq.nodes.llms.base import LLM_DEFAULT_MAX_TOKENS, FallbackConfig, FallbackTrigger, ModelInfo
 from dynamiq.nodes.node import ErrorHandling, is_retryable_error
 from dynamiq.nodes.types import InferenceMode
@@ -92,16 +93,20 @@ def stream_of(message: dict, model: str) -> list[dict]:
 
 
 class FakeRouter:
-    """The router's chat completions endpoint on an httpx MockTransport.
+    """The router's chat completions and model list endpoints on an httpx MockTransport.
 
-    It answers the first requests with the `errors` status codes, then each later one with the next of `replies`,
-    the last one repeated. Its errors say "x-should-retry: false", so the SDK does not retry them itself.
+    It answers the first chat completion requests with the `errors` status codes, then each later one with the next
+    of `replies`, the last one repeated. Its errors say "x-should-retry: false", so the SDK does not retry them itself.
+    It lists `models`, answering with `models_status`, and keeps those requests in `model_requests`.
     """
 
     def __init__(self):
         self.replies: list[dict] = [HELLO]
         self.errors: list[int] = []
         self.requests: list[httpx.Request] = []
+        self.models: list[dict] = []
+        self.models_status = 200
+        self.model_requests: list[httpx.Request] = []
         self._replied = 0
 
     @property
@@ -109,6 +114,11 @@ class FakeRouter:
         return [json.loads(request.content) for request in self.requests]
 
     def handler(self, request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path.endswith("/models"):
+            self.model_requests.append(request)
+            if self.models_status != 200:
+                return httpx.Response(self.models_status, headers={"x-should-retry": "false"}, json={"error": {}})
+            return httpx.Response(200, json={"object": "list", "data": self.models})
         self.requests.append(request)
         if self.errors:
             return httpx.Response(
@@ -137,12 +147,17 @@ class FakeRouter:
         )
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def router(monkeypatch) -> FakeRouter:
-    """A FakeRouter that every node built in the test calls, sync and async."""
+    """A FakeRouter that every node built in the test calls, sync and async, with no model list fetched yet."""
     fake = FakeRouter()
     transport = httpx.MockTransport(fake.handler)
-    monkeypatch.setattr(connections, "_openai_http_client", lambda: httpx.Client(transport=transport))
+    monkeypatch.setattr(
+        connections,
+        "_openai_http_client",
+        lambda async_client=False: (httpx.AsyncClient if async_client else httpx.Client)(transport=transport),
+    )
+    router_catalog.ROUTER_CATALOG.clear()
     monkeypatch.setattr(
         DynamiqConnection, "connect_async", AsyncMock(side_effect=lambda: httpx.AsyncClient(transport=transport))
     )
@@ -418,6 +433,100 @@ class TestModelCapabilities:
         assert node.is_vision_supported is True
         assert node.is_function_calling_supported is False
         assert node.is_pdf_input_supported is False
+
+
+CATALOG_MODEL = {
+    "id": MODEL,
+    "object": "model",
+    "owned_by": "meta-llama",
+    "name": "Llama 4 Maverick",
+    "type": "chat",
+    "context_length": 1_000_000,
+    "max_output_tokens": 16384,
+    "input_modalities": ["text", "image", "file"],
+    "output_modalities": ["text"],
+    "supports_tools": False,
+    "supports_structured_output": True,
+    "supports_prompt_caching": True,
+    "parameters": {
+        "temperature": None,
+        "max_tokens": {"default": None},
+        "reasoning_effort": None,
+        "budget_tokens": None,
+    },
+}
+
+
+class TestModelCatalog:
+    def test_reads_the_model_s_capabilities_from_the_router_once_per_process(self, router):
+        router.models = [CATALOG_MODEL]
+
+        for node in (make_node(), make_node()):
+            assert node.get_token_limit() == 1_000_000
+            assert node.is_vision_supported is True
+            assert node.is_pdf_input_supported is True
+            assert node.is_video_input_supported is False
+            assert node.is_function_calling_supported is False
+            assert node.is_response_schema_supported is True
+
+        [request] = router.model_requests
+        assert request.headers["authorization"] == f"Bearer {TOKEN}"
+
+    def test_model_info_overrides_the_catalog_field_by_field(self, router):
+        router.models = [CATALOG_MODEL]
+
+        node = make_node(model_info=ModelInfo(max_input_tokens=8192, supports_function_calling=True))
+
+        assert node.get_token_limit() == 8192
+        assert node.is_function_calling_supported is True
+        assert node.is_vision_supported is True
+
+    def test_leaves_cache_breakpoints_to_the_model_s_slug(self, router):
+        router.models = [CATALOG_MODEL]
+
+        assert make_node().supports_prompt_caching() is False
+
+    @pytest.mark.parametrize("models, status", [([], 200), ([CATALOG_MODEL], 404)], ids=["unlisted", "no-list"])
+    def test_falls_back_to_the_defaults(self, router, models, status):
+        router.models, router.models_status = models, status
+        node = make_node()
+
+        assert node.get_token_limit() == LLM_DEFAULT_MAX_TOKENS
+        assert node.is_function_calling_supported is True
+        assert node.is_vision_supported is False
+
+    def test_refreshes_the_list_and_keeps_the_last_one_while_the_router_fails(self, router, monkeypatch):
+        now = [0.0]
+        monkeypatch.setattr(router_catalog, "_now", lambda: now[0])
+        router.models = [CATALOG_MODEL]
+        node = make_node()
+        assert node.get_token_limit() == 1_000_000
+        router.models = [CATALOG_MODEL | {"context_length": 2_000_000}]
+
+        now[0] = router_catalog.MODEL_LIST_TTL_SECONDS - 1
+        assert node.get_token_limit() == 1_000_000
+        now[0] = router_catalog.MODEL_LIST_TTL_SECONDS
+        assert node.get_token_limit() == 2_000_000
+
+        router.models_status = 503
+        now[0] = 2 * router_catalog.MODEL_LIST_TTL_SECONDS
+        assert node.get_token_limit() == 2_000_000
+        now[0] += router_catalog.MODEL_LIST_RETRY_SECONDS - 1
+        assert node.get_token_limit() == 2_000_000
+        assert len(router.model_requests) == 3
+
+    def test_an_async_run_fetches_the_list_and_a_lookup_in_the_loop_never_does(self, router):
+        router.models = [CATALOG_MODEL]
+        node = make_node()
+
+        async def lookups() -> tuple[int, int]:
+            before = node.get_token_limit()
+            result = await node.run_async(input_data={})
+            assert result.status == RunnableStatus.SUCCESS, result.error
+            return before, node.get_token_limit()
+
+        assert asyncio.run(lookups()) == (LLM_DEFAULT_MAX_TOKENS, 1_000_000)
+        assert len(router.model_requests) == 1
 
 
 EPHEMERAL = {"type": "ephemeral", "ttl": "5m"}
