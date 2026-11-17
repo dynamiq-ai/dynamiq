@@ -239,6 +239,26 @@ class TestRequest:
         assert request.headers["x-request-id"] == "request-123"
         assert headers == {"X-Request-Id": "request-123", "Dynamiq-Connection-Id": "caller-value"}
 
+    @pytest.mark.parametrize("source", ["request", "connection"])
+    @pytest.mark.parametrize("run_async", [False, True])
+    @pytest.mark.parametrize("name", ["dynamiq-connection-id", "DYNAMIQ-CONNECTION-ID", "DyNaMiQ-CoNnEcTiOn-Id"])
+    def test_sends_only_the_node_s_project_connection_whatever_its_spelling(self, router, run_async, name, source):
+        headers = {name: "caller-value", "X-Request-Id": "request-123"}
+        original = copy.deepcopy(headers)
+        if source == "request":
+            node = make_node(provider_connection_id="node-value", extra_headers=headers)
+        else:
+            connection = DynamiqConnection(api_key=TOKEN, router_url=ROUTER_URL, headers=headers.copy())
+            node = make_node(provider_connection_id="node-value", connection=connection)
+
+        result = run(node, run_async)
+
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        [request] = router.requests
+        assert request.headers.get_list("dynamiq-connection-id") == ["node-value"]
+        assert request.headers["x-request-id"] == "request-123"
+        assert headers == original
+
     @pytest.mark.parametrize("run_async", [False, True])
     def test_calls_the_connection_s_router_url_not_its_url(self, router, run_async):
         url = "http://synapse.internal:8080/v1"
@@ -528,6 +548,87 @@ class TestModelCatalog:
         assert node.get_token_limit() == 2_000_000
         assert len(router.model_requests) == 3
 
+    @pytest.mark.parametrize("run_async", [False, True])
+    def test_a_failed_fetch_logs_no_credentials_from_the_router_url(self, router, caplog, run_async):
+        router.models_status = 503
+        node = make_node(
+            connection=DynamiqConnection(api_key=TOKEN, router_url="https://router-user:router-password@router.test/v1")
+        )
+
+        if run_async:
+            assert asyncio.run(node.run_async(input_data={})).status == RunnableStatus.SUCCESS
+        else:
+            assert node.get_token_limit() > 0
+
+        assert "router-password" not in caplog.text
+        assert "router.test/v1" in caplog.text
+
+    @pytest.mark.parametrize("run_async", [False, True])
+    def test_one_caller_s_refused_key_leaves_the_list_to_other_callers(self, router, run_async):
+        router.models = [CATALOG_MODEL]
+        invalid = make_node(connection=DynamiqConnection(api_key="invalid-token", router_url=ROUTER_URL))
+        good = make_node(connection=DynamiqConnection(api_key=TOKEN, router_url=ROUTER_URL))
+        router.models_status = 401
+        if run_async:
+            assert asyncio.run(invalid.run_async(input_data={})).status == RunnableStatus.SUCCESS
+        else:
+            assert invalid.is_vision_supported is False
+
+        router.models_status = 200
+        if run_async:
+            assert asyncio.run(good.run_async(input_data={})).status == RunnableStatus.SUCCESS
+
+        assert good.is_vision_supported is True
+
+    def test_a_refused_key_waits_before_asking_again(self, router):
+        router.models_status = 401
+        node = make_node(connection=DynamiqConnection(api_key="invalid-token", router_url=ROUTER_URL))
+
+        for _ in range(3):
+            assert node.is_vision_supported is False
+
+        assert len(router.model_requests) == 1
+
+    @pytest.mark.parametrize("explicit", [False, True])
+    @pytest.mark.parametrize("run_async", [False, True])
+    @pytest.mark.parametrize(
+        "bad", [{"context_length": "unknown"}, {"input_modalities": 5}, {"supports_tools": "unknown"}, {"id": 7}]
+    )
+    def test_a_malformed_entry_costs_only_its_own_model(self, router, run_async, bad, explicit):
+        router.models = [CATALOG_MODEL, CATALOG_MODEL | {"id": "other/broken-model"} | bad, "not-an-entry"]
+        node = make_node()
+        if explicit:
+            node.model_info = ModelInfo(
+                max_input_tokens=8192,
+                supports_vision=True,
+                supports_pdf_input=True,
+                supports_video_input=False,
+                supports_function_calling=True,
+                supports_response_schema=True,
+            )
+
+        if run_async:
+            result = asyncio.run(node.run_async(input_data={}))
+            assert result.status == RunnableStatus.SUCCESS, result.error
+
+        assert node.get_token_limit() == (8192 if explicit else CATALOG_MODEL["context_length"])
+
+    @pytest.mark.parametrize("run_async", [False, True])
+    def test_a_malformed_refresh_keeps_the_last_list(self, router, monkeypatch, run_async):
+        now = [0.0]
+        monkeypatch.setattr(router_catalog, "_now", lambda: now[0])
+        router.models = [CATALOG_MODEL]
+        node = make_node()
+        assert node.get_token_limit() == 1_000_000
+        now[0] = router_catalog.MODEL_LIST_TTL_SECONDS
+        router.models = [CATALOG_MODEL | {"context_length": "unknown"}]
+
+        if run_async:
+            result = asyncio.run(node.run_async(input_data={}))
+            assert result.status == RunnableStatus.SUCCESS, result.error
+
+        assert node.get_token_limit() == 1_000_000
+
     def test_an_async_run_fetches_the_list_and_a_lookup_in_the_loop_never_does(self, router):
         router.models = [CATALOG_MODEL]
         node = make_node()
@@ -643,6 +744,63 @@ class TestPromptCaching:
 
         assert request["messages"] == messages
         assert "cache_control" not in request.get("extra_body", {})
+
+    @pytest.mark.parametrize("automatic", [False, True])
+    @pytest.mark.parametrize("location", ["message", "tool_call", "extra_body_tools", "extra_body_top_level"])
+    def test_counts_every_cache_marker_the_router_honors(self, router, automatic, location):
+        messages = [{"role": "user", "content": [text(f"turn {n}", EPHEMERAL)]} for n in range(3)]
+        extra = {}
+        if location == "message":
+            messages.append({"role": "user", "content": "caller marked this", "cache_control": EPHEMERAL})
+        elif location == "tool_call":
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [tool_call("call_1", "search") | {"cache_control": EPHEMERAL}],
+                }
+            )
+            messages.append({"role": "tool", "tool_call_id": "call_1", "content": "found"})
+        elif location == "extra_body_top_level":
+            extra["extra_body"] = {"cache_control": EPHEMERAL}
+        else:
+            extra["extra_body"] = {
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {"name": "search", "parameters": {"type": "object"}},
+                        "cache_control": EPHEMERAL,
+                    }
+                ]
+            }
+        messages.append({"role": "user", "content": "new turn"})
+        node = make_node(
+            model="anthropic/claude-sonnet-5",
+            messages=messages,
+            cache_control=DynamiqCacheControl(automatic=automatic),
+            **extra,
+        )
+
+        result = node.run(input_data={})
+
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        [body] = router.bodies
+        count = bool(body.get("cache_control")) + sum(bool(t.get("cache_control")) for t in body.get("tools", []))
+        for message in body["messages"]:
+            parts = message["content"] if isinstance(message.get("content"), list) else []
+            # Bifrost puts a message's marker on its last block, or on its last tool call when it has no content.
+            count += sum(bool(p.get("cache_control")) for p in parts)
+            count += sum(bool(t.get("cache_control")) for t in message.get("tool_calls", []))
+            if message.get("cache_control") and not (
+                (parts and parts[-1].get("cache_control"))
+                or (
+                    not message.get("content")
+                    and message.get("tool_calls")
+                    and message["tool_calls"][-1].get("cache_control")
+                )
+            ):
+                count += 1
+        assert count <= 4, f"sent {count} effective breakpoints"
 
     @pytest.mark.parametrize("existing, automatic", [(3, True), (4, False)])
     def test_automatic_caching_is_left_out_when_the_messages_use_every_breakpoint(self, existing, automatic):

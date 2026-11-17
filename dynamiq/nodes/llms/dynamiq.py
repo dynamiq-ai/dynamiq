@@ -9,6 +9,7 @@ from dynamiq.nodes.llms._router_catalog import MODEL_LIST_TIMEOUT_SECONDS, ROUTE
 from dynamiq.nodes.llms.anthropic import AnthropicCacheControl
 from dynamiq.nodes.llms.base import LLM_DEFAULT_MAX_TOKENS, BaseLLM, BaseLLMUsageData, ModelInfo
 from dynamiq.runnables import RunnableConfig
+from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -35,10 +36,26 @@ _MAX_CACHE_BREAKPOINTS = 4
 
 
 def _cache_breakpoints(message: dict) -> int:
+    """The cache breakpoints `message` carries: on its content parts and tool calls, and its own, which the router
+    puts on its last content part, or on its last tool call when it has no content, unless that one has a breakpoint."""
     content = message.get("content")
-    if not isinstance(content, list):
-        return 0
-    return sum(1 for part in content if isinstance(part, dict) and part.get("cache_control"))
+    parts = [part for part in content if isinstance(part, dict)] if isinstance(content, list) else []
+    calls = [call for call in message.get("tool_calls") or () if isinstance(call, dict)]
+    count = sum(1 for item in [*parts, *calls] if item.get("cache_control"))
+    if message.get("cache_control"):
+        last = parts[-1] if parts else calls[-1] if calls and not content else None
+        if not (last and last.get("cache_control")):
+            count += 1
+    return count
+
+
+def _request_breakpoints(request: dict) -> int:
+    """The cache breakpoints of `request` outside its messages: on tool definitions and the top-level one, as the body
+    will carry them once the SDK merges the caller's `extra_body` into it."""
+    extra = request.get("extra_body") if isinstance(request.get("extra_body"), dict) else {}
+    tools = extra["tools"] if "tools" in extra else request.get("tools")
+    count = sum(1 for tool in tools or () if isinstance(tool, dict) and tool.get("cache_control"))
+    return count + (1 if extra.get("cache_control") else 0)
 
 
 def _with_cache_breakpoint(message: dict, control: dict) -> dict | None:
@@ -57,6 +74,23 @@ def _with_cache_breakpoint(message: dict, control: dict) -> dict | None:
                 parts[index] = part | {"cache_control": control}
                 return message | {"content": parts}
     return None
+
+
+# The capabilities the node reads from the router's catalog when `model_info` does not set them.
+_CATALOG_CAPABILITIES = (
+    "max_input_tokens",
+    "supports_vision",
+    "supports_pdf_input",
+    "supports_video_input",
+    "supports_function_calling",
+    "supports_response_schema",
+)
+
+
+def _catalog_entry(model: Any) -> Any:
+    """A model of the SDK's list as a dict. The SDK passes an entry that is not an object through as it is, which the
+    catalog then skips."""
+    return model.model_dump() if hasattr(model, "model_dump") else model
 
 
 def _in_event_loop() -> bool:
@@ -207,25 +241,41 @@ class Dynamiq(BaseLLM):
         return getattr(self.DEFAULT_MODEL_INFO, name) if value is None else value
 
     def _catalog_model_info(self) -> ModelInfo | None:
+        """The router catalog's capabilities of the model, or None. It never raises: a lookup must not fail a run."""
         if self.connection is None:
             return None
-        if self.client is None or _in_event_loop():
-            return ROUTER_CATALOG.lookup(self.connection.router_url, self.model)
-        return ROUTER_CATALOG.get(self.connection.router_url, self.model, self._list_models)
+        try:
+            if self.client is None or _in_event_loop():
+                return ROUTER_CATALOG.lookup(self.connection.router_url, self.model)
+            return ROUTER_CATALOG.get(
+                self.connection.router_url, self.connection.api_key, self.model, self._list_models
+            )
+        except Exception as e:
+            logger.warning(f"Failed to read the router catalog for {self.model}: {type(e).__name__}")
+            return None
 
-    def _list_models(self) -> list[dict[str, Any]]:
+    def _list_models(self) -> list[Any]:
         client = self.client.with_options(timeout=MODEL_LIST_TIMEOUT_SECONDS, max_retries=0)
-        return [model.model_dump() for model in client.models.list()]
+        return [_catalog_entry(model) for model in client.models.list()]
 
-    async def _alist_models(self) -> list[dict[str, Any]]:
+    async def _alist_models(self) -> list[Any]:
         client = (await self._async_client()).with_options(timeout=MODEL_LIST_TIMEOUT_SECONDS, max_retries=0)
-        return [model.model_dump() async for model in client.models.list()]
+        return [_catalog_entry(model) async for model in client.models.list()]
 
     async def execute_async(self, input_data, config: RunnableConfig = None, **kwargs):
         # Fetched here: in an event loop, a capability lookup only reads the last list fetched.
-        if self.connection is not None:
-            await ROUTER_CATALOG.aget(self.connection.router_url, self.model, self._alist_models)
+        if self.connection is not None and self._reads_catalog():
+            try:
+                await ROUTER_CATALOG.aget(
+                    self.connection.router_url, self.connection.api_key, self.model, self._alist_models
+                )
+            except Exception as e:
+                logger.warning(f"Failed to read the router catalog for {self.model}: {type(e).__name__}")
         return await super().execute_async(input_data, config=config, **kwargs)
+
+    def _reads_catalog(self) -> bool:
+        """Whether `model_info` leaves a capability the node answers to the catalog."""
+        return any(getattr(self.model_info, name, None) is None for name in _CATALOG_CAPABILITIES)
 
     def get_token_limit(self) -> int:
         return self._model_capability("max_input_tokens")
@@ -294,19 +344,13 @@ class Dynamiq(BaseLLM):
             request["messages"] = [self._replayable(message) for message in request["messages"]]
         if self.cache_control and request.get("messages"):
             # In the messages, since the router drops LiteLLM's cache_control_injection_points.
-            tool_breakpoints = sum(
-                1 for tool in request.get("tools") or () if isinstance(tool, dict) and tool.get("cache_control")
-            )
             request["messages"], automatic = _with_cache_breakpoints(
-                request["messages"], self.cache_control, tool_breakpoints
+                request["messages"], self.cache_control, _request_breakpoints(request)
             )
             if automatic:
                 request["cache_control"] = self.cache_control.model_dump(exclude_none=True, include={"type", "ttl"})
         if self.provider_connection_id:
-            # Per request: nodes with different project connections share the connection's client.
-            request["extra_headers"] = (request.get("extra_headers") or {}) | {
-                CONNECTION_ID_HEADER: self.provider_connection_id
-            }
+            request["extra_headers"] = self._with_connection_id(request.get("extra_headers") or {})
         if "max_tokens" in request:
             request.setdefault("max_completion_tokens", request.pop("max_tokens"))
         thinking = request.pop("thinking", None)
@@ -320,6 +364,20 @@ class Dynamiq(BaseLLM):
             # The usage, and the cost in it, arrives only in a stream's last chunk, and only when asked for.
             request["stream_options"] = stream_options | {"include_usage": True}
         return _openai_sdk.with_extra_body(request), emit_usage
+
+    def _with_connection_id(self, headers: dict) -> dict:
+        """A copy of `headers` that sends the node's project connection, and no other spelling of its header.
+
+        Per request, since nodes with different project connections share the connection's client. Header names are
+        case-insensitive, but the SDK merges the request's headers into the client's by exact name, and the router
+        reads the first value, so another spelling, from the caller or the connection, would win.
+        """
+        from openai import Omit  # deferred: importing the node must not load the OpenAI SDK
+
+        name = CONNECTION_ID_HEADER.lower()
+        out = {key: value for key, value in headers.items() if key.lower() != name}
+        out |= {key: Omit() for key in (self.connection.headers if self.connection else {}) if key.lower() == name}
+        return out | {CONNECTION_ID_HEADER: self.provider_connection_id}
 
     def _replayable(self, message: dict) -> dict:
         """`message` with only the reasoning details that go back to this node's model."""
