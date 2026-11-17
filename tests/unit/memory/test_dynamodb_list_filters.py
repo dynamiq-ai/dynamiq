@@ -5,7 +5,10 @@
 which compares the stored attribute to the whole list and so matched nothing.
 """
 
+import re
 from types import SimpleNamespace
+
+from boto3.dynamodb.conditions import ConditionExpressionBuilder
 
 from dynamiq.memory.backends.dynamo_db import DynamoDB
 
@@ -33,3 +36,13 @@ def test_empty_list_filter_is_left_to_the_client_side_filter():
     backend = SimpleNamespace(metadata_attribute_name="metadata")
     message = SimpleNamespace(metadata={"kind": "human"})
     assert DynamoDB._apply_filters_client_side_messages(backend, [message], {"kind": []}) == []
+
+
+def test_long_list_filter_is_split_into_in_groups_of_at_most_100():
+    values = [f"s{i}" for i in range(250)]
+    built = ConditionExpressionBuilder().build_expression(_build({"session_id": values}))
+
+    groups = [group.split(", ") for group in re.findall(r"IN \(([^)]*)\)", built.condition_expression)]
+    assert [len(group) for group in groups] == [100, 100, 50]
+    assert " OR " in built.condition_expression
+    assert [built.attribute_value_placeholders[p] for group in groups for p in group] == values
