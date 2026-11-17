@@ -7,7 +7,7 @@ from examples.llm_setup import setup_llm
 if __name__ == "__main__":
     connection_exa = Exa()
     tool_search = ExaTool(connection=connection_exa)
-    llm = setup_llm(model_provider="gpt", model_name="gpt-5.6-terra")
+    llm = setup_llm(model_provider="gpt", model_name="gpt-6.1-terra")
     agent = Agent(
         name="Agent",
         id="Agent",

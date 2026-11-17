@@ -10,6 +10,10 @@ from dynamiq.prompts import Message, MessageRole
 from dynamiq.utils.logger import logger
 
 
+def _is_blank_text_part(part: Any) -> bool:
+    return isinstance(part, dict) and part.get("type") == "text" and not str(part.get("text") or "").strip()
+
+
 class DynamiqMemoryError(Exception):
     """Base exception for errors raised by the Dynamiq memory backend."""
 
@@ -200,16 +204,20 @@ class Dynamiq(MemoryBackend):
         return []
 
     def _format_content_payload(self, content: Any) -> list[dict[str, Any]]:
-        """Normalize message content into the Dynamiq API payload structure."""
+        """Normalize message content into the Dynamiq API payload structure.
+
+        The API rejects a text part whose text is blank, as an assistant message carrying only tool calls has, so
+        blank text is sent as no part at all.
+        """
         if isinstance(content, list):
-            return content
+            return [part for part in content if not _is_blank_text_part(part)]
 
         if isinstance(content, str):
             text = content
         else:
             text = str(content) if content is not None else ""
 
-        return [{"type": "text", "text": text}]
+        return [{"type": "text", "text": text}] if text.strip() else []
 
     def _items_to_messages(self, items: list[dict[str, Any]]) -> list[Message]:
         """Convert raw API records into Message objects."""

@@ -9,11 +9,11 @@ from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.llms.groq import Groq
 from dynamiq.nodes.llms.openai import OpenAI
 
-MODEL_NAME_GPT = "gpt-4o-mini"
+MODEL_NAME_GPT = "gpt-6-luna"
 MODEL_NAME_CLAUDE = "claude-sonnet-5-5"
-MODEL_NAME_COHERE = "command-r-plus"
-MODEL_NAME_GROQ = "groq/llama3-70b-8192"
-MODEL_NAME_GEMINI = "gemini/gemini-1.5-pro-latest"
+MODEL_NAME_COHERE = "command-a-plus-05-2026"
+MODEL_NAME_GROQ = "groq/openai/gpt-oss-120b"
+MODEL_NAME_GEMINI = "gemini/gemini-4-argon"
 MODEL_PROVIDER = "gpt"
 MODEL_NAME = MODEL_NAME_GPT
 TEMPERATURE = 0.1

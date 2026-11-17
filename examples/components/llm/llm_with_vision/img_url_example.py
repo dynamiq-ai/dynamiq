@@ -32,7 +32,7 @@ def get_prompt():
 def run_openai_img_url(prompt):
     openai_node = llms.OpenAI(
         name="OpenAI Vision Answer Generation",
-        model="gpt-4o-mini",
+        model="gpt-6-luna",
         prompt=prompt,
         connection=OpenAIConnection(),
     )
@@ -40,7 +40,7 @@ def run_openai_img_url(prompt):
     openai_output = openai_node.execute(
         input_data={
             "user_message": "What’s in this image?",
-            "img_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg",
+            "img_url": "https://raw.githubusercontent.com/dynamiq-ai/dynamiq/main/examples/components/data/img.jpeg",
         }
     )
     print(openai_output)
@@ -51,7 +51,7 @@ def run_gemini(prompt):
 
     gemini_node = llms.Gemini(
         name="Gemini Vision Answer Generation",
-        model="gemini/gemini-1.5-flash",
+        model="gemini/gemini-3.8-flash",
         prompt=prompt,
         connection=GeminiConnection(),
     )
@@ -59,7 +59,7 @@ def run_gemini(prompt):
     gemini_output = gemini_node.execute(
         input_data={
             "user_message": "What’s in this image?",
-            "img_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg",
+            "img_url": "https://raw.githubusercontent.com/dynamiq-ai/dynamiq/main/examples/components/data/img.jpeg",
         }
     )
 
@@ -71,7 +71,7 @@ def run_anthropic_bedrock(prompt):
 
     anthropic_bedrock_node = llms.Bedrock(
         name="Bedrock Vision Answer Generation",
-        model="bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
+        model="bedrock/global.anthropic.claude-sonnet-5-5",
         prompt=prompt,
         connection=AWSConnection(),
     )
@@ -79,7 +79,7 @@ def run_anthropic_bedrock(prompt):
     anthropic_output = anthropic_bedrock_node.execute(
         input_data={
             "user_message": "What’s in this image?",
-            "img_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg",
+            "img_url": "https://raw.githubusercontent.com/dynamiq-ai/dynamiq/main/examples/components/data/img.jpeg",
         }
     )
 
@@ -92,7 +92,7 @@ def run_openai_img_local(prompt, image_path):
 
     openai_node = llms.OpenAI(
         name="OpenAI Vision Answer Generation",
-        model="gpt-4o-mini",
+        model="gpt-6-luna",
         prompt=prompt,
         connection=OpenAIConnection(),
     )

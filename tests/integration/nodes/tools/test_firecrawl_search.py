@@ -131,7 +131,7 @@ def test_firecrawl_search_with_overrides(mock_firecrawl_search_requests_scrape, 
         {"type": "news"},
         {"type": "images"},
     ]
-    assert payload["categories"] == ["github"]
+    assert payload["categories"] == ["developer"]
     assert payload["location"] == input_data["location"]
     assert payload["tbs"] == input_data["tbs"]
     assert payload["timeout"] == 45000  # from node-level operator config

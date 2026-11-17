@@ -82,7 +82,7 @@ def extract_text_from_images(file_path: str, extraction_instruction: str) -> str
     # Initialize LLM node
     llm_node = llms.OpenAI(
         name="OpenAI Vision",
-        model="gpt-4o",
+        model="gpt-6.1-sol",
         prompt=vision_prompt,
         connection=OpenAIConnection(),
     )

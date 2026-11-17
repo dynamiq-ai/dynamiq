@@ -23,7 +23,7 @@ def set_orchestrator() -> GraphOrchestrator:
 
     llm = OpenAI(
         connection=OpenAIConnection(),
-        model="gpt-4o-mini",
+        model="gpt-6-luna",
         temperature=0.1,
     )
 

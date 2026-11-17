@@ -51,7 +51,7 @@ def setup_agent(daytona_api_key: str = None) -> tuple[Agent, DaytonaSandbox]:
     if not api_key:
         raise ValueError("Daytona API key is required. Set DAYTONA_API_KEY environment variable or pass it directly.")
 
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=0.2)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-6.1-sol", temperature=0.2)
 
     daytona_connection = DaytonaConnection(api_key=api_key)
 

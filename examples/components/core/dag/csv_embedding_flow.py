@@ -37,7 +37,7 @@ def run_csv_embedding_workflow(csv_file_path: str, yaml_file_path: str):
 
 if __name__ == "__main__":
     current_dir = Path(__file__).parent
-    csv_file_path = ".data/sample_regression_data.csv"
+    csv_file_path = current_dir.parent.parent / "data" / "sample_regression_data.csv"
     yaml_file_path = current_dir / "csv_embedding_flow.yaml"
 
     result, trace_logs = run_csv_embedding_workflow(

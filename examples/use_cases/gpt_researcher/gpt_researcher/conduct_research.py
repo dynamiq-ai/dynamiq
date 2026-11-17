@@ -30,7 +30,7 @@ def conduct_research_workflow():
     generate_sub_queries_node = OpenAI(
         name="OpenAI: Generate Sub-Queries",
         id="generate_sub_queries_node",
-        model="gpt-4o-mini",
+        model="gpt-6-luna",
         connection=OpenAIConnection(),
         prompt=Prompt(messages=[Message(role="user", content=get_search_queries_prompt())]),
         temperature=1,

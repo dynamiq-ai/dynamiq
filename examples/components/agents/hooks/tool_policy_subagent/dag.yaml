@@ -33,7 +33,7 @@ nodes:
       id: ops-llm
       type: dynamiq.nodes.llms.OpenAI
       connection: openai-conn
-      model: gpt-4o-mini
+      model: gpt-6-luna
     max_loops: 8
     tools:
       - id: web-search-tool
@@ -69,7 +69,7 @@ nodes:
             connection:
               type: dynamiq.connections.OpenAI
               api_key: ${oc.env:OPENAI_API_KEY}
-            model: gpt-4o-mini
+            model: gpt-6-luna
           max_loops: 6
     hooks:
       - type: dynamiq.nodes.agents.hooks.ToolPolicyHook

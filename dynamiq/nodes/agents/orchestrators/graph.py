@@ -262,9 +262,12 @@ class GraphOrchestrator(Orchestrator):
             raise OrchestratorError("Failed to generate final answer")
 
         try:
-            next_state = json.loads(
-                manager_result.output.get("content").get("result").replace("json", "").replace("```", "").strip()
-            )["state"]
+            result = manager_result.output.get("content").get("result").strip()
+            if result.startswith("```") and result.endswith("```"):
+                opening_fence, separator, fenced_result = result.partition("\n")
+                if separator and opening_fence.strip().lower() in {"```", "```json"}:
+                    result = fenced_result.rsplit("```", 1)[0].strip()
+            next_state = json.loads(result)["state"]
 
             if self.manager.streaming.enabled and self.manager.streaming.mode == StreamingMode.ALL:
                 self.manager.stream_content(

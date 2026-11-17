@@ -18,6 +18,8 @@ from dynamiq.utils.logger import logger
 
 from .generation import ImageResponseFormat, ImageSize, create_image_file, download_image_from_url
 
+OPENROUTER_MODEL_PREFIX = "openrouter/"
+
 
 def prepare_single_image(img: bytes | io.BytesIO) -> io.BytesIO:
     """Prepare the image for the API call.
@@ -239,9 +241,13 @@ Examples:
             "image": image,
             "prompt": input_data.prompt,
             "size": size,
-            "drop_params": True,
             **self.edit_params,
         }
+        # litellm's image_edit sends keywords it does not know, drop_params among them, to OpenAI-style APIs as
+        # form fields, and OpenAI rejects them. Those APIs take every param this node sets; OpenRouter lacks mask
+        # and response_format, and its requests are JSON, so it is the only route that needs drop_params.
+        if self.model.startswith(OPENROUTER_MODEL_PREFIX):
+            edit_kwargs["drop_params"] = True
 
         n = input_data.n or self.n
         if n:

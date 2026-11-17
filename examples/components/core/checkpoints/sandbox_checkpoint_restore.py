@@ -38,7 +38,7 @@ def build_agent(agent_id: str) -> Agent:
         id=agent_id,
         name=agent_id,
         llm=OpenAI(
-            model="gpt-4o-mini",
+            model="gpt-6-luna",
             connection=OpenAIConnection(api_key=os.getenv("OPENAI_API_KEY", "unused-in-this-demo")),
             is_postponed_component_init=True,
         ),
