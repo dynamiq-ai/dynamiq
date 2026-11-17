@@ -102,7 +102,7 @@ class ContextSearchTool(ConnectionNode):
                     "url": result.url,
                     "title": result.title or result.url,
                     "content": "\n".join(passages or []) or result.description or "",
-                    "highlights_status": result.highlights.code if result.highlights else "NOT_REQUESTED",
+                    "highlights_status": (result.highlights.code if result.highlights else None) or "NOT_RETURNED",
                 }
             )
         text = "\n\n".join(f"[{s['title']}]({s['url']})\n{s['content']}" for s in sources)
