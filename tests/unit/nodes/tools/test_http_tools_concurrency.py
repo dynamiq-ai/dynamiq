@@ -11,6 +11,7 @@ import pytest
 from dynamiq import connections
 from dynamiq.connections.connections import PipedreamOAuth2
 from dynamiq.nodes.tools import HttpApiCall
+from dynamiq.nodes.tools.context_search import ContextSearchTool
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
 from dynamiq.nodes.tools.firecrawl_search import FirecrawlSearchTool
@@ -50,6 +51,12 @@ def _make_slow_async_client(json_payload):
 @pytest.mark.parametrize(
     ("tool_factory", "tool_cls", "input_payload", "json_payload"),
     [
+        (
+            lambda: ContextSearchTool(connection=connections.Context(api_key="k")),
+            ContextSearchTool,
+            {"query": "q"},
+            {"results": []},
+        ),
         (
             lambda: HttpApiCall(
                 connection=connections.Http(method=connections.HTTPMethod.GET, url="https://x.io"),
@@ -127,6 +134,7 @@ def _make_slow_async_client(json_payload):
         ),
     ],
     ids=[
+        "context_search",
         "http_api_call",
         "tavily",
         "exa_search",
