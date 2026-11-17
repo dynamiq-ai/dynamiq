@@ -1,3 +1,4 @@
+from http import HTTPStatus
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
@@ -73,14 +74,14 @@ class ContextSearchTool(ConnectionNode):
         }
 
     def _format_response(self, response: Any) -> dict[str, Any]:
-        if response.status_code >= 300:
+        if response.status_code >= HTTPStatus.MULTIPLE_CHOICES:
             message = f"Context.dev returned HTTP {response.status_code}."
             guidance = {
-                401: "Check your Context.dev API key.",
-                403: "Check your key permissions and account access.",
-                429: "Retry later and check your account limits.",
+                HTTPStatus.UNAUTHORIZED: "Check your Context.dev API key.",
+                HTTPStatus.FORBIDDEN: "Check your key permissions and account access.",
+                HTTPStatus.TOO_MANY_REQUESTS: "Retry later and check your account limits.",
             }.get(response.status_code)
-            if response.status_code >= 500:
+            if response.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR:
                 guidance = "Retry the search later."
             if guidance:
                 message += f" {guidance}"
