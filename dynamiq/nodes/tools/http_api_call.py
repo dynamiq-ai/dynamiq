@@ -11,6 +11,7 @@ from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ActionParsingException, ToolExecutionException
 from dynamiq.nodes.agents.utils import FileMappedInput
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.tools.utils import sanitize_filename
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file.base import FileInfo
 from dynamiq.types.cancellation import check_cancellation
@@ -188,7 +189,8 @@ class HttpApiCall(ConnectionNode):
         data = self.connection.data | self.data | input_data.data
         payload_type = input_data.payload_type or self.payload_type
         files = {
-            param: (getattr(file_io, "name", param), file_io.getvalue()) for param, file_io in input_data.files.items()
+            param: (sanitize_filename(getattr(file_io, "name", None), default=param), file_io.getvalue())
+            for param, file_io in input_data.files.items()
         }
         url = input_data.url or self.url or self.connection.url
         if not url:
