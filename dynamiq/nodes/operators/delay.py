@@ -1,8 +1,10 @@
+import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from dynamiq.checkpoints.checkpoint import BaseCheckpointState
 from dynamiq.checkpoints.types import RunPausedException
@@ -30,6 +32,19 @@ class DelayInputSchema(BaseModel):
     duration_seconds: float | None = Field(
         default=None, ge=0, description="How long to wait. Overrides the node's own duration_seconds."
     )
+
+    @field_validator("until", mode="before")
+    @classmethod
+    def read_basic_iso_date(cls, value: Any) -> Any:
+        # YYYYMMDD is how bank systems write a date, a SQL NUMERIC column included; as Unix seconds, eight digits
+        # would be a time in 1970-1973.
+        text = str(value) if isinstance(value, (int, Decimal)) else value
+        if isinstance(text, str) and re.fullmatch(r"[0-9]{8}", text):
+            try:
+                return date.fromisoformat(text).isoformat()
+            except ValueError:
+                return value
+        return value
 
 
 class DelayCheckpointState(BaseCheckpointState):

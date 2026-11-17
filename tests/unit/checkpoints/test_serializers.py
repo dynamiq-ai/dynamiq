@@ -3,10 +3,13 @@
 import base64
 import json
 import math
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from io import BytesIO
+from ipaddress import ip_address, ip_interface, ip_network
 from uuid import uuid4
+
+import pytest
 
 from dynamiq.checkpoints.checkpoint import CheckpointStatus, FlowCheckpoint, NodeCheckpointState, PendingInputContext
 from dynamiq.runnables import RunnableResult, RunnableStatus
@@ -472,6 +475,55 @@ class TestValuesJsonCannotHold:
         checkpoint = FlowCheckpoint(flow_id="loan", run_id="run-1", original_input={"ratio": float("nan")})
 
         assert math.isnan(FlowCheckpoint.from_bytes(checkpoint.to_bytes()).original_input["ratio"])
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "0500742425263120".ljust(24, "\x00"),
+            "Ok I can pay friday \ud83d",
+            {"t\x00x\x00n\x00_\x00i\x00d\x00": "T-1"},
+            time(17, 0),
+            timedelta(days=11, seconds=3600, microseconds=5),
+            ip_address("203.0.113.7"),
+            ip_interface("10.1.2.3/24"),
+            ip_network("10.0.0.0/8"),
+        ],
+        ids=["nul", "lone-surrogate", "nul-in-key", "time", "timedelta", "ip-address", "ip-interface", "ip-network"],
+    )
+    def test_a_value_jsonb_cannot_hold_as_it_is_comes_back_unchanged(self, value):
+        """The platform keeps checkpoints in a Postgres jsonb column, which refuses the escape JSON writes for a NUL."""
+        checkpoint = FlowCheckpoint(flow_id="loan", run_id="run-1", original_input={"value": value})
+
+        stored = checkpoint.to_bytes()
+        restored = FlowCheckpoint.from_bytes(stored).original_input["value"]
+
+        assert b"\\u0000" not in stored
+        assert restored == value
+        assert type(restored) is type(value)
+
+    @pytest.mark.parametrize(
+        "body",
+        ["Service unavailable".encode("utf-16-le").decode("latin-1"), "Ok I can pay friday \ud83d"],
+        ids=["utf-16-body", "lone-surrogate"],
+    )
+    def test_text_jsonb_cannot_hold_in_an_error_the_metadata_or_the_config_comes_back_unchanged(self, body):
+        """A failed request's error quotes the response body, which a UTF-16 body read as Latin-1 fills with NULs."""
+        message = f"Request failed with unexpected status code: 500 and response: {body}."
+        error = {"type": "ToolExecutionException", "message": message, "recoverable": True, "failed_nodes": []}
+        checkpoint = FlowCheckpoint(
+            flow_id="loan", run_id="run-1", original_config={"note": body}, metadata={"last_error": message}
+        )
+        checkpoint.mark_node_complete(
+            "fetch", NodeCheckpointState(node_id="fetch", node_type="HttpApiCall", status="failure", error=error)
+        )
+
+        stored = checkpoint.to_bytes()
+        restored = FlowCheckpoint.from_bytes(stored)
+
+        assert b"\\u0000" not in stored
+        assert restored.node_states["fetch"].error == error
+        assert restored.metadata == {"last_error": message}
+        assert restored.original_config == {"note": body}
 
 
 class TestByteSerialization:
