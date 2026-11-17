@@ -24,7 +24,7 @@ def validate_json_response(response: str) -> Document:
 
 
 def run_openai_node(prompt: Prompt, response_format: dict):
-    openai_node = OpenAI(model="gpt-4o-mini", response_format=response_format)
+    openai_node = OpenAI(model="gpt-6-luna", response_format=response_format)
     response = openai_node.run(input_data={}, prompt=prompt)
     return response
 

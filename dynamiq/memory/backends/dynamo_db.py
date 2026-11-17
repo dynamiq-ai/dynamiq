@@ -14,6 +14,9 @@ from dynamiq.memory.backends.base import MemoryBackend
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.utils.logger import logger
 
+# DynamoDB accepts at most 100 values in the right-hand side of an IN comparison.
+_MAX_IN_VALUES = 100
+
 
 class BillingMode(str, Enum):
     PAY_PER_REQUEST = "PAY_PER_REQUEST"
@@ -366,7 +369,18 @@ class DynamoDB(MemoryBackend):
         fe: Attr | None = None
         for key, value in filters.items():
             try:
-                current_cond = Attr(f"{self.metadata_attribute_name}.{key}").eq(value)
+                if isinstance(value, list) and not value:
+                    # DynamoDB rejects an empty IN list; the client-side filter drops every message for it.
+                    continue
+                attr = Attr(f"{self.metadata_attribute_name}.{key}")
+                if isinstance(value, list):
+                    # A list means "any of these", matching the client-side filter and InMemory.
+                    # DynamoDB caps IN at 100 values, so longer lists become OR'd IN groups.
+                    current_cond = attr.is_in(value[:_MAX_IN_VALUES])
+                    for start in range(_MAX_IN_VALUES, len(value), _MAX_IN_VALUES):
+                        current_cond = current_cond | attr.is_in(value[start : start + _MAX_IN_VALUES])
+                else:
+                    current_cond = attr.eq(value)
             except Exception as e:
                 logger.error(f"Could not build Attr condition for filter key '{key}': {e}. Skipping this filter.")
                 continue

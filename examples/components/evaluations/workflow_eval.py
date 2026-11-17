@@ -42,8 +42,8 @@ def main(
         context_list = [doc["content"] for doc in documents]
         context = " ".join(context_list)
 
-        # Initialize the LLM (replace 'gpt-4o-mini' with your available model)
-        llm = OpenAI(model="gpt-4o-mini")
+        # Initialize the LLM (replace 'gpt-6-luna' with your available model)
+        llm = OpenAI(model="gpt-6-luna")
 
         # Initialize Dynamiq Evaluators
         context_recall_evaluator = ContextRecallEvaluator(llm=llm)

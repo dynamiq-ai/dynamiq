@@ -23,7 +23,7 @@ def set_wf_with_agent(cm):
     llm = OpenAI(
         id="openai",
         connection=OpenAIConnection(),
-        model="gpt-4o",
+        model="gpt-6.1-sol",
         temperature=0.3,
         max_tokens=1000,
         is_postponed_component_init=True,

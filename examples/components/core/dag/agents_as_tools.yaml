@@ -14,7 +14,7 @@ nodes:
       id: child-llm
       type: dynamiq.nodes.llms.OpenAI
       connection: openai-conn
-      model: gpt-4o
+      model: gpt-6.1-sol
       temperature: 0.1
       max_tokens: 2000
     tools:
@@ -42,7 +42,7 @@ nodes:
       id: parent-llm
       type: dynamiq.nodes.llms.OpenAI
       connection: openai-conn
-      model: gpt-4o
+      model: gpt-6.1-sol
       temperature: 0.1
       max_tokens: 2000
     tools:
@@ -57,7 +57,7 @@ nodes:
           id: child-llm
           type: dynamiq.nodes.llms.OpenAI
           connection: openai-conn
-          model: gpt-4o
+          model: gpt-6.1-sol
           temperature: 0.1
           max_tokens: 2000
         tools:

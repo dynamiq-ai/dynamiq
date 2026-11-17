@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, PrivateAttr, model_validator
 
 from dynamiq.connections import AWS as AWSConnection
 from dynamiq.nodes.llms.base import BaseLLM, provider_error_text
@@ -10,6 +10,17 @@ _BEDROCK_STOP_UNSUPPORTED_INDICATORS = (
     "doesn't support the stopSequences field",
     "does not support the stopSequences field",
 )
+# How a model (e.g. meta.llama4-*) rejects an assistant turn that carries text next to its tool calls.
+_BEDROCK_TEXT_WITH_TOOL_USE_INDICATOR = "conversation blocks and tool use blocks cannot be provided in the same turn"
+# How a model (e.g. meta.llama4-*) rejects a streamed request that offers tools.
+_BEDROCK_NO_STREAMED_TOOL_USE_INDICATOR = "doesn't support tool use in streaming mode"
+
+
+def _without_text_beside_tool_calls(messages: list[dict]) -> list[dict]:
+    return [
+        {**message, "content": ""} if message.get("tool_calls") and message.get("content") else message
+        for message in messages
+    ]
 
 
 class BedrockCacheControl(BaseModel):
@@ -65,10 +76,17 @@ class Bedrock(BaseLLM):
     # ``None`` = nothing chosen (survives a YAML round trip, lets an Agent inject the
     # default); ``False`` = opt out.
     cache_control: BedrockCacheControl | Literal[False] | None = None
+    _rejects_text_beside_tool_calls: bool = PrivateAttr(default=False)
+    _rejects_streamed_tool_use: bool = PrivateAttr(default=False)
 
     def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """Attach the node's own prompt caching configuration to completion params."""
         params = super().update_completion_params(params)
+        if self._rejects_text_beside_tool_calls and params.get("messages"):
+            params["messages"] = _without_text_beside_tool_calls(params["messages"])
+        if self._rejects_streamed_tool_use and params.get("tools"):
+            params["stream"] = False
+            params.pop("stream_options", None)
         return self._apply_cache_control(params, self.cache_control)
 
     def _apply_cache_control(self, params: dict[str, Any], cache_control: Any) -> dict[str, Any]:
@@ -127,10 +145,37 @@ class Bedrock(BaseLLM):
             recovered = dict(common_params)
             recovered.pop("stop", None)
             return recovered
+        if (
+            _BEDROCK_NO_STREAMED_TOOL_USE_INDICATOR in msg
+            and common_params.get("stream")
+            and common_params.get("tools")
+        ):
+            logger.warning(
+                "LLM '%s': model '%s' cannot stream tool use; retrying the request without streaming.",
+                self.name,
+                self.model,
+            )
+            recovered = common_params | {"stream": False}
+            recovered.pop("stream_options", None)
+            return recovered
+        messages = common_params.get("messages") or []
+        if _BEDROCK_TEXT_WITH_TOOL_USE_INDICATOR in msg.lower() and any(
+            m.get("tool_calls") and m.get("content") for m in messages
+        ):
+            logger.warning(
+                "LLM '%s': model '%s' rejects text beside tool calls; retrying with that text removed.",
+                self.name,
+                self.model,
+            )
+            return common_params | {"messages": _without_text_beside_tool_calls(messages)}
         return super()._recover_completion_params(exc, common_params)
 
     def _persist_completion_recovery(self, common_params: dict, recovered: dict) -> None:
         """Persist Bedrock's `stop` drop, then the base sampling-param drops."""
         if common_params.get("stop") and "stop" not in recovered:
             self.stop = None
+        if recovered.get("messages") is not common_params.get("messages"):
+            self._rejects_text_beside_tool_calls = True
+        if common_params.get("stream") and recovered.get("stream") is False:
+            self._rejects_streamed_tool_use = True
         super()._persist_completion_recovery(common_params, recovered)

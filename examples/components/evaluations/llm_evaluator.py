@@ -159,7 +159,7 @@ def main():
     # Initialize the LLM (provide your LLM configuration)
     llm = OpenAI(
         name="OpenAI",
-        model="gpt-4o-mini",
+        model="gpt-6-luna",
     )
 
     # Run the examples

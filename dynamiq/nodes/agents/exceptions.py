@@ -10,7 +10,7 @@ class RecoverableAgentException(Exception):
 
 class ActionParsingException(RecoverableAgentException):
     """
-    Exception raised when an action cannot be parsed. Raising this exeption will allow Agent to reiterate.
+    Exception raised when an action cannot be parsed. Raising this exception will allow Agent to reiterate.
 
     This exception is a subclass of AgentException and inherits its attributes and methods.
     """
@@ -20,7 +20,7 @@ class ActionParsingException(RecoverableAgentException):
 
 class AgentUnknownToolException(RecoverableAgentException):
     """
-    Exception raised when a unknown tool is requested. Raising this exeption will allow Agent to reiterate.
+    Exception raised when an unknown tool is requested. Raising this exception will allow Agent to reiterate.
 
     This exception is a subclass of AgentException and inherits its attributes and methods.
     """
@@ -30,7 +30,7 @@ class AgentUnknownToolException(RecoverableAgentException):
 
 class ToolExecutionException(RecoverableAgentException):
     """
-    Exception raised when a tools fails to execute. Raising this exeption will allow Agent to reiterate.
+    Exception raised when a tool fails to execute. Raising this exception will allow Agent to reiterate.
 
     This exception is a subclass of AgentException and inherits its attributes and methods.
     """
@@ -76,7 +76,7 @@ class ToolBlockedException(ToolExecutionException):
 
 class InvalidActionException(RecoverableAgentException):
     """
-    Exception raised when invalid action is chosen. Raising this exeption will allow Agent to reiterate.
+    Exception raised when invalid action is chosen. Raising this exception will allow Agent to reiterate.
 
     This exception is a subclass of AgentException and inherits its attributes and methods.
     """

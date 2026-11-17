@@ -93,6 +93,17 @@ def test_delete_nonexistent_file(storage):
     assert result is False
 
 
+@pytest.mark.parametrize("recursive", [False, True])
+def test_list_files_directory_does_not_match_sibling_prefix(storage, sample_text_content, recursive):
+    """Listing 'reports' must not include files from a sibling directory like 'reports-old'."""
+    storage.store("reports/current.txt", sample_text_content)
+    storage.store("reports-old/private.txt", sample_text_content)
+
+    files = storage.list_files(directory="reports", recursive=recursive)
+
+    assert [f.path for f in files] == ["reports/current.txt"]
+
+
 def test_list_files_recursive_and_directory_behavior(storage, sample_text_content):
     """Test recursive vs non-recursive file listing and directory parameter behavior."""
 

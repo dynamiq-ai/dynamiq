@@ -9,7 +9,7 @@ from dynamiq.nodes.llms import OpenAI
 
 llm = OpenAI(
     connection=OpenAIConnection(),
-    model="gpt-4o",
+    model="gpt-6.1-sol",
     temperature=0.1,
 )
 

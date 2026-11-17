@@ -12,7 +12,7 @@ def main() -> None:
         return
 
     inner = RecursiveCharacterSplitter(chunk_size=140, chunk_overlap=20)
-    llm = OpenAILLM(connection=OpenAIConnection(), model="gpt-4o-mini")
+    llm = OpenAILLM(connection=OpenAIConnection(), model="gpt-6-luna")
     splitter = ContextualSplitter(inner_splitter=inner, llm=llm, prepend=True)
     splitter.init_components()
 

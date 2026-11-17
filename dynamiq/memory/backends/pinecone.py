@@ -134,12 +134,15 @@ class Pinecone(MemoryBackend):
         except Exception as e:
             raise PineconeError(f"Error adding message to Pinecone: {e}") from e
 
-    def get_all(self, limit: int = 10000) -> list[Message]:
+    def get_all(self, limit: int | None = None) -> list[Message]:
         """Retrieves all messages from Pinecone."""
         try:
             documents = self.vector_store.list_documents(include_embeddings=False)
             messages = [self._document_to_message(doc) for doc in documents]
-            return sorted(messages, key=lambda msg: msg.metadata.get("timestamp", 0))
+            messages = sorted(messages, key=lambda msg: msg.metadata.get("timestamp", 0))
+            if limit is not None and 0 < limit < len(messages):
+                return messages[-limit:]
+            return messages
         except Exception as e:
             raise PineconeError(f"Error retrieving messages from Pinecone: {e}") from e
 

@@ -15,7 +15,7 @@ def execute_agent(system_prompt: str, user_prompt: str, to_json: bool = False) -
     """Executes an LLM request"""
 
     llm = OpenAI(
-        model="gpt-4o-mini",
+        model="gpt-6-luna",
         connection=OpenAIConnection(),
         max_tokens=3000,
         prompt=Prompt(
