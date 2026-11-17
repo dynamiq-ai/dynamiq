@@ -504,6 +504,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
     _output_references: NodeOutputReferences = PrivateAttr()
     _pending_approval_response: ApprovalInputData | None = PrivateAttr(default=None)
+    _authored_id: str | None = PrivateAttr(default=None)
 
     # Set to True in subclasses that manage their own background event loop
     # (e.g. CuaDesktopTool, E2BDesktopTool) to force run_async to offload
@@ -514,6 +515,11 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
     # tool): "mock all the tools" never means those, and mocking them corrupts the agent
     # rather than protecting the outside world. An explicit node-level mock still applies.
     is_mockable: ClassVar[bool] = True
+
+    @property
+    def authored_id(self) -> str:
+        """The id the node was written with, which copies made for a Map item or a call keep."""
+        return self._authored_id or self.id
 
     @property
     def has_native_async(self) -> bool:
