@@ -214,9 +214,8 @@ def test_binary_tool_output_summary_copes_with_no_file_and_no_type():
 
 
 def test_a_text_body_that_happens_to_be_bytes_is_still_readable():
-    """HttpApiCall leaves `content` as bytes for anything but an exact application/json header,
-    so most JSON, HTML and XML bodies arrive here as bytes and the agent has to be able to read
-    them."""
+    """HttpApiCall leaves `content` as bytes for any body it does not read as JSON, so HTML, XML
+    and JSON under another label arrive here as bytes and the agent has to be able to read them."""
     body = b'{"answer": 42, "detail": "what the agent needed"}'
 
     assert process_tool_output_for_agent(body) == '{"answer": 42, "detail": "what the agent needed"}'

@@ -1,5 +1,7 @@
+import math
 import re
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any, ClassVar, Literal, NamedTuple
 from uuid import uuid4
 
@@ -101,6 +103,11 @@ def read_literal(text: str, column_type: str, where: str) -> CellLiteral:
 
 def coerce_value(value: Any, column_type: str) -> Any:
     """The incoming value read as the column type. None means it cannot be, and only an empty cell matches."""
+    if isinstance(value, Decimal):
+        # A SQL NUMERIC column arrives as a Decimal, which a numeric column read as no number and a range or an ordering
+        # never matched: it reads as the number its text writes, as the same amount sent as JSON does, and a NaN or an
+        # infinity as no number.
+        value = _number(str(value)) if value.is_finite() else None
     if value is None or column_type == "Any":
         return value
     if column_type in NUMERIC_TYPES:
@@ -364,6 +371,13 @@ class DecisionTable(Node):
         numbers = [value for value in outputs if _is_number(value)]
         if not numbers:
             return None
+        floats = [number for number in numbers if isinstance(number, float)]
+        if self.aggregation == DecisionAggregation.SUM and floats and all(map(math.isfinite, floats)):
+            # A float cell holds the binary number nearest the decimal written in it, and adding the binaries drifts
+            # from the written sum: 0.2 + 0.1 gives 0.30000000000000004. Each float's shortest repr is the decimal
+            # written, so the sum adds those decimals; a sum of ints is exact as it is, and one with an infinity, a
+            # cell of 1e999 say, stays a float sum, where opposite infinities give a NaN and Decimal ones raise.
+            return float(sum(Decimal(repr(number)) for number in numbers))
         return _FOLDS[self.aggregation](numbers)
 
     def _folds_numbers(self, index: int, column: NamedField) -> bool:

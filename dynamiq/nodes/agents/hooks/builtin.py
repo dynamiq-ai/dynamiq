@@ -9,6 +9,7 @@ PIIHook              pii               detect, mask and restore PII with numbere
 PromptInjectionHook  prompt_injection  check the user input and tool results with a detector node.
 """
 
+import bisect
 import copy
 import dataclasses
 import json
@@ -17,6 +18,7 @@ import threading
 from collections import OrderedDict
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from decimal import Decimal
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
@@ -56,8 +58,21 @@ RunPoint = Literal["input", "tool_result", "output"]
 _RUN_POINTS = {"input": HookPoint.ON_INPUT, "tool_result": HookPoint.AFTER_TOOL, "output": HookPoint.ON_OUTPUT}
 
 
+def _number_text(value: Any) -> str | None:
+    """The text of an int or a Decimal, which is how a parsed JSON body or SQL row can hold a card number; ``None``
+    for any other value. A bool is an int with no number in it, and a float's text is not the number as written."""
+    if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
+        return None
+    try:
+        return str(value)
+    except ValueError:
+        # Python turns no int longer than sys.get_int_max_str_digits() into text, and no identifier is that long.
+        return None
+
+
 def iter_strings(value: Any) -> Iterator[str]:
-    """Every string leaf of a payload: dicts, lists and tuples are walked, and so is a ``ToolResult``.
+    """Every text of a payload: string leaves, dict keys and the text of int and Decimal leaves. Dicts, lists and
+    tuples are walked, and so is a ``ToolResult``.
 
     Bytes that hold text (an HTTP tool returns most JSON, HTML and XML bodies this way) count as a string.
     """
@@ -66,17 +81,22 @@ def iter_strings(value: Any) -> Iterator[str]:
     elif isinstance(value, (bytes, bytearray)):
         if (text := decode_text_payload(value)) is not None:
             yield text
+    elif (text := _number_text(value)) is not None:
+        yield text
     elif isinstance(value, ToolResult):
         yield from iter_strings([value.content, value.output, value.error])
     elif isinstance(value, dict):
-        yield from iter_strings(list(value.values()))
+        for key, item in value.items():
+            yield from iter_strings(key)
+            yield from iter_strings(item)
     elif isinstance(value, (list, tuple)):
         for item in value:
             yield from iter_strings(item)
 
 
 def map_strings(value: Any, fn) -> Any:
-    """Copy of a payload with ``fn`` applied to every string leaf (text bytes too: changed ones become ``str``)."""
+    """Copy of a payload with ``fn`` applied to every text that ``iter_strings`` yields. A key or leaf whose text ``fn``
+    changes is replaced with the new text, so changed bytes and numbers become ``str``; everything else is kept."""
     if isinstance(value, str):
         return fn(value)
     if isinstance(value, (bytes, bytearray)):
@@ -85,10 +105,13 @@ def map_strings(value: Any, fn) -> Any:
             return value
         mapped = fn(text)
         return value if mapped == text else mapped
+    if (text := _number_text(value)) is not None:
+        mapped = fn(text)
+        return value if mapped == text else mapped
     if isinstance(value, ToolResult):
         return ToolResult(map_strings(value.content, fn), map_strings(value.output, fn), map_strings(value.error, fn))
     if isinstance(value, dict):
-        return {key: map_strings(item, fn) for key, item in value.items()}
+        return {map_strings(key, fn): map_strings(item, fn) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return type(value)(map_strings(item, fn) for item in value)
     return value
@@ -444,12 +467,21 @@ class RegexHook(TextGuardHook):
 PIIEntity = Literal["email", "phone", "credit_card", "ssn", "ip_address"]
 
 _PII_PATTERNS: dict[str, str] = {
-    "credit_card": (r"(?<![\d-])(?:\d{4}([ -])\d{4}\1\d{4}\1\d{1,7}|\d{4}([ -])\d{6}\2\d{5}|\d{13,19})(?![\d-]|[ ]\d)"),
+    "credit_card": r"(?<![\d-])(?:\d{4}([ -])\d{4}\1\d{4}\1\d{1,7}|\d{4}([ -])\d{6}\2\d{5}|\d{13,19})(?![\d-])",
     "ssn": r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)",
     "email": r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}",
     "ip_address": r"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])",
     "phone": r"(?<![\w.])\+?\d[\d\s().\-]{7,}\d(?![\w])",
 }
+# A 19-digit card grouped 4-4-4-4-3 starts with a 16-digit grouping, and only the Luhn check tells it from a 16-digit
+# card followed by its CVV, so it is looked for before the other forms.
+_GROUPED_19_DIGIT_CARD = r"(?<![\d-])\d{4}([ -])\d{4}\1\d{4}\1\d{4}\1\d{3}(?![\d-])"
+# An IBAN is written in groups of four like a card number, and a stretch of it can pass the Luhn check, so a card
+# number that lies inside an IBAN passing the ISO 13616 check (mod 97) is taken for part of the IBAN. Text that only
+# looks like an IBAN is scanned like any other: an IBAN masked as a card number is the safe failure.
+_IBAN = regex.compile(
+    r"(?<![A-Za-z0-9])[A-Z]{2}[0-9]{2}(?:[A-Z0-9]{11,30}|(?:[ ][A-Z0-9]{4}){0,7}(?:[ ][A-Z0-9]{1,3})?)(?![A-Za-z0-9])"
+)
 _VALIDATED_ENTITIES = {"credit_card", "phone"}
 _PLACEHOLDER = regex.compile(r"<(?P<label>[A-Z_]+)_\d+(?:_\d+)?>")
 
@@ -462,6 +494,10 @@ def _luhn_ok(digits: str) -> bool:
     return total % 10 == 0
 
 
+def _iban_ok(iban: str) -> bool:
+    return 15 <= len(iban) <= 34 and int("".join(str(int(char, 36)) for char in iban[4:] + iban[:4])) % 97 == 1
+
+
 def _is_valid_match(entity: str | None, text: str) -> bool:
     digits = re.sub(r"\D", "", text)
     if entity == "credit_card":
@@ -472,6 +508,27 @@ def _is_valid_match(entity: str | None, text: str) -> bool:
         )
         return formatted and 9 <= len(digits) <= 15 and not re.match(r"\d{4}-\d{2}-\d{2}", text.strip())
     return True
+
+
+def _iban_spans(text: str) -> list[tuple[int, int]]:
+    """The spans of ``text`` that hold an IBAN passing its check, in order. An IBAN can be followed by more groups,
+    such as those of a card number, so the IBAN of a run of groups is its longest start that passes."""
+    spans = []
+    for run in list(_IBAN.finditer(text, timeout=REGEX_TIMEOUT_SECONDS)):
+        iban, end = "", None
+        for group in re.finditer(r"\S+", run.group(0)):
+            iban += group.group(0)
+            if _iban_ok(iban):
+                end = run.start() + group.end()
+        if end is not None:
+            spans.append((run.start(), end))
+    return spans
+
+
+def _inside(span: tuple[int, int], spans: list[tuple[int, int]]) -> bool:
+    """Whether ``span`` lies inside one of ``spans``, which are in order and do not overlap."""
+    index = bisect.bisect_right(spans, span[0], key=lambda item: item[0]) - 1
+    return index >= 0 and span[1] <= spans[index][1]
 
 
 _SESSION_STORES: "OrderedDict[tuple, dict]" = OrderedDict()
@@ -527,16 +584,41 @@ def _merge_mapping(target: dict, source: dict) -> None:
             target.setdefault("value_to_placeholder", {}).setdefault(label, {}).setdefault(value, placeholder)
 
 
+def _valid_matches(pattern, text: str, entity: str | None) -> Iterator:
+    """The matches of ``pattern`` in ``text`` that pass validation, overlapping ones included, leftmost first. A card
+    number that lies inside an IBAN passing its check is left out. When the scan times out, the matches it found come
+    first and the ``TimeoutError`` after them, so that a value found before the timeout still blocks."""
+    # The scan is finished before any match is validated: its timeout also counts the time spent between matches,
+    # which validating every candidate of a long text would use up.
+    matches, timeout = [], None
+    try:
+        matches.extend(pattern.finditer(text, overlapped=True, timeout=REGEX_TIMEOUT_SECONDS))
+    except TimeoutError as e:
+        timeout = e
+    ibans = _iban_spans(text) if entity == "credit_card" and matches else []
+    for match in matches:
+        if _is_valid_match(entity, match.group(0)) and not _inside(match.span(), ibans):
+            yield match
+    if timeout is not None:
+        raise timeout
+
+
 def _sub_validated(pattern, text: str, replace, entity: str) -> str:
-    """Replace the matches that pass validation. A candidate that fails does not consume the text, so a real value
-    that starts inside it is still found (overlapped search, leftmost valid match first)."""
+    """Replace the matches that pass validation with ``replace`` of their text. A candidate that fails does not consume
+    the text, so a real value that starts inside it is still found (overlapped search, leftmost valid match first).
+    Valid matches that overlap are replaced as one: a card number can start inside digits written before it, and
+    replacing only the first valid window would leave the end of the card in clear."""
+    spans: list[list[int]] = []
+    for match in _valid_matches(pattern, text, entity):
+        start, end = match.span()
+        if spans and start < spans[-1][1]:
+            spans[-1][1] = max(spans[-1][1], end)
+        else:
+            spans.append([start, end])
     out, pos = [], 0
-    for match in pattern.finditer(text, overlapped=True, timeout=REGEX_TIMEOUT_SECONDS):
-        if match.start() < pos or not _is_valid_match(entity, match.group(0)):
-            continue
-        out.append(text[pos : match.start()])
-        out.append(replace(match))
-        pos = match.end()
+    for start, end in spans:
+        out += [text[pos:start], replace(text[start:end])]
+        pos = end
     out.append(text[pos:])
     return "".join(out)
 
@@ -592,6 +674,8 @@ class PIIHook(TextGuardHook):
         if self.scope == "request" and self.action != "mask":
             raise ValueError("pii `scope: request` only applies to `action: mask`")
         built_in = [(name.upper(), name, _PII_PATTERNS[name]) for name in _PII_PATTERNS if name in self.entities]
+        if "credit_card" in self.entities:
+            built_in.insert(0, ("CREDIT_CARD", "credit_card", _GROUPED_19_DIGIT_CARD))
         custom = [(name, None, pattern) for name, pattern in self.custom_patterns.items()]
         self._detectors = [
             (label, entity, compile_regex(pattern, f"pattern for {label}"))
@@ -626,22 +710,19 @@ class PIIHook(TextGuardHook):
 
     def _violates(self, text: str) -> bool:
         return any(
-            _is_valid_match(entity, match.group(0))
-            for _, entity, pattern in self._detectors
-            for match in pattern.finditer(text, overlapped=True, timeout=REGEX_TIMEOUT_SECONDS)
+            next(_valid_matches(pattern, text, entity), None) is not None for _, entity, pattern in self._detectors
         )
 
     def _mask(self, ctx: HookContext, text: str, origin: str) -> str:
         for label, entity, pattern in self._detectors:
 
-            def replace(match, label=label, entity=entity):
-                found = match.group(0)
-                return self._placeholder(ctx, label, found, origin) if _is_valid_match(entity, found) else found
+            def replace(found: str, label=label) -> str:
+                return self._placeholder(ctx, label, found, origin)
 
             if entity in _VALIDATED_ENTITIES:
                 text = _sub_validated(pattern, text, replace, entity)
             else:
-                text = pattern.sub(replace, text, timeout=REGEX_TIMEOUT_SECONDS)
+                text = pattern.sub(lambda match: replace(match.group(0)), text, timeout=REGEX_TIMEOUT_SECONDS)
         return text
 
     def _restore(self, ctx: HookContext, text: str, only_origin: str | None = None) -> str:
