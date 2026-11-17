@@ -215,7 +215,7 @@ async def test_http_api_call_json_payload_dropped_when_files_present():
     call_kwargs = mock_client.request.await_args.kwargs
     assert "json" not in call_kwargs
     assert "files" in call_kwargs
-    assert call_kwargs["files"]["upload"] == b"hello"
+    assert call_kwargs["files"]["upload"] == ("upload", b"hello")
 
 
 @pytest.mark.asyncio
@@ -239,7 +239,7 @@ async def test_http_api_call_raw_data_kept_alongside_files():
 
     call_kwargs = mock_client.request.await_args.kwargs
     assert call_kwargs["data"] == {"field1": "value1"}
-    assert call_kwargs["files"]["upload"] == b"hello"
+    assert call_kwargs["files"]["upload"] == ("upload", b"hello")
 
 
 @pytest.mark.asyncio

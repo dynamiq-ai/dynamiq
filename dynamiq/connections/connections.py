@@ -2051,10 +2051,18 @@ class Databricks(BaseApiKeyConnection):
 def merge_mcp_http_headers(base: dict[str, Any] | None, extra: dict[str, Any] | None) -> dict[str, Any] | None:
     """Merge connection-level and per-call MCP HTTP headers without mutating either dict.
 
-    Per-call values win on duplicate keys. An empty merge returns ``None`` so the MCP client
-    keeps its default (no extra headers) rather than sending ``{}``.
+    Per-call values win on duplicate keys, compared case-insensitively as HTTP header names are: a
+    per-call ``authorization`` replaces the connection's ``Authorization`` instead of being sent next
+    to it. An empty merge returns ``None`` so the MCP client keeps its default (no extra headers)
+    rather than sending ``{}``.
     """
-    merged = {**(base or {}), **(extra or {})}
+    merged: dict[str, Any] = {}
+    names: dict[str, str] = {}  # lowercased name -> the spelling kept in ``merged``
+    for headers in (base or {}, extra or {}):
+        for key, value in headers.items():
+            merged.pop(names.get(str(key).lower(), key), None)
+            names[str(key).lower()] = key
+            merged[key] = value
     return merged or None
 
 
@@ -2442,6 +2450,48 @@ class SteelBrowser(BaseConnection):
             if self.api_key:
                 raise ValueError("api_key should not be provided when environment='SELF_HOSTED'")
         return self
+
+    def connect(self):
+        pass
+
+
+class BrowserUse(BaseConnection):
+    """
+    Browser Use Cloud connection configuration for Stagehand.
+
+    The browser is created through the Browser Use Cloud API (``POST /browsers``) and driven over
+    CDP by Stagehand's bundled local server, which inherits the process environment. With
+    ``anthropic/*`` models, leave ``ANTHROPIC_BASE_URL`` unset or include the ``/v1`` suffix.
+    """
+
+    api_key: str = Field(default_factory=partial(get_env_var, "BROWSER_USE_API_KEY"))
+    url: str = Field(default="https://api.browser-use.com/api/v4", description="Browser Use Cloud API base URL.")
+    model_api_key: str = Field(..., description="API key for the LLM model.")
+    session_config: dict[str, Any] = Field(
+        default_factory=lambda: {"timeout": 60},
+        description=(
+            "Request body for browser creation (e.g. proxyCountryCode, profileId, enableRecording). "
+            "timeout is in minutes (max 240) so the browser outlasts a full agent run."
+        ),
+    )
+    extra_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Additional Stagehand session start options (e.g. self_heal, system_prompt, "
+            "dom_settle_timeout_ms, verbose)."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_api_key(self):
+        """Fail at construction rather than with an opaque header error on the first tool call."""
+        if not self.api_key:
+            raise ValueError("api_key is required: pass it or set BROWSER_USE_API_KEY")
+        return self
+
+    @property
+    def conn_params(self) -> dict:
+        return {"X-Browser-Use-API-Key": self.api_key, "Content-Type": "application/json"}
 
     def connect(self):
         pass
