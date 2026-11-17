@@ -100,8 +100,9 @@ import reprlib
 from enum import Enum
 from typing import Any
 
-from jinja2 import Template
 from pydantic import BaseModel, Field, field_validator
+
+from dynamiq.utils.jinja import compile_template
 
 DEFAULT_MOCK_MARKER = "[MOCKED]"
 
@@ -248,7 +249,7 @@ class MockConfig(BaseModel):
             output = {"content": self.describe_skipped_call(node_name, input_data)}
         else:
             output = {
-                "content": Template(self.output).render(
+                "content": compile_template(self.output).render(
                     marker=self.marker or "",
                     node_name=node_name,
                     node_id=node_id,
