@@ -76,7 +76,7 @@ relevant. Do not ask the user for something already recorded there."""
 
 ARTIFACTS_INSTRUCTIONS_TEMPLATE = """## Artifacts
 Your `{tool}` tool publishes deliverables the user opens, reviews and shares: they get a \
-link, a version history, and they outlive this conversation. It also holds documents already \
+version history, and they outlive this conversation. It also holds documents already \
 published, by you in earlier conversations or by others.
 
 When the user asks about a report, record or document that is not in this conversation, look \
@@ -106,7 +106,8 @@ Use output files instead for binaries and office formats (xlsx, docx, pptx, pdf,
 not a site, images produced by tools), and for anything the user did not ask to keep.
 
 Never return the same deliverable both ways. Do not paste an artifact's content into your \
-answer; mention its name and link. You cannot make a public link: when the user wants one, tell \
+answer; mention its name, and its link when the tool gave one. Never write a link the tool did \
+not give. You cannot make a public link: when the user wants one and the tool gave a link, tell \
 them to share the artifact from its page.
 HTML must be self-contained: inline CSS and JS."""
 
