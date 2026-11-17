@@ -1,6 +1,7 @@
 # Prompt injection in the user's input AND in tool results (web pages).
 #
-#   hook 1  regex preset `injection_basic` on `input`: runs once, on the user's message, in every inference mode.
+#   hook 1  regex preset `injection_basic` on `input`: runs on the user's message and on the run input's
+#           `context`, once each, in every inference mode.
 #           on_violation: answer -> the run ends successfully with the message, the model is never called,
 #           the output carries `blocked: true` / `blocked_by: input-guard`.
 #   hook 2  the same preset on `tool_result`: runs on every tool result, failures (e.g. a 4xx body) included.
