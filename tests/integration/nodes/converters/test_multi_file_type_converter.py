@@ -366,8 +366,18 @@ def test_single_file_failure_fails_the_node(converter):
     assert result.status == RunnableStatus.FAILURE
 
 
-def test_failure_stops_pending_files(converter):
+def test_failure_stops_pending_files(converter, monkeypatch):
     """An early failure stops files that have not started, mirroring sequential fail-fast."""
+    from dynamiq.nodes.converters import multi_file_type_converter
+
+    # A main thread slow to see the failure, as on a busy runner, must not let the worker start later files.
+    real_wait = multi_file_type_converter.wait
+
+    def slow_wait(fs, timeout=None):
+        time.sleep(0.2)
+        return real_wait(fs, timeout=timeout)
+
+    monkeypatch.setattr(multi_file_type_converter, "wait", slow_wait)
     n = 6
     converter.max_workers = 1  # serialize so the failure lands before later files start
     files = [_txt(f"body {i}", f"f{i}.txt") for i in range(n)]
@@ -391,7 +401,7 @@ def test_failure_stops_pending_files(converter):
         TextFileConverter.run = original_run
 
     assert result.status == RunnableStatus.FAILURE
-    assert len(started) < n  # files after the failure never started converting
+    assert started == ["f0.txt", "f1.txt"]  # files after the failure never started converting
 
 
 def test_failure_reports_first_error_in_input_order(converter):
