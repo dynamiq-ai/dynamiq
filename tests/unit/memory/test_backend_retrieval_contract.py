@@ -182,6 +182,19 @@ def test_vector_backend_get_all_without_limit_returns_everything_oldest_first(ve
     assert [m.content for m in vector_backend.get_all()] == [f"msg-{i}" for i in range(TOTAL)]
 
 
+def test_pinecone_get_all_without_limit_is_not_capped(mocker):
+    """A bare get_all() must return every message, not a hidden default of 10000."""
+    from dynamiq.memory.backends.pinecone import Pinecone
+
+    store = mocker.MagicMock()
+    store.list_documents.return_value = [
+        Document(id=str(i), content=f"msg-{i}", metadata={"role": "user", "timestamp": float(i)}) for i in range(10_001)
+    ]
+    backend = Pinecone.model_construct(vector_store=store, embedder=mocker.MagicMock(), connection=mocker.MagicMock())
+
+    assert len(backend.get_all()) == 10_001
+
+
 def test_weaviate_filter_only_search_with_limit_returns_the_most_recent(mocker):
     """filter_documents returns an unordered set; the limit must keep the newest, oldest first."""
     from dynamiq.memory.backends.weaviate import Weaviate

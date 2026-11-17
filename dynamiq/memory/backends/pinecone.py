@@ -134,7 +134,7 @@ class Pinecone(MemoryBackend):
         except Exception as e:
             raise PineconeError(f"Error adding message to Pinecone: {e}") from e
 
-    def get_all(self, limit: int = 10000) -> list[Message]:
+    def get_all(self, limit: int | None = None) -> list[Message]:
         """Retrieves all messages from Pinecone."""
         try:
             documents = self.vector_store.list_documents(include_embeddings=False)
