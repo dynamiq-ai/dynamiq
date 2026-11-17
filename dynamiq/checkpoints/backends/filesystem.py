@@ -110,7 +110,11 @@ class FileSystem(CheckpointBackend):
             (self._flow_dir(flow_id), self._safe_id(effective)),
             (self._base_dir / self._legacy_id(flow_id), self._legacy_id(effective)),
         ):
-            if flow_dir.is_symlink() or not flow_dir.is_dir():
+            try:
+                if flow_dir.is_symlink() or not flow_dir.is_dir():
+                    continue
+            except OSError:
+                # A legacy name past the filesystem's limit (Python < 3.14 raises for it) can't exist.
                 continue
             for match in flow_dir.glob(f"*__{run_name}"):
                 if not match.is_symlink() and match.is_dir():
