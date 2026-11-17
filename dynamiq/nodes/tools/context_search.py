@@ -11,6 +11,9 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
 
+HIGHLIGHTS_SUCCESS = "SUCCESS"
+HIGHLIGHTS_NOT_RETURNED = "NOT_RETURNED"
+
 
 class ContextSearchInputSchema(BaseModel):
     """Inputs for a Context.dev web search."""
@@ -95,14 +98,17 @@ class ContextSearchTool(ConnectionNode):
         sources = []
         for result in data.results:
             passages = (
-                result.highlights.highlights if result.highlights and result.highlights.code == "SUCCESS" else None
+                result.highlights.highlights
+                if result.highlights and result.highlights.code == HIGHLIGHTS_SUCCESS
+                else None
             )
             sources.append(
                 {
                     "url": result.url,
                     "title": result.title or result.url,
                     "content": "\n".join(passages or []) or result.description or "",
-                    "highlights_status": (result.highlights.code if result.highlights else None) or "NOT_RETURNED",
+                    "highlights_status": (result.highlights.code if result.highlights else None)
+                    or HIGHLIGHTS_NOT_RETURNED,
                 }
             )
         text = "\n\n".join(f"[{s['title']}]({s['url']})\n{s['content']}" for s in sources)
