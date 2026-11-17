@@ -179,7 +179,8 @@ def attack_probability(predictions: list) -> float:
         raise ValueError("The classifier returned no label.")
     if unknown := scores.keys() - BENIGN_LABELS - ATTACK_LABELS:
         raise ValueError(f"Unrecognized classifier labels {sorted(unknown)}; not a prompt-injection classifier.")
-    attack = [score for label, score in scores.items() if label in ATTACK_LABELS]
-    if attack:
-        return sum(attack)
-    return 1 - sum(scores.values())
+    attack = sum(score for label, score in scores.items() if label in ATTACK_LABELS)
+    benign = sum(score for label, score in scores.items() if label in BENIGN_LABELS)
+    # A top-1 reply leaves out the other classes: what it doesn't give to a benign label may be an attack, so a
+    # three-class model's top INJECTION at 0.45 counts as at least 0.55 attack, not 0.45.
+    return max(attack, 1 - benign)

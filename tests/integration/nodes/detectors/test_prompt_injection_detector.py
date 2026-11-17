@@ -45,8 +45,18 @@ def test_huggingface_detector_calls_the_router_or_the_connection_endpoint(reques
         ([{"label": "benign", "score": 0.1}, {"label": "injection", "score": 0.9}], True),
         ([{"label": "SAFE", "score": 0.97}], False),
         ([{"label": "LEGIT", "score": 0.4}], True),
+        ([{"label": "INJECTION", "score": 0.45}], True),
     ],
-    ids=["legacy-nested", "prompt-guard", "prompt-guard-2", "generic-labels", "lowercase", "top-1-safe", "top-1-legit"],
+    ids=[
+        "legacy-nested",
+        "prompt-guard",
+        "prompt-guard-2",
+        "generic-labels",
+        "lowercase",
+        "top-1-safe",
+        "top-1-legit",
+        "top-1-attack-below-half",
+    ],
 )
 def test_huggingface_detector_reads_the_labels_of_common_classifiers(requests_mock, response, detected):
     requests_mock.post(ROUTER_URL, json=response)
