@@ -1059,6 +1059,11 @@ class Weaviate(BaseApiKeyConnection):
     timeout_init: int = Field(default=180, description="Timeout for initialization checks in seconds")
     timeout_query: int = Field(default=180, description="Timeout for query operations in seconds")
     timeout_insert: int = Field(default=120, description="Timeout for insert operations in seconds")
+    secure: bool = Field(
+        default=True,
+        description="Whether a custom deployment is reached over TLS. Set to False for a self-hosted Weaviate "
+        "served over plain HTTP, such as a local one; an empty api_key then connects without authentication.",
+    )
 
     def connect(self) -> "WeaviateClient":
         """
@@ -1088,11 +1093,11 @@ class Weaviate(BaseApiKeyConnection):
             weaviate_client = connect_to_custom(
                 http_host=self.http_host,
                 http_port=self.http_port,
-                http_secure=True,
+                http_secure=self.secure,
                 grpc_host=self.grpc_host,
                 grpc_port=self.grpc_port,
-                grpc_secure=True,
-                auth_credentials=Auth.api_key(self.api_key),
+                grpc_secure=self.secure,
+                auth_credentials=Auth.api_key(self.api_key) if self.api_key else None,
                 additional_config=AdditionalConfig(
                     timeout=Timeout(
                         init=self.timeout_init, query=self.timeout_query, insert=self.timeout_insert
