@@ -137,7 +137,7 @@ class Qdrant(MemoryBackend):
             documents = self.vector_store.list_documents(include_embeddings=False)
             messages = [self._document_to_message(doc) for doc in documents]
             messages = sorted(messages, key=lambda msg: msg.metadata.get("timestamp", 0))
-            if limit and len(messages) > limit:
+            if limit is not None and 0 < limit < len(messages):
                 return messages[-limit:]
             return messages
         except Exception as e:

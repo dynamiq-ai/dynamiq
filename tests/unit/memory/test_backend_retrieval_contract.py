@@ -182,6 +182,12 @@ def test_vector_backend_get_all_without_limit_returns_everything_oldest_first(ve
     assert [m.content for m in vector_backend.get_all()] == [f"msg-{i}" for i in range(TOTAL)]
 
 
+@pytest.mark.parametrize("limit", [0, -1])
+def test_vector_backend_get_all_with_non_positive_limit_returns_everything(vector_backend, limit):
+    """Like SQLite, PostgreSQL and Weaviate, a limit <= 0 means no limit, not a slice."""
+    assert [m.content for m in vector_backend.get_all(limit=limit)] == [f"msg-{i}" for i in range(TOTAL)]
+
+
 def test_pinecone_get_all_without_limit_is_not_capped(mocker):
     """A bare get_all() must return every message, not a hidden default of 10000."""
     from dynamiq.memory.backends.pinecone import Pinecone
