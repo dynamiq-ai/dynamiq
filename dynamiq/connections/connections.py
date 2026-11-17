@@ -2450,6 +2450,13 @@ class BrowserUse(BaseConnection):
         ),
     )
 
+    @model_validator(mode="after")
+    def validate_api_key(self):
+        """Fail at construction rather than with an opaque header error on the first tool call."""
+        if not self.api_key:
+            raise ValueError("api_key is required: pass it or set BROWSER_USE_API_KEY")
+        return self
+
     @property
     def conn_params(self) -> dict:
         return {"X-Browser-Use-API-Key": self.api_key, "Content-Type": "application/json"}

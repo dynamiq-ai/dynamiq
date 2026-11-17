@@ -721,3 +721,9 @@ class TestBrowserUse:
         assert [(r.method, r.url.path) for r in requests] == [("PATCH", "/api/v4/browsers/bu-1")]
         assert tool._browser_use_session is None
         assert tool._browser_use_client is None
+
+    def test_connection_requires_an_api_key(self, monkeypatch):
+        """Without a key the first call would fail on a None header instead of naming the problem."""
+        monkeypatch.delenv("BROWSER_USE_API_KEY", raising=False)
+        with pytest.raises(ValueError, match="BROWSER_USE_API_KEY"):
+            BrowserUseConnection(model_api_key="mk")
