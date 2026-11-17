@@ -10,6 +10,7 @@ import pytest
 
 from dynamiq.checkpoints.backends import filesystem
 from dynamiq.checkpoints.backends.filesystem import FileSystem
+from dynamiq.checkpoints.backends.in_memory import InMemory
 from dynamiq.checkpoints.checkpoint import FlowCheckpoint
 from dynamiq.checkpoints.types import CheckpointStatus
 
@@ -262,3 +263,29 @@ def test_retention_expires_waiting_snapshot_and_honors_fetch_bound(backend):
     backend.max_cleanup_results = 2
     assert backend.cleanup_by_flow("flow", keep_count=0) == 2
     assert len(backend.get_list_by_flow("flow")) == 2
+
+
+@pytest.mark.parametrize("keep_count, max_ttl_minutes", [(1, None), (0, None), (2, 30)])
+def test_retention_selection_matches_base_backend(backend, keep_count, max_ttl_minutes):
+    reference = InMemory()
+    start = FlowCheckpoint(flow_id="flow", run_id="seed").created_at - timedelta(hours=2)
+    statuses = [CheckpointStatus.PAUSED, CheckpointStatus.COMPLETED, CheckpointStatus.PENDING_INPUT]
+    checkpoints = [
+        FlowCheckpoint(flow_id="flow", run_id=str(index), status=status, created_at=start + timedelta(minutes=index))
+        for index, status in enumerate(statuses * 2)
+    ]
+    checkpoints.append(
+        FlowCheckpoint(
+            flow_id="flow",
+            run_id="continued",
+            parent_checkpoint_id=checkpoints[0].id,
+            created_at=start + timedelta(hours=2),
+        )
+    )
+    for checkpoint in checkpoints:
+        backend.save(checkpoint)
+        reference.save(checkpoint)
+    kwargs = {"keep_count": keep_count, "max_ttl_minutes": max_ttl_minutes}
+    assert backend.cleanup_by_flow("flow", **kwargs) == reference.cleanup_by_flow("flow", **kwargs)
+    remaining = {checkpoint.id for checkpoint in reference.get_list_by_flow("flow", limit=None)}
+    assert {checkpoint.id for checkpoint in backend.get_list_by_flow("flow")} == remaining

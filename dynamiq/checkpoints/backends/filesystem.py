@@ -4,7 +4,7 @@ import json
 import os
 import re
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Iterator
@@ -301,19 +301,8 @@ class FileSystem(CheckpointBackend):
             checkpoints = self._list(lambda cp: cp.flow_id == flow_id, self._in_flow_dir(flow_id))[
                 : self.max_cleanup_results
             ]
-            continued_from = {cp.parent_checkpoint_id for cp in checkpoints}
-            deleted = 0
-            now = datetime.now(timezone.utc)
-            for index, cp in enumerate(checkpoints):
-                waiting = (
-                    keep_count > 0
-                    and cp.status in (CheckpointStatus.PAUSED, CheckpointStatus.PENDING_INPUT)
-                    and cp.id not in continued_from
-                )
-                expired = max_ttl_minutes is not None and (now - cp.created_at).total_seconds() / 60 > max_ttl_minutes
-                if (index >= keep_count and not waiting) or expired:
-                    deleted += self._delete(cp.id)
-            return deleted
+            selected = self._select_for_cleanup(checkpoints, keep_count=keep_count, max_ttl_minutes=max_ttl_minutes)
+            return sum(self._delete(cp.id) for cp in selected)
 
     def get_chain(self, checkpoint_id: str) -> list[FlowCheckpoint]:
         with directory_lock(self._base_dir):
