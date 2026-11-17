@@ -17,6 +17,7 @@ from dynamiq.nodes.agents.components import parser, schema_generator
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
+    HookBlockedException,
     JSONParsingError,
     MaxLoopsExceededException,
     OutputFileNotFoundError,
@@ -45,7 +46,7 @@ from dynamiq.nodes.tools.todo_tools import TodoItem, TodoWriteTool
 from dynamiq.nodes.types import ActionType, Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage
 from dynamiq.runnables import RunnableConfig, RunnableStatus
-from dynamiq.types.cancellation import check_cancellation
+from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import (
     AgentReasoningEventMessageData,
@@ -191,6 +192,12 @@ class AgentState(BaseModel):
 UNKNOWN_TOOL_NAME = "unknown_tool"
 
 TOOL_ERROR_PREFIX = "[tool_error]"
+
+RUN_FAILING_TOOL_RESULT = "The tool failed with an error that ended the run."
+
+# Calls these leave open: a canceled call and a timed-out wait for a person are ended by the run that resumes,
+# and a hook that ends the run streams its own event.
+CALL_LEFT_OPEN = (CanceledException, InputStreamingTimeoutError, HookBlockedException)
 
 
 def mark_tool_failure(content: str, success: Any) -> str:
@@ -860,6 +867,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     status=(
                         RunnableStatus.SKIP
                         if tp.get("tool_run_id") in self._blocked_tool_run_ids
+                        # A call with no result never started: an earlier one failed the run.
+                        or not (result_entry or tp.get("refused"))
                         else RunnableStatus.SUCCESS if result_entry.get("success") else RunnableStatus.FAILURE
                     ),
                 ).model_dump()
@@ -1432,6 +1441,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             config,
             **kwargs,
         )
+        result_streamed = False
         try:
             check_cancellation(config)
             if isinstance(tool, ContextManagerTool):
@@ -1517,6 +1527,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     elif live_filter and isinstance(tool_result, str):
                         shown_result = live_filter.mask_all(tool_result)
                 # Stream tool result (with files) before streaming final answer
+                result_streamed = True
                 self._stream_agent_event(
                     AgentToolResultEventMessageData(
                         tool_run_id=tool_run_id,
@@ -1550,6 +1561,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     preserved=to_preserve,
                 )
 
+            result_streamed = True
             self._stream_agent_event(
                 AgentToolResultEventMessageData(
                     tool_run_id=tool_run_id,
@@ -1608,6 +1620,32 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 **kwargs,
             )
             return error_message, [], False, False, None
+
+        except CALL_LEFT_OPEN:
+            raise
+
+        except Exception:
+            if result_streamed:
+                raise
+            # The call still gets its end event, without the error's text: no AFTER_TOOL hook has seen it, so it
+            # could show what a hook would have masked.
+            self._stream_agent_event(
+                AgentToolResultEventMessageData(
+                    tool_run_id=tool_run_id,
+                    name=tool.name,
+                    tool=tool_data,
+                    input=action_input,
+                    result=RUN_FAILING_TOOL_RESULT,
+                    files=[],
+                    loop_num=loop_num,
+                    output={},
+                    status=RunnableStatus.FAILURE,
+                ),
+                "tool",
+                config,
+                **kwargs,
+            )
+            raise
 
     @staticmethod
     def _accepts_input(tool: Node, tool_input: Any) -> bool:
@@ -2746,18 +2784,36 @@ class Agent(HistoryManagerMixin, BaseAgent):
         # to a different tool. Only execution skips them.
         executable = [tp for tp in prepared_tools if not tp.get("refused")]
 
+        # A run-failing error is held until the batch has streamed its end.
+        run_failures: list[Exception] = []
+
         def _execute_single_tool_to_result(tool_payload: dict[str, Any], **extra) -> dict[str, Any]:
             """Execute a single tool and wrap the result as a dict."""
-            tool_result, tool_files, is_delegated, success, dependency = self._execute_single_tool(
-                tool_payload["name"],
-                tool_payload["input"],
-                tool_payload.get("thought") or thought or "",
-                loop_num,
-                config,
-                collect_dependency=True,
-                **extra,
-                **kwargs,
-            )
+            try:
+                tool_result, tool_files, is_delegated, success, dependency = self._execute_single_tool(
+                    tool_payload["name"],
+                    tool_payload["input"],
+                    tool_payload.get("thought") or thought or "",
+                    loop_num,
+                    config,
+                    collect_dependency=True,
+                    **extra,
+                    **kwargs,
+                )
+            except CALL_LEFT_OPEN:
+                # The batch stays open with this call, and the run still fails with the error that came first.
+                if run_failures:
+                    raise run_failures[0]
+                raise
+            except Exception as e:
+                run_failures.append(e)
+                tool_result, tool_files, is_delegated, success, dependency = (
+                    RUN_FAILING_TOOL_RESULT,
+                    [],
+                    False,
+                    False,
+                    None,
+                )
             return {
                 "order": tool_payload["order"],
                 "tool_call_id": tool_payload.get("tool_call_id"),
@@ -2816,7 +2872,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                             future_map[future] = tool_payload
 
                         for future in as_completed(future_map.keys()):
-                            check_cancellation(config)
+                            if not run_failures:
+                                check_cancellation(config)
                             all_results.append(future.result())
                 elif len(parallel_group) == 1:
                     all_results.append(
@@ -2835,6 +2892,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         self._run_depends = parallel_deps
 
                 for tool_payload in sequential_group:
+                    if run_failures:
+                        break
                     check_cancellation(config)
                     all_results.append(
                         _execute_single_tool_to_result(
@@ -2847,6 +2906,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self._stream_batch_tool_result_event(
                     batch_tool_run_id, prepared_tools, all_results, loop_num, config, **kwargs
                 )
+
+            if run_failures:
+                raise run_failures[0]
 
         observation_parts: list[str] = []
         aggregated_files: dict[str, Any] = {}
