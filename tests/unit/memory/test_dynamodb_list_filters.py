@@ -23,3 +23,13 @@ def test_list_filter_uses_membership():
 def test_scalar_filter_still_uses_equality():
     expr = _build({"kind": "human"})
     assert expr.get_expression()["operator"] == "="
+
+
+def test_empty_list_filter_is_left_to_the_client_side_filter():
+    # boto3 would build "IN ()", which DynamoDB rejects as a syntax error.
+    expr = _build({"kind": [], "user_id": "u1"})
+    assert expr.get_expression()["operator"] == "="
+
+    backend = SimpleNamespace(metadata_attribute_name="metadata")
+    message = SimpleNamespace(metadata={"kind": "human"})
+    assert DynamoDB._apply_filters_client_side_messages(backend, [message], {"kind": []}) == []

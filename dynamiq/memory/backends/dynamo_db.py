@@ -366,6 +366,9 @@ class DynamoDB(MemoryBackend):
         fe: Attr | None = None
         for key, value in filters.items():
             try:
+                if isinstance(value, list) and not value:
+                    # DynamoDB rejects an empty IN list; the client-side filter drops every message for it.
+                    continue
                 attr = Attr(f"{self.metadata_attribute_name}.{key}")
                 # A list means "any of these", matching the client-side filter and InMemory.
                 current_cond = attr.is_in(value) if isinstance(value, list) else attr.eq(value)
