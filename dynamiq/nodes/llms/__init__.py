@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from .databricks import Databricks
     from .deepinfra import DeepInfra
     from .deepseek import DeepSeek
+    from .dynamiq import Dynamiq, DynamiqCacheControl
     from .fireworksai import FireworksAI
     from .gemini import Gemini, GeminiCacheControl
     from .groq import Groq
@@ -50,6 +51,8 @@ _LAZY_EXPORTS = {
     "Databricks": ".databricks",
     "DeepInfra": ".deepinfra",
     "DeepSeek": ".deepseek",
+    "Dynamiq": ".dynamiq",
+    "DynamiqCacheControl": ".dynamiq",
     "FireworksAI": ".fireworksai",
     "Gemini": ".gemini",
     "GeminiCacheControl": ".gemini",
@@ -88,6 +91,8 @@ __all__ = [
     "Databricks",
     "DeepInfra",
     "DeepSeek",
+    "Dynamiq",
+    "DynamiqCacheControl",
     "FireworksAI",
     "Gemini",
     "GeminiCacheControl",

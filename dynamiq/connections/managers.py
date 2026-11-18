@@ -22,11 +22,13 @@ class ConnectionClientInitType(str, enum.Enum):
     """Enumeration of connection client initialization types."""
     DEFAULT = "DEFAULT"
     ASYNC = "ASYNC"
+    ROUTER = "ROUTER"
 
 
 CONNECTION_METHOD_BY_INIT_TYPE = {
     ConnectionClientInitType.DEFAULT: "connect",
     ConnectionClientInitType.ASYNC: "connect_async",
+    ConnectionClientInitType.ROUTER: "connect_router",
 }
 
 

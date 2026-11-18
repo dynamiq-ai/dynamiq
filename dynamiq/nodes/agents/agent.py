@@ -57,7 +57,6 @@ from dynamiq.types.streaming import (
 )
 from dynamiq.utils import generate_uuid, serialize_files_in_value
 from dynamiq.utils.json_parser import parse_llm_json_output
-from dynamiq.utils.litellm import get_supported_openai_params, supports_response_schema
 from dynamiq.utils.logger import logger
 
 
@@ -662,15 +661,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     self.inference_mode = fallback
                     return self
 
-                params = get_supported_openai_params(model=model) or []
-                schema_ok = True
-                try:
-                    schema_ok = bool(supports_response_schema(model=model))
-                except Exception:
-                    schema_ok = True
-                if "response_format" not in params or not schema_ok:
+                if not self.llm.is_response_schema_supported:
                     logger.warning(
-                        "Agent: LiteLLM reports model '%s' may not fully support json_schema "
+                        "Agent: model '%s' may not fully support json_schema "
                         "structured output. Proceeding anyway; if it fails at runtime, switch "
                         "to inference_mode=InferenceMode.FUNCTION_CALLING or InferenceMode.XML.",
                         model,
@@ -950,6 +943,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                                 role=MessageRole.ASSISTANT,
                                 content=f"Calling: {called_names}",
                                 tool_calls=payload,
+                                # The model's reasoning before these calls, which the next call continues from.
+                                reasoning_details=llm_result.output.get("reasoning_details"),
                                 static=True,
                             )
                         )
