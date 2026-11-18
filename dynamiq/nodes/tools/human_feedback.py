@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any, ClassVar, Literal
 
-from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dynamiq.nodes import NodeGroup
@@ -11,6 +10,7 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.feedback import FeedbackMethod
 from dynamiq.types.streaming import StreamingEntitySource, StreamingEventMessage
+from dynamiq.utils.jinja import compile_template
 from dynamiq.utils.logger import logger
 
 
@@ -427,7 +427,7 @@ Important:
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        input_text = Template(self.msg_template).render(input_data.model_dump())
+        input_text = compile_template(self.msg_template).render(input_data.model_dump())
         action = self.action if self.action is not None else input_data.action
 
         if action == HumanFeedbackAction.ASK:
