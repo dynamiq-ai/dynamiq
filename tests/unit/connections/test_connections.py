@@ -278,6 +278,21 @@ def test_dynamiq_connection_names_the_sdk():
     assert USER_AGENT.startswith("dynamiq-python/")
 
 
+@pytest.mark.parametrize(
+    "env, router_url", [(None, "https://router.getdynamiq.ai/v1"), ("http://synapse:8080/v1", "http://synapse:8080/v1")]
+)
+def test_dynamiq_connection_router_url_comes_from_the_environment_or_the_public_router(monkeypatch, env, router_url):
+    if env is None:
+        monkeypatch.delenv("DYNAMIQ_ROUTER_URL", raising=False)
+    else:
+        monkeypatch.setenv("DYNAMIQ_ROUTER_URL", env)
+
+    connection = DynamiqConnection(url="https://api.example.test", api_key="key")
+
+    assert connection.router_url == router_url
+    assert connection.conn_params["api_base"] == "https://api.example.test"
+
+
 def test_dynamiq_connection_keeps_a_given_user_agent():
     connection = DynamiqConnection(url="https://api.example.test", api_key="key", headers={"User-Agent": "custom/1.0"})
 

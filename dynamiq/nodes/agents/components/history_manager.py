@@ -8,6 +8,22 @@ from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTe
 from dynamiq.utils.litellm import token_counter
 from dynamiq.utils.logger import logger
 
+# Encrypted reasoning is opaque, so its tokens are estimated from the length of its data, at the characters per
+# token of plain text.
+_ENCRYPTED_REASONING_CHARS_PER_TOKEN = 4
+
+
+def _reasoning_details_tokens(model: str, details: list[dict]) -> int:
+    """Input tokens that replaying `details` adds to a request, which the message token count leaves out."""
+    tokens = 0
+    for detail in details:
+        for key in ("text", "summary"):
+            if isinstance(value := detail.get(key), str) and value:
+                tokens += token_counter(model=model, text=value)
+        if isinstance(data := detail.get("data"), str):
+            tokens += len(data) // _ENCRYPTED_REASONING_CHARS_PER_TOKEN
+    return tokens
+
 
 class HistoryManagerMixin:
     """Mixin that provides conversation history and token limit management.
@@ -46,7 +62,7 @@ class HistoryManagerMixin:
         Split rather than summed because they are different levers: compaction shrinks the
         conversation and can do nothing about the schemas.
         """
-        messages = self._prompt.count_tokens(self.llm.model)
+        messages = self._prompt.count_tokens(self.llm.model) + self._replayed_reasoning_tokens(self._prompt.messages)
 
         # same accessor the request uses, so a run-time tool overlay is counted too
         if effective := getattr(self, "_effective_inference_schemas", None):
@@ -82,6 +98,15 @@ class HistoryManagerMixin:
                 and tokens > self.summarization_config.max_token_context_length
             )
             or (tokens / self.llm.get_token_limit() > self.summarization_config.context_usage_ratio)
+        )
+
+    def _replayed_reasoning_tokens(self, messages: list[Message | VisionMessage]) -> int:
+        """Tokens of the reasoning the LLM sends back with `messages`, none for an LLM that sends none back."""
+        if (replayed := getattr(self.llm, "replayed_reasoning_details", None)) is None:
+            return 0
+        return sum(
+            _reasoning_details_tokens(self.llm.model, replayed(getattr(message, "reasoning_details", None)))
+            for message in messages
         )
 
     def is_token_limit_exceeded(self) -> bool:
@@ -138,7 +163,7 @@ class HistoryManagerMixin:
             msg_tokens = token_counter(
                 model=self.llm.model,
                 messages=[msg.model_dump(exclude={"metadata"})],
-            )
+            ) + self._replayed_reasoning_tokens([msg])
             if n_tokens + msg_tokens > self.summarization_config.max_preserved_tokens:
                 break
             n_tokens += msg_tokens
@@ -154,7 +179,7 @@ class HistoryManagerMixin:
             unread = conversation_history[last_reply:]
             unread_tokens = token_counter(
                 model=self.llm.model, messages=[msg.model_dump(exclude={"metadata"}) for msg in unread]
-            )
+            ) + self._replayed_reasoning_tokens(unread)
             if self._fixed_context_tokens() + unread_tokens <= self.llm.get_token_limit():
                 preserve_count = max(preserve_count, len(unread))
 
