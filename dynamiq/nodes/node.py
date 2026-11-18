@@ -21,7 +21,6 @@ from types import FunctionType, ModuleType
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Union
 from uuid import uuid4
 
-from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, create_model, model_validator
 
 from dynamiq.cache.utils import cache_wf_entity, cache_wf_entity_async
@@ -69,6 +68,7 @@ from dynamiq.types.streaming import (
 )
 from dynamiq.utils import format_value, generate_uuid, merge
 from dynamiq.utils.duration import format_duration
+from dynamiq.utils.jinja import compile_template
 from dynamiq.utils.jsonpath import filter as jsonpath_filter
 from dynamiq.utils.jsonpath import mapper as jsonpath_mapper
 from dynamiq.utils.logger import logger
@@ -1159,7 +1159,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             approval_result = self._pending_approval_response
         else:
             # The tracing form masks connection credentials, which a user-written template could otherwise render.
-            message = Template(approval_config.msg_template).render(
+            message = compile_template(approval_config.msg_template).render(
                 self.to_dict(for_tracing=True), input_data=input_data
             )
 

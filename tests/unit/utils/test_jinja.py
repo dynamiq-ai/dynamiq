@@ -22,13 +22,13 @@ def empty_caches():
 def compiled_sources(monkeypatch):
     """Records each source jinja actually compiles."""
     sources = []
-    original = jinja.Template
+    original = jinja._RENDERING_ENVIRONMENT.from_string
 
     def counting(source):
         sources.append(source)
         return original(source)
 
-    monkeypatch.setattr(jinja, "Template", counting)
+    monkeypatch.setattr(jinja._RENDERING_ENVIRONMENT, "from_string", counting)
     return sources
 
 
