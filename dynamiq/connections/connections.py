@@ -9,7 +9,16 @@ from functools import cache, cached_property, partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    computed_field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 from pydantic_core.core_schema import ValidationInfo
 
 from dynamiq.utils import generate_uuid
@@ -22,6 +31,7 @@ if TYPE_CHECKING:
 
     import httpx
     from chromadb import ClientAPI as ChromaClient
+    from google.cloud.bigquery import Client as BigQueryClient
     from google.cloud.documentai import DocumentProcessorServiceClient as DocumentAIClient
     from neo4j import Driver as Neo4jDriver
     from openai import AsyncOpenAI as AsyncOpenAIClient
@@ -211,10 +221,20 @@ class Dynamiq(HttpApiKey):
 
     The base URL and API key can be provided explicitly or sourced from the
     ``DYNAMIQ_URL`` and ``DYNAMIQ_API_KEY`` environment variables.
+
+    Attributes:
+        url (str): The platform API's base URL, which the memory, skills, artifact and knowledge base clients call.
+        api_key (str): The key every call authenticates with.
+        router_url (str): The Dynamiq router's OpenAI-compatible base URL, which the Dynamiq LLM node calls. It
+            defaults to ``DYNAMIQ_ROUTER_URL``, else the public router.
+        headers (dict[str, Any]): Headers sent with every call, with the bearer token and the SDK's User-Agent added.
     """
 
     url: str = Field(default_factory=partial(get_env_var, "DYNAMIQ_URL", "https://api.getdynamiq.ai"))
     api_key: str = Field(default_factory=partial(get_env_var, "DYNAMIQ_API_KEY"))
+    router_url: str = Field(
+        default_factory=partial(get_env_var, "DYNAMIQ_ROUTER_URL", "https://router.getdynamiq.ai/v1")
+    )
     headers: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -224,6 +244,21 @@ class Dynamiq(HttpApiKey):
             self.headers.update({"Authorization": f"Bearer {self.api_key}"})
         self.headers.setdefault("User-Agent", USER_AGENT)
         return self
+
+    def connect_router(self) -> "OpenAIClient":
+        """An OpenAI SDK client for the router at `router_url`, which sends the connection's headers.
+
+        `connect()` returns the requests module for the platform API's clients, so the Dynamiq LLM node gets this one
+        from the connection manager instead.
+        """
+        from openai import OpenAI as OpenAIClient  # deferred: importing the connection must not load the OpenAI SDK
+
+        return OpenAIClient(
+            api_key=self.api_key,
+            base_url=self.router_url,
+            default_headers=self.headers,
+            http_client=_openai_http_client(),
+        )
 
     @property
     def conn_params(self) -> dict:
@@ -768,6 +803,105 @@ class GoogleDocumentAI(GoogleCloud):
             client_options=ClientOptions(api_endpoint=self.api_endpoint),
         )
         logger.debug(f"Connected to Google Document AI at {self.api_endpoint}")
+        return client
+
+
+# BigQuery bills at least 10 MiB for each table a query reads, so a lower limit would fail every query.
+BIGQUERY_MINIMUM_BYTES_BILLED = 10 * 1024**2
+
+
+class BigQuery(BaseConnection):
+    """
+    Represents a connection to Google BigQuery as the service account whose key it holds.
+
+    The key is its only source of credentials: unlike the other Google Cloud connections, it never falls back to
+    Application Default Credentials or the `GOOGLE_CLOUD_*` environment variables, which on a shared runtime belong
+    to someone else.
+
+    Attributes:
+        project (str): The project that runs the query jobs and is billed for them. It may differ from the service
+            account's project and from the projects that hold the data.
+        location (str | None): Where query jobs run: "US", "EU", a region such as "europe-west2", or a BigQuery Omni
+            region such as "aws-us-east-1". Without it, BigQuery runs each job where the datasets it reads are.
+        maximum_bytes_billed (int | None): The most bytes a query may bill, at least 10 MiB. A query that would bill
+            more fails before it runs, without a charge.
+        service_account (GoogleCloud): The service account key, as the fields of its JSON key file or as the
+            file's text.
+    """
+
+    project: str = Field(min_length=1)
+    location: str | None = None
+    maximum_bytes_billed: int | None = Field(default=None, ge=BIGQUERY_MINIMUM_BYTES_BILLED)
+    service_account: GoogleCloud
+
+    # Keeps key material out of validation errors, and validates a key assigned later the same way.
+    model_config = ConfigDict(hide_input_in_errors=True, validate_assignment=True)
+
+    @field_validator("service_account", mode="before")
+    @classmethod
+    def _take_the_key_as_given(cls, key: Any) -> Any:
+        """Builds the key from its own fields only: a field it lacks is passed as None, so GoogleCloud does not
+        fill it in from the environment."""
+        if isinstance(key, str):
+            key = json.loads(key)
+        elif isinstance(key, GoogleCloud):
+            # Fields it was not given came from the environment.
+            given = key.model_fields_set & set(GoogleCloud.SERVICE_ACCOUNT_FIELDS)
+            key = {field: getattr(key, field) for field in given}
+        if isinstance(key, dict):
+            return dict.fromkeys(GoogleCloud.SERVICE_ACCOUNT_FIELDS) | key
+        return key
+
+    @field_serializer("service_account")
+    def _dump_the_key(self, key: GoogleCloud) -> dict[str, str | None]:
+        """Dumps only the key's fields: the nested GoogleCloud gets a new id on every build, and ConnectionManager
+        caches clients by the dump."""
+        return {field: getattr(key, field) for field in GoogleCloud.SERVICE_ACCOUNT_FIELDS}
+
+    def _service_account_info(self) -> dict[str, str]:
+        """The key's set fields for google-auth: an unset universe_domain passed as None would make it switch to
+        self-signed JWTs.
+
+        Raises:
+            ConnectionError: If the key lacks a field that google-auth needs to sign in.
+        """
+        key = self.service_account
+        if missing := [field for field in GoogleCloud.SERVICE_ACCOUNT_REQUIRED_FIELDS if not getattr(key, field)]:
+            raise ConnectionError(
+                f"The BigQuery connection's service account key has no {', '.join(missing)}. "
+                "Give the connection the service account's complete JSON key."
+            )
+        return {field: value for field in GoogleCloud.SERVICE_ACCOUNT_FIELDS if (value := getattr(key, field))}
+
+    def connect(self) -> "BigQueryClient":
+        """
+        Connects to BigQuery as the connection's service account.
+
+        Returns:
+            google.cloud.bigquery.Client: A client that bills its query jobs to `project` and runs them in `location`.
+
+        Raises:
+            ConnectionError: If the service account key is incomplete or not valid.
+        """
+        try:
+            from google.cloud.bigquery import Client
+        except ModuleNotFoundError as error:
+            if error.name != "google.cloud":
+                raise
+            # Without any Google Cloud package even the shared namespace is missing, which ConnectionManager would
+            # put down to the gcp extra.
+            raise ModuleNotFoundError(
+                "No module named 'google.cloud.bigquery'", name="google.cloud.bigquery"
+            ) from error
+        from google.oauth2 import service_account
+
+        try:
+            credentials = service_account.Credentials.from_service_account_info(self._service_account_info())
+        except ValueError as error:
+            raise ConnectionError(f"The BigQuery connection's service account key is not valid: {error}") from error
+
+        client = Client(project=self.project, credentials=credentials, location=self.location)
+        logger.debug(f"Connected to BigQuery with project={self.project}, location={self.location}.")
         return client
 
 

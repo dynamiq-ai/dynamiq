@@ -10,6 +10,9 @@ them, and the assembled response has the attributes the node reads.
 `build_request` returns None for a request using anything it does not translate, or one LiteLLM sends to the Responses
 API, and the node then sends that request through LiteLLM. So does a failure in the LiteLLM internals this module calls
 to translate a request, which an upgrade may change.
+
+The Dynamiq router node sends its requests through `send` and `asend`, which skip LiteLLM's body transform: the router
+takes the OpenAI format itself and serves models LiteLLM does not know.
 """
 
 import copy
@@ -180,6 +183,12 @@ def _build_request(params: dict[str, Any], model_prefix: str | None) -> dict[str
         envelope["extra_body"] = extra_body
     request = envelope | mapped
 
+    return with_extra_body(request)
+
+
+def with_extra_body(request: dict[str, Any]) -> dict[str, Any]:
+    """`request` with the arguments the installed SDK's `chat.completions.create` does not take moved into
+    `extra_body`, which the SDK merges into the request body."""
     known = _sdk_create_params() | {"extra_body"}
     unknown = {key: request.pop(key) for key in list(request) if key not in known}
     if unknown:
@@ -370,7 +379,9 @@ class _Assembly:
 
     It keeps strings and copies, so a stream callback editing its chunk cannot change the response. Content joins
     the content deltas and stays None when none had any. A tool call keeps its last id and name and joins its argument
-    deltas. Only the first choice is assembled, the only one the node reads.
+    deltas. Reasoning text joins the "reasoning" deltas, or the "reasoning_content" ones of a server that sends only
+    those. A reasoning detail, such as a signed Claude thinking block, joins the strings of the deltas with its index
+    and keeps their last other values. Only the first choice is assembled, the only one the node reads.
     """
 
     def __init__(self):
@@ -378,6 +389,8 @@ class _Assembly:
         self._content: list[str] = []
         self._has_content = False
         self._refusal: list[str] = []
+        self._reasoning: list[str] = []
+        self._reasoning_details: dict[int, dict[str, Any]] = {}
         self._tool_calls: dict[int, dict[str, Any]] = {}
         self._finish_reason = None
         self._usage: dict | None = None
@@ -396,6 +409,16 @@ class _Assembly:
                 self._content.append(delta["content"])
             if delta.get("refusal"):
                 self._refusal.append(delta["refusal"])
+            # A server that sends both spellings sends the same text in each.
+            if reasoning := delta.get("reasoning") or delta.get("reasoning_content"):
+                self._reasoning.append(reasoning)
+            for detail in delta.get("reasoning_details") or ():
+                merged = self._reasoning_details.setdefault(detail.get("index", 0), {})
+                for key, value in detail.items():
+                    if isinstance(value, str) and key in ("text", "summary", "signature", "data"):
+                        merged[key] = merged.get(key, "") + value
+                    elif value is not None:
+                        merged[key] = copy.deepcopy(value)
             for tool_call in delta.get("tool_calls") or ():
                 call = self._tool_calls.setdefault(
                     tool_call["index"], {"id": None, "type": "function", "function": {"name": None, "arguments": ""}}
@@ -413,6 +436,10 @@ class _Assembly:
         }
         if self._refusal:
             message["refusal"] = "".join(self._refusal)
+        if self._reasoning:
+            message["reasoning"] = "".join(self._reasoning)
+        if self._reasoning_details:
+            message["reasoning_details"] = [self._reasoning_details[index] for index in sorted(self._reasoning_details)]
         if self._tool_calls:
             message["tool_calls"] = [self._tool_calls[index] for index in sorted(self._tool_calls)]
 
@@ -518,6 +545,28 @@ async def _asend(client: AsyncOpenAI, request: dict[str, Any]) -> Any:
         return await client.chat.completions.create(**request)
     response = await client.chat.completions.with_raw_response.create(**request)
     return response.parse(to=openai.AsyncStream[object])
+
+
+def send(client: OpenAI, request: dict[str, Any], emit_usage: bool) -> ChatCompletion | Stream:
+    """Send `request`, SDK arguments as they are, to an endpoint that takes them without LiteLLM's body transform.
+
+    A streamed request comes back as a `Stream`, which streams its usage chunk only when `emit_usage` is set. Errors
+    are raised as LiteLLM's exceptions.
+    """
+    try:
+        response = _send(client, request)
+    except _TRANSPORT_ERRORS as e:
+        raise _as_litellm_error(e, request["model"]) from e
+    return Stream(response, request["model"], emit_usage) if request.get("stream") else response
+
+
+async def asend(client: AsyncOpenAI, request: dict[str, Any], emit_usage: bool) -> ChatCompletion | AsyncStream:
+    """Async `send`."""
+    try:
+        response = await _asend(client, request)
+    except _TRANSPORT_ERRORS as e:
+        raise _as_litellm_error(e, request["model"]) from e
+    return AsyncStream(response, request["model"], emit_usage) if request.get("stream") else response
 
 
 def create(client: OpenAI, request: dict[str, Any]) -> ChatCompletion | Stream | None:

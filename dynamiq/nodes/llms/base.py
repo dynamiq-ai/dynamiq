@@ -29,7 +29,7 @@ from dynamiq.utils.litellm import (
     supports_pdf_input,
 )
 from dynamiq.utils.litellm import supports_prompt_caching as litellm_supports_prompt_caching
-from dynamiq.utils.litellm import supports_vision
+from dynamiq.utils.litellm import supports_response_schema, supports_vision
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -102,6 +102,8 @@ class ModelInfo(BaseModel):
     supports_pdf_input: bool | None = None
     supports_video_input: bool | None = None
     supports_function_calling: bool | None = None
+    supports_response_schema: bool | None = None
+    supports_prompt_caching: bool | None = None
 
 
 class FallbackTrigger(str, Enum):
@@ -139,6 +141,20 @@ class FallbackConfig(BaseModel):
         if self.enabled and self.llm is None:
             raise ValueError("FallbackConfig requires 'llm' when 'enabled' is True")
         return self
+
+
+def _without_reasoning_details(messages: list[dict]) -> list[dict]:
+    """`messages` without the `reasoning_details` of their assistant turns, copying only the messages that had some."""
+    if not any("reasoning_details" in message for message in messages):
+        return messages
+    return [
+        (
+            {key: value for key, value in message.items() if key != "reasoning_details"}
+            if "reasoning_details" in message
+            else message
+        )
+        for message in messages
+    ]
 
 
 class BaseLLMUsageData(BaseModel):
@@ -278,6 +294,9 @@ class BaseLLM(ConnectionNode):
 
     Attributes:
         MODEL_PREFIX (ClassVar[str | None]): Optional model prefix.
+        REPLAYS_REASONING_DETAILS (ClassVar[bool]): Whether the node sends an assistant message's
+            ``reasoning_details`` back to the model. Off, the node drops them from its requests, since
+            only a provider that returned them can read them.
         name (str | None): Name of the LLM node. Defaults to "LLM".
         model (str): Model to use for the LLM.
         prompt (Prompt | None): Prompt to use for the LLM.
@@ -303,6 +322,7 @@ class BaseLLM(ConnectionNode):
     """
 
     MODEL_PREFIX: ClassVar[str | None] = None
+    REPLAYS_REASONING_DETAILS: ClassVar[bool] = False
     name: str | None = "LLM"
     model: str
     prompt: Prompt | None = None
@@ -467,6 +487,10 @@ class BaseLLM(ConnectionNode):
         except Exception:
             return None
 
+    def replayed_reasoning_details(self, details: list[dict] | None) -> list[dict]:
+        """The part of an assistant message's `reasoning_details` that the node sends back to the model."""
+        return list(details or ()) if self.REPLAYS_REASONING_DETAILS else []
+
     def get_token_limit(self) -> int:
         """Returns token limits of a llm.
 
@@ -545,6 +569,21 @@ class BaseLLM(ConnectionNode):
         return True
 
     @property
+    def is_response_schema_supported(self) -> bool:
+        """Check if the LLM supports a JSON schema ``response_format``, as LiteLLM reports it.
+
+        A model LiteLLM cannot say anything about counts as supporting it.
+        """
+        if self.model_info and self.model_info.supports_response_schema is not None:
+            return self.model_info.supports_response_schema
+        if "response_format" not in (get_supported_openai_params(model=self.model) or []):
+            return False
+        try:
+            return bool(supports_response_schema(model=self.model))
+        except Exception:
+            return True
+
+    @property
     def is_pdf_input_supported(self) -> bool:
         """Check if the LLM supports PDF input."""
         if self.model_info and self.model_info.supports_pdf_input is not None:
@@ -618,8 +657,6 @@ class BaseLLM(ConnectionNode):
         Returns:
             BaseLLMUsageData: A model containing the usage data for the LLM.
         """
-        from litellm import cost_per_token
-
         usage = cls._extract_usage(completion=completion)
         prompt_tokens = cls._usage_value(usage, "prompt_tokens", 0) or 0
         completion_tokens = cls._usage_value(usage, "completion_tokens", 0) or 0
@@ -636,23 +673,17 @@ class BaseLLM(ConnectionNode):
 
         cache_read_input_tokens = min(cache_read_input_tokens or 0, prompt_tokens)
 
-        try:
-            cost_kwargs: dict[str, Any] = {
-                "model": model,
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "cache_read_input_tokens": cache_read_input_tokens,
-            }
-            if cache_creation_input_tokens is not None:
-                cost_kwargs["cache_creation_input_tokens"] = cache_creation_input_tokens
-
-            prompt_tokens_cost_usd, completion_tokens_cost_usd = cost_per_token(**cost_kwargs)
-            total_tokens_cost_usd = prompt_tokens_cost_usd + completion_tokens_cost_usd
-        except Exception:
-            prompt_tokens_cost_usd, completion_tokens_cost_usd, total_tokens_cost_usd = None, None, None
-            # A model missing from litellm's price map, as most OpenRouter models are, may still have its cost
-            # reported by the provider.
-            total_tokens_cost_usd = cls._reported_cost(completion, usage)
+        cost_kwargs: dict[str, Any] = {
+            "model": model,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "cache_read_input_tokens": cache_read_input_tokens,
+        }
+        if cache_creation_input_tokens is not None:
+            cost_kwargs["cache_creation_input_tokens"] = cache_creation_input_tokens
+        prompt_tokens_cost_usd, completion_tokens_cost_usd, total_tokens_cost_usd = cls._usage_costs(
+            completion, usage, **cost_kwargs
+        )
 
         return BaseLLMUsageData(
             prompt_tokens=prompt_tokens,
@@ -664,6 +695,23 @@ class BaseLLM(ConnectionNode):
             cache_read_input_tokens=cache_read_input_tokens,
             cache_creation_input_tokens=cache_creation_input_tokens,
         )
+
+    @classmethod
+    def _usage_costs(
+        cls, completion: "ModelResponse", usage: Any, **tokens: Any
+    ) -> tuple[float | None, float | None, float | None]:
+        """The call's prompt, completion and total cost in USD, from LiteLLM's price map for the model.
+
+        `tokens` are LiteLLM's `cost_per_token` arguments. A model missing from the price map, as most OpenRouter
+        models are, gets only the total cost the provider reported, or no cost at all.
+        """
+        from litellm import cost_per_token  # deferred: importing litellm takes seconds
+
+        try:
+            prompt_cost, completion_cost = cost_per_token(**tokens)
+        except Exception:
+            return None, None, cls._reported_cost(completion, usage)
+        return prompt_cost, completion_cost, prompt_cost + completion_cost
 
     @classmethod
     def _reported_cost(cls, completion: "ModelResponse", usage: Any) -> float | None:
@@ -1122,6 +1170,8 @@ class BaseLLM(ConnectionNode):
         Returns:
             Dict of params ready to pass to _completion or _acompletion.
         """
+        if not self.REPLAYS_REASONING_DETAILS:
+            messages = _without_reasoning_details(messages)
         extra = copy.deepcopy(self.__pydantic_extra__)
         params = self.connection.completion_params.copy()
         if include_sync_client and self.client and not isinstance(self.connection, HttpApiKey):

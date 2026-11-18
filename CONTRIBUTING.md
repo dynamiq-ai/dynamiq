@@ -43,31 +43,32 @@ Good documentation is key to a successful project. If you find areas in our docu
    make install
    ```
 
-4. **Create a Branch:** Create a new branch for your work:
+4. **Create a Branch:** Create a new branch for your work, named `<type>/<short-description>` with the type your commit will have:
    ```sh
-   git checkout -b feature-name
+   git checkout -b fix/qdrant-filter-search
    ```
 
 5. **Make Changes:** Make your changes in your branch.
 
 6. **Write Tests:** If applicable, write tests for your changes.
 
-7. **Commit Changes:** Commit your changes with a descriptive commit message:
+7. **Commit Changes:** Commit your changes with a message in [Conventional Commits](https://www.conventionalcommits.org/) form. The hook that `make install` sets up rejects any other, and CI checks the pull request title the same way:
    ```sh
-   git commit -m "Description of the feature or fix"
+   git commit -m "fix(retrievers): keep the filter on a Qdrant search"
    ```
 
-8. Make sure you run tests before pushing your changes:
+8. Make sure you run the checks and the tests that CI runs before pushing your changes. `make test` would also run `tests/integration_with_creds`, which calls real providers with keys from `.env`:
    ```sh
-   make prepare test
+   make prepare
+   uv run pytest tests --ignore=tests/integration_with_creds -m "not smoke" -n auto --dist worksteal
    ```
 
 9. **Push to Fork:** Push your changes to your forked repository:
    ```sh
-   git push origin feature-name
+   git push origin fix/qdrant-filter-search
    ```
 
-10. **Open a Pull Request:** Open a pull request from your fork to the main repository. Include a detailed description of your changes and any related issues.
+10. **Open a Pull Request:** Open a pull request from your fork to the main repository, and fill in the template: what changes and why, whether saved workflows still load, what you ran, and any related issues.
 
 ## Code Style
 

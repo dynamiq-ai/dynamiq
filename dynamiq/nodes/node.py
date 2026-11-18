@@ -21,7 +21,6 @@ from types import FunctionType, ModuleType
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Union
 from uuid import uuid4
 
-from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, create_model, model_validator
 
 from dynamiq.cache.utils import cache_wf_entity, cache_wf_entity_async
@@ -34,7 +33,7 @@ from dynamiq.connections import BaseConnection
 if TYPE_CHECKING:
     from dynamiq.checkpoints.checkpoint import BaseCheckpointState
 
-from dynamiq.connections.managers import ConnectionManager, ConnectionManagerException
+from dynamiq.connections.managers import ConnectionClientInitType, ConnectionManager, ConnectionManagerException
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.nodes.exceptions import (
@@ -69,6 +68,7 @@ from dynamiq.types.streaming import (
 )
 from dynamiq.utils import format_value, generate_uuid, merge
 from dynamiq.utils.duration import format_duration
+from dynamiq.utils.jinja import compile_template
 from dynamiq.utils.jsonpath import filter as jsonpath_filter
 from dynamiq.utils.jsonpath import mapper as jsonpath_mapper
 from dynamiq.utils.logger import logger
@@ -1159,7 +1159,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             approval_result = self._pending_approval_response
         else:
             # The tracing form masks connection credentials, which a user-written template could otherwise render.
-            message = Template(approval_config.msg_template).render(
+            message = compile_template(approval_config.msg_template).render(
                 self.to_dict(for_tracing=True), input_data=input_data
             )
 
@@ -2547,11 +2547,15 @@ class ConnectionNode(Node, ABC):
     Attributes:
         connection (BaseConnection | None): The connection to use.
         client (Any | None): The client instance.
+        CLIENT_INIT_TYPE (ClassVar[ConnectionClientInitType]): Which of the connection's clients the node gets from
+            the connection manager.
     """
 
     connection: BaseConnection | None = None
     client: Any | None = None
     _connection_manager: ConnectionManager | None = PrivateAttr(default=None)
+
+    CLIENT_INIT_TYPE: ClassVar[ConnectionClientInitType] = ConnectionClientInitType.DEFAULT
 
     @model_validator(mode="after")
     def validate_connection_client(self):
@@ -2572,7 +2576,7 @@ class ConnectionNode(Node, ABC):
         super().init_components(connection_manager)
         if self.client is None:
             self.client = connection_manager.get_connection_client(
-                connection=self.connection
+                connection=self.connection, init_type=self.CLIENT_INIT_TYPE
             )
 
     def is_client_closed(self) -> bool:
@@ -2627,7 +2631,9 @@ class ConnectionNode(Node, ABC):
             connection_manager = self._connection_manager or ConnectionManager()
 
             try:
-                self.client = connection_manager.get_connection_client(connection=self.connection)
+                self.client = connection_manager.get_connection_client(
+                    connection=self.connection, init_type=self.CLIENT_INIT_TYPE
+                )
                 logger.info(self._node_run_log("Client reinitialized successfully."))
             except Exception as e:
                 logger.error(self._node_run_log(f"Failed to reinitialize client: {e}"))

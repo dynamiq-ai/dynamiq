@@ -3,7 +3,7 @@ from unittest.mock import Mock
 import pytest
 
 from dynamiq.connections import PostgreSQL
-from dynamiq.connections.managers import ConnectionManager, ConnectionManagerException
+from dynamiq.connections.managers import ConnectionClientInitType, ConnectionManager, ConnectionManagerException
 from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.node import ConnectionNode, VectorStoreNode
 from dynamiq.runnables import RunnableConfig
@@ -199,7 +199,7 @@ def test_ensure_client_uses_cached_connection_manager(connection_node_instance, 
     connection_node_instance.ensure_client()
 
     mock_connection_manager.get_connection_client.assert_called_once_with(
-        connection=connection_node_instance.connection
+        connection=connection_node_instance.connection, init_type=ConnectionClientInitType.DEFAULT
     )
 
 
