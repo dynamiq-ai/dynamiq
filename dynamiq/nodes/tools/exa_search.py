@@ -8,6 +8,7 @@ from dynamiq.connections import Exa
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.tools.research_receipts import emit_research_receipt
 from dynamiq.nodes.tools.utils import http_error_detail
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
@@ -654,8 +655,29 @@ class ExaTool(ConnectionNode):
             response.raise_for_status()
             search_result = response.json()
         except Exception as e:
+            emit_research_receipt(
+                self,
+                config,
+                kwargs,
+                provider="exa",
+                kind="search",
+                status="failed",
+                query=input_data.query,
+                error_code="transport_error",
+            )
             raise self._wrap_search_exception(e)
 
+        emit_research_receipt(
+            self,
+            config,
+            kwargs,
+            provider="exa",
+            kind="search",
+            status="succeeded",
+            query=input_data.query,
+            status_code=getattr(response, "status_code", None),
+            result_urls=[item.get("url") for item in search_result.get("results", []) if isinstance(item, dict)],
+        )
         return self._format_search_response(search_result)
 
     async def execute_async(
@@ -679,6 +701,27 @@ class ExaTool(ConnectionNode):
             response.raise_for_status()
             search_result = response.json()
         except Exception as e:
+            emit_research_receipt(
+                self,
+                config,
+                kwargs,
+                provider="exa",
+                kind="search",
+                status="failed",
+                query=input_data.query,
+                error_code="transport_error",
+            )
             raise self._wrap_search_exception(e)
 
+        emit_research_receipt(
+            self,
+            config,
+            kwargs,
+            provider="exa",
+            kind="search",
+            status="succeeded",
+            query=input_data.query,
+            status_code=getattr(response, "status_code", None),
+            result_urls=[item.get("url") for item in search_result.get("results", []) if isinstance(item, dict)],
+        )
         return self._format_search_response(search_result)

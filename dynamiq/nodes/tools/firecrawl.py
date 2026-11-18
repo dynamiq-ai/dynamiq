@@ -8,6 +8,7 @@ from dynamiq.connections import Firecrawl
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.tools.research_receipts import emit_research_receipt
 from dynamiq.nodes.tools.utils import http_error_detail
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
@@ -393,8 +394,35 @@ class FirecrawlTool(ConnectionNode):
             response.raise_for_status()
             scrape_result = response.json()
         except Exception as e:
+            emit_research_receipt(
+                self,
+                config,
+                kwargs,
+                provider="firecrawl",
+                kind="fetch",
+                status="failed",
+                url=url,
+                error_code="transport_error",
+            )
             raise self._wrap_scrape_exception(e)
 
+        data = scrape_result.get("data") or {}
+        metadata = data.get("metadata") or {}
+        usable = scrape_result.get("success") is True and any(
+            isinstance(data.get(key), str) and bool(data[key].strip()) for key in ("markdown", "html", "rawHtml")
+        )
+        emit_research_receipt(
+            self,
+            config,
+            kwargs,
+            provider="firecrawl",
+            kind="fetch",
+            status="succeeded" if usable else "failed",
+            url=url,
+            final_url=metadata.get("url") or metadata.get("sourceURL"),
+            status_code=metadata.get("statusCode") or getattr(response, "status_code", None),
+            error_code=None if usable else "empty_content",
+        )
         return self._format_scrape_output(url, scrape_result)
 
     async def execute_async(
@@ -418,6 +446,33 @@ class FirecrawlTool(ConnectionNode):
             response.raise_for_status()
             scrape_result = response.json()
         except Exception as e:
+            emit_research_receipt(
+                self,
+                config,
+                kwargs,
+                provider="firecrawl",
+                kind="fetch",
+                status="failed",
+                url=url,
+                error_code="transport_error",
+            )
             raise self._wrap_scrape_exception(e)
 
+        data = scrape_result.get("data") or {}
+        metadata = data.get("metadata") or {}
+        usable = scrape_result.get("success") is True and any(
+            isinstance(data.get(key), str) and bool(data[key].strip()) for key in ("markdown", "html", "rawHtml")
+        )
+        emit_research_receipt(
+            self,
+            config,
+            kwargs,
+            provider="firecrawl",
+            kind="fetch",
+            status="succeeded" if usable else "failed",
+            url=url,
+            final_url=metadata.get("url") or metadata.get("sourceURL"),
+            status_code=metadata.get("statusCode") or getattr(response, "status_code", None),
+            error_code=None if usable else "empty_content",
+        )
         return self._format_scrape_output(url, scrape_result)

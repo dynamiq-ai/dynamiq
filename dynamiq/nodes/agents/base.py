@@ -724,6 +724,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             tool.is_optimized_for_agents = True
 
         for hook in self.hooks:
+            initialize = getattr(hook, "init_components", None)
+            if callable(initialize):
+                initialize(connection_manager)
             detector = getattr(hook, "detector", None)
             if isinstance(detector, Node) and detector.is_postponed_component_init:
                 detector.init_components(connection_manager)
@@ -2067,9 +2070,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     def _hook_to_dict(hook: Hook, dumped: dict, **kwargs) -> dict:
         """A hook's detector is a node: serialized as the agent's other nodes are (``for_tracing`` included)."""
         detector = getattr(hook, "detector", None)
-        if not isinstance(detector, Node):
-            return dumped
-        return {**dumped, "detector": detector.to_dict(**kwargs)}
+        if isinstance(detector, Node):
+            dumped = {**dumped, "detector": detector.to_dict(**kwargs)}
+        connection = getattr(hook, "connection", None)
+        if connection is not None:
+            dumped = {**dumped, "connection": connection.to_dict(**kwargs)}
+        return dumped
 
     def _snapshot_hook_state(self) -> dict | None:
         """JSON-safe copy of the run's hook state for checkpoints."""

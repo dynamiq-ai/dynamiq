@@ -1828,6 +1828,11 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 self.log_execution_start(input_data)
 
                 try:
+                    if self.group == NodeGroup.TOOLS:
+                        # Deferred because agent hooks themselves depend on Node.
+                        from dynamiq.nodes.agents.hooks.remote import check_remote_tool_lifecycle
+
+                        check_remote_tool_lifecycle(config, self.name or self.id, self.authored_id)
                     if executor and timeout is not None:
                         output = self.execute_with_timeout(
                             executor=executor,
@@ -1952,6 +1957,11 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             self.log_execution_start(input_data)
 
             try:
+                if self.group == NodeGroup.TOOLS:
+                    # Deferred because agent hooks themselves depend on Node.
+                    from dynamiq.nodes.agents.hooks.remote import check_remote_tool_lifecycle
+
+                    await asyncio.to_thread(check_remote_tool_lifecycle, config, self.name or self.id, self.authored_id)
                 if timeout is not None:
                     with _deadline_after(timeout):
                         output = await asyncio.wait_for(

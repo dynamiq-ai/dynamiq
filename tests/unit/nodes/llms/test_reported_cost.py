@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+
+import pytest
 from litellm import ModelResponse
 
 from dynamiq.nodes.llms.base import BaseLLM
@@ -24,3 +27,18 @@ def test_a_priced_model_keeps_litellm_s_price():
     usage = BaseLLM.get_usage_data(model="gpt-4o-mini", completion=_response(cost=99.0))
 
     assert 0 < usage.total_tokens_cost_usd < 1
+
+
+@pytest.mark.parametrize(
+    ("raw", "complete"),
+    [
+        ({"prompt_tokens": 0, "completion_tokens": 0}, True),
+        ({"prompt_tokens": 12, "completion_tokens": 7}, True),
+        ({"prompt_tokens": 12}, False),
+        ({"completion_tokens": 7}, False),
+        ({}, False),
+    ],
+)
+def test_usage_completeness_requires_both_observed_counters(raw, complete):
+    usage = BaseLLM.get_usage_data(model="gpt-4o-mini", completion=SimpleNamespace(usage=raw))
+    assert usage.complete is complete
