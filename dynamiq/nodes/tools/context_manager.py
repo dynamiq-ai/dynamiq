@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from dynamiq.checkpoints.checkpoint import BaseCheckpointState
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
-from dynamiq.nodes.agents.hooks.remote import check_remote_model_lifecycle
+from dynamiq.nodes.agents.exceptions import HookStopException
 from dynamiq.nodes.agents.prompts.react.instructions import HISTORY_SUMMARIZATION_PROMPT_REPLACE
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, MessageRole
@@ -303,7 +303,6 @@ class ContextManagerTool(Node):
         last_error: str | None = None
         for attempt in range(1, self.max_retries + 1):
             check_cancellation(config)
-            check_remote_model_lifecycle(config)
             llm_result = self.llm.run(
                 input_data={},
                 prompt=Prompt(messages=messages),
@@ -313,6 +312,8 @@ class ContextManagerTool(Node):
             self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
 
             if llm_result.status != RunnableStatus.SUCCESS:
+                if llm_result.error and issubclass(llm_result.error.type, HookStopException):
+                    raise HookStopException(llm_result.error.message)
                 last_error = llm_result.error.message if llm_result.error else "Unknown error"
                 suffix = " Retrying." if attempt < self.max_retries else ""
                 logger.warning(

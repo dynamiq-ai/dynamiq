@@ -188,12 +188,13 @@ reasons are ignored. Requests do not follow redirects or use environment proxies
 and both the request timeout and response size are bounded. A lifecycle endpoint
 must be a read-only admission check, not a consequential operation.
 
-The check also runs immediately before each SDK model transport request and each
-tool execution, including automatic node retries. The initial execution can
-therefore repeat a logical admission check. Both checks are read-only. Provider
-libraries may retry an already-dispatched HTTP operation internally; configure
-those libraries' retry limits separately when an individual HTTP attempt needs
-to be controlled.
+Authorization runs once immediately before each SDK-controlled model transport
+request or tool execution, including automatic node retries, parameter recovery,
+and context-summary requests. Other agent hooks still run at their normal logical
+boundaries; a skipped or policy-blocked tool does not make an authorization request.
+Provider libraries may retry an already-dispatched HTTP operation internally;
+configure those libraries' retry limits separately when an individual HTTP attempt
+needs to be controlled.
 
 LLM usage metadata now includes `complete`: false means required provider counters
 were absent or invalid, even when compatibility token fields contain zero.
