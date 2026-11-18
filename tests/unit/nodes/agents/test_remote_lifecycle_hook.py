@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 import yaml
+from litellm import ModelResponse
 from pydantic import ValidationError
 
 from dynamiq.callbacks.base import BaseCallbackHandler
@@ -18,20 +19,20 @@ from dynamiq.nodes.agents.hooks import (
     HookRunner,
     RemoteLifecycleHook,
     ToolCall,
+    ToolPolicyHook,
+    TransformHook,
     current_hook_ctx,
 )
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.llms.base import BaseLLM
-from dynamiq.nodes.node import ErrorHandling
+from dynamiq.nodes.node import ErrorHandling, InputTransformer
 from dynamiq.nodes.tools import RemoteContextTool
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Message, MessageRole, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
-from dynamiq.types.streaming import StreamingConfig
 from dynamiq.workflow import Workflow
-from tests.helpers.agent_hooks import ALL_MODES, build_agent, final_step, run_scripted, scripted, tool_step
+from tests.helpers.agent_hooks import ALL_MODES, build_agent, encode, final_step, scripted, tool_step, use_mode
 
 
 class CallRecorder(BaseCallbackHandler):
@@ -288,27 +289,41 @@ def test_guard_cannot_fail_open_and_control_context_is_not_checkpointed():
     assert "opaque-control-token" not in json.dumps(context().config.to_checkpoint_dict())
 
 
+def provider_response(mode, step, index=0):
+    return ModelResponse(
+        model="gpt-4o",
+        choices=[{"message": {"role": "assistant", **encode(mode, step, index)}, "finish_reason": "stop"}],
+        usage={"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+    )
+
+
 @pytest.mark.parametrize("mode", ALL_MODES)
-def test_agent_rechecks_each_model_and_tool_call_without_exposing_context(mode):
+def test_agent_rechecks_each_model_and_tool_call_without_exposing_context(mode, mocker):
     hook, _ = make_hook()
     client = hook._client
     agent = build_agent(hooks=[hook])
     hook._client = client
-    result, recorder = run_scripted(
-        agent,
-        mode,
-        [tool_step("search", query="public question"), final_step("done")],
+    use_mode(agent, mode)
+    provider = mocker.patch.object(
+        agent.llm,
+        "_call_completion",
+        side_effect=[
+            provider_response(mode, tool_step("search", query="public question")),
+            provider_response(mode, final_step("done"), 1),
+        ],
+    )
+    result = agent.run_sync(
+        {"input": "hello", "context": {"control_context": {"token": "model-controlled-forgery"}}},
         config=context().config,
-        input_extra={"context": {"control_context": {"token": "model-controlled-forgery"}}},
     )
     assert result.status == RunnableStatus.SUCCESS
+    assert provider.call_count == 2
     assert [call.kwargs["json"]["phase"] for call in client.post.call_args_list] == [
         "before_model",
         "before_tool",
-        "before_tool",
         "before_model",
     ]
-    assert "opaque-control-token" not in recorder.sent_text()
+    assert "opaque-control-token" not in str(provider.call_args_list)
     assert all(
         call.kwargs["json"]["control_context"] == {"token": "opaque-control-token"}
         for call in client.post.call_args_list
@@ -316,27 +331,230 @@ def test_agent_rechecks_each_model_and_tool_call_without_exposing_context(mode):
     assert "opaque-control-token" not in json.dumps(agent.to_dict(for_tracing=True))
 
 
-def test_summary_rechecks_between_retry_calls_and_denial_prevents_next_model():
+def test_summary_rechecks_between_retry_calls_and_denial_prevents_next_model(mocker):
     hook, response = make_hook()
     ctx = context()
     ctx.hooks = [("lifecycle", hook)]
-    llm = MagicMock(spec=BaseLLM)
-    llm.id = llm.name = llm.type = "summary-model"
-    llm.model = "gpt-4o-mini"
-    llm.is_postponed_component_init = False
-    llm.streaming = StreamingConfig()
-    llm.error_handling = ErrorHandling()
-    llm.run.return_value = MagicMock(status=RunnableStatus.SUCCESS, output={"content": ""})
+    llm = OpenAI(connection=OpenAIConnection(api_key="test"), model="gpt-4o-mini")
+    provider = mocker.patch.object(
+        llm,
+        "_call_completion",
+        return_value=ModelResponse(choices=[{"message": {"role": "assistant", "content": ""}}]),
+    )
     tool = ContextManagerTool(llm=llm)
-    response.iter_content.side_effect = [
-        [b'{"allow": true}'],
-        [b'{"allow": false}'],
-    ]
+    response.iter_content.side_effect = [[b'{"allow":true}'], [b'{"allow":false}']]
     token = current_hook_ctx.set(ctx)
     try:
         with pytest.raises(HookStopException):
             tool._call_llm_for_summary([Message(role=MessageRole.USER, content="private history")], config=ctx.config)
     finally:
         current_hook_ctx.reset(token)
-    assert llm.run.call_count == 1
+    assert provider.call_count == 1
     assert hook._client.post.call_count == 2
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.asyncio
+async def test_node_model_retry_authorizes_each_attempt_once(mocker, asynchronous):
+    hook, _ = make_hook()
+    ctx = context()
+    ctx.hooks = [("lifecycle", hook)]
+    llm = OpenAI(
+        connection=OpenAIConnection(api_key="test"),
+        model="gpt-4o-mini",
+        prompt=Prompt(messages=[Message(role=MessageRole.USER, content="hello")]),
+        error_handling=ErrorHandling(max_retries=1, retry_interval_seconds=0),
+    )
+    response = provider_response(InferenceMode.XML, final_step("done"))
+    provider = (
+        AsyncMock(side_effect=[RuntimeError("synthetic transient"), response])
+        if asynchronous
+        else MagicMock(side_effect=[RuntimeError("synthetic transient"), response])
+    )
+    mocker.patch.object(llm, "_acall_completion" if asynchronous else "_call_completion", provider)
+    token = current_hook_ctx.set(ctx)
+    try:
+        result = await llm.run_async({}, config=ctx.config) if asynchronous else llm.run_sync({}, config=ctx.config)
+    finally:
+        current_hook_ctx.reset(token)
+    assert result.status == RunnableStatus.SUCCESS
+    assert provider.call_count == 2
+    assert hook._client.post.call_count == 2
+
+
+def test_agent_denial_at_model_dispatch_is_not_retried(mocker):
+    hook, _ = make_hook({"allow": False})
+    client = hook._client
+    agent = build_agent(hooks=[hook], tools=[])
+    hook._client = client
+    agent.error_handling = ErrorHandling(max_retries=2, retry_interval_seconds=0)
+    agent.llm.error_handling = ErrorHandling(max_retries=2, retry_interval_seconds=0)
+    provider = mocker.patch.object(agent.llm, "_call_completion")
+    result = agent.run_sync({"input": "hello"}, config=context().config)
+    assert result.status == RunnableStatus.FAILURE
+    assert issubclass(result.error.type, HookStopException)
+    provider.assert_not_called()
+    assert client.post.call_count == 1
+
+
+def test_summary_authorizes_once_per_model_dispatch(mocker):
+    hook, _ = make_hook()
+    ctx = context()
+    ctx.hooks = [("lifecycle", hook)]
+    llm = OpenAI(connection=OpenAIConnection(api_key="test"), model="gpt-4o-mini")
+    provider = mocker.patch.object(
+        llm,
+        "_call_completion",
+        return_value=ModelResponse(
+            choices=[{"message": {"role": "assistant", "content": "summary"}}],
+        ),
+    )
+    tool = ContextManagerTool(llm=llm)
+    token = current_hook_ctx.set(ctx)
+    try:
+        assert (
+            tool._call_llm_for_summary([Message(role=MessageRole.USER, content="history")], config=ctx.config)
+            == "summary"
+        )
+    finally:
+        current_hook_ctx.reset(token)
+    assert provider.call_count == hook._client.post.call_count == 1
+
+
+@pytest.mark.parametrize("allow_search", [True, False])
+def test_other_hooks_keep_transforms_and_tool_policy_at_logical_boundary(mocker, allow_search):
+    hook, _ = make_hook()
+    client = hook._client
+    agent = build_agent(
+        hooks=[
+            hook,
+            TransformHook(tools=["search"], input_transformer=InputTransformer(selector={"query": "trusted rewrite"})),
+            ToolPolicyHook(tools=["search"], allow_if={"search_allowed": True}),
+        ]
+    )
+    hook._client = client
+    use_mode(agent, InferenceMode.FUNCTION_CALLING)
+    search = next(tool for tool in agent.tools if tool.name == "search")
+    transport = mocker.spy(type(search), "execute")
+    provider = mocker.patch.object(
+        agent.llm,
+        "_call_completion",
+        side_effect=[
+            provider_response(InferenceMode.FUNCTION_CALLING, tool_step("search", query="model query")),
+            provider_response(InferenceMode.FUNCTION_CALLING, final_step("done"), 1),
+        ],
+    )
+    config = context().config
+    config.trusted_context["search_allowed"] = allow_search
+    observer = MagicMock(spec=BaseCallbackHandler)
+    config.callbacks = [observer]
+    result = agent.run_sync({"input": "hello"}, config=config)
+    assert result.status == RunnableStatus.SUCCESS
+    assert provider.call_count == 2
+    assert transport.call_count == int(allow_search)
+    if allow_search:
+        assert transport.call_args.kwargs["input_data"].query == "trusted rewrite"
+    assert client.post.call_count == 2 + int(allow_search)
+    assert observer.on_node_execute_start.called
+    assert observer.on_node_execute_end.called
+
+
+@pytest.mark.parametrize("allow_query", [True, False])
+def test_remote_context_tool_authorizes_once_before_private_request(mocker, allow_query):
+    hook, response = make_hook()
+    client = hook._client
+    if not allow_query:
+        response.iter_content.side_effect = [[b'{"allow":true}'], [b'{"allow":false}']]
+    tool = RemoteContextTool(
+        name="tenant-query",
+        description="Query authorized records.",
+        parameters={"type": "object", "properties": {"kind": {"type": "string"}}, "required": ["kind"]},
+        connection=Http(url="https://control.example/query", method=HTTPMethod.POST),
+    )
+    agent = build_agent(hooks=[hook], tools=[tool])
+    hook._client = client
+    query = MagicMock()
+    query.closed = False
+    reply = MagicMock(status_code=200)
+    reply.__enter__.return_value = reply
+    reply.iter_content.return_value = [b'{"items":[]}']
+    query.post.return_value = reply
+    tool.client = query
+    use_mode(agent, InferenceMode.FUNCTION_CALLING)
+    provider = mocker.patch.object(
+        agent.llm,
+        "_call_completion",
+        side_effect=[
+            provider_response(InferenceMode.FUNCTION_CALLING, tool_step("tenant-query", kind="alerts")),
+            provider_response(InferenceMode.FUNCTION_CALLING, final_step("done"), 1),
+        ],
+    )
+    result = agent.run_sync({"input": "hello"}, config=context().config)
+    assert result.status == (RunnableStatus.SUCCESS if allow_query else RunnableStatus.FAILURE)
+    assert provider.call_count == 1 + int(allow_query)
+    phases = ["before_model", "before_tool"] + (["before_model"] if allow_query else [])
+    assert [call.kwargs["json"]["phase"] for call in client.post.call_args_list] == phases
+    assert query.post.call_count == int(allow_query)
+    if allow_query:
+        assert query.post.call_args.kwargs["json"]["control_context"] == {"token": "opaque-control-token"}
+    assert "opaque-control-token" not in str(provider.call_args_list)
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.asyncio
+async def test_parameter_recovery_authorizes_each_provider_attempt_once(mocker, asynchronous):
+    hook, _ = make_hook()
+    ctx = context()
+    ctx.hooks = [("lifecycle", hook)]
+    llm = OpenAI(
+        connection=OpenAIConnection(api_key="test"),
+        model="gpt-4o-mini",
+        prompt=Prompt(messages=[Message(role=MessageRole.USER, content="hello")]),
+    )
+    mocker.patch.object(llm, "_recover_completion_params", return_value={})
+    response = provider_response(InferenceMode.XML, final_step("done"))
+    provider = (
+        AsyncMock(side_effect=[ValueError("unsupported parameter"), response])
+        if asynchronous
+        else MagicMock(side_effect=[ValueError("unsupported parameter"), response])
+    )
+    mocker.patch.object(llm, "_acall_completion" if asynchronous else "_call_completion", provider)
+    token = current_hook_ctx.set(ctx)
+    try:
+        result = await llm.run_async({}, config=ctx.config) if asynchronous else llm.run_sync({}, config=ctx.config)
+    finally:
+        current_hook_ctx.reset(token)
+    assert result.status == RunnableStatus.SUCCESS
+    assert provider.call_count == hook._client.post.call_count == 2
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.asyncio
+async def test_tool_retry_authorizes_each_dispatch_once(mocker, asynchronous):
+    hook, _ = make_hook()
+    ctx = context()
+    ctx.hooks = [("lifecycle", hook)]
+    tool = build_agent().tools[0]
+    tool.error_handling = ErrorHandling(max_retries=1, retry_interval_seconds=0)
+    provider = mocker.patch.object(
+        type(tool),
+        "execute",
+        side_effect=[
+            RuntimeError("synthetic transient"),
+            {"content": "public result"},
+        ],
+    )
+    token = current_hook_ctx.set(ctx)
+    try:
+        result = (
+            await tool.run_async({"query": "hello"}, config=ctx.config)
+            if asynchronous
+            else tool.run_sync(
+                {"query": "hello"},
+                config=ctx.config,
+            )
+        )
+    finally:
+        current_hook_ctx.reset(token)
+    assert result.status == RunnableStatus.SUCCESS
+    assert provider.call_count == hook._client.post.call_count == 2
