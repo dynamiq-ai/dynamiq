@@ -37,7 +37,7 @@ WORKSPACE_DIR = "artifacts"
 STATE_PATH = posixpath.join(WORKSPACE_DIR, ".state.json")
 
 DESCRIPTION = """Publish deliverables the user opens, reviews and shares, and read documents already \
-published, by you or by others. Each artifact gets a link and a version history, and outlives this \
+published, by you or by others. Each artifact gets a version history, and outlives this \
 conversation. Artifacts move as files: you write and change files in your workspace with your file \
 tools, and this tool publishes them and loads them back. Look here with 'list' and 'get' when asked \
 about a report, record or document you do not have in this conversation.
@@ -318,7 +318,11 @@ class ArtifactTool(Node):
             }
         if not artifacts:
             return {"content": "No artifacts found."}
-        lines = [f"- {a.id}: '{a.name}' ({a.kind.value}, v{a.version}) {a.url or ''}".rstrip() for a in artifacts]
+        links = self.backend.is_url_for_reader
+        lines = [
+            f"- {a.id}: '{a.name}' ({a.kind.value}, v{a.version}) {a.url if links and a.url else ''}".rstrip()
+            for a in artifacts
+        ]
         return {"content": "\n".join(lines), "artifact_ids": [a.id for a in artifacts]}
 
     def _published(self, artifact: Artifact, key: str, verb: str) -> dict[str, Any]:
@@ -328,7 +332,7 @@ class ArtifactTool(Node):
             self._seen_versions[artifact.id] = artifact.latest_version.id
         self._save_state()
         ref = artifact.to_ref()
-        link = f": {ref['url']}" if ref["url"] else ""
+        link = f": {ref['url']}" if ref["url"] and self.backend.is_url_for_reader else ""
         text = f"Artifact '{artifact.name}' v{artifact.version} {verb} (id {artifact.id}) from {key}{link}"
         return {"content": text, "artifact": ref}
 

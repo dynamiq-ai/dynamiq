@@ -19,7 +19,6 @@ from typing import Any, Callable, ClassVar, Union
 from urllib.parse import unquote_to_bytes
 from uuid import uuid4
 
-from jinja2.sandbox import SandboxedEnvironment
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -127,6 +126,7 @@ from dynamiq.storages.memory.base import MemoryStore, MemoryStoreConfig
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.feedback import ApprovalConfig, FeedbackMethod
 from dynamiq.types.streaming import InputStreamingTimeoutError, StreamingMode
+from dynamiq.utils.jinja import compile_template
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import TRACING_REDACTED_KEYS, TRACING_REDACTED_PLACEHOLDER, deep_merge
 
@@ -2244,7 +2244,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         shown = {key: value for key, value in tool_input.items() if key not in hidden_keys}
         try:
             prompt = (
-                SandboxedEnvironment().from_string(ask.prompt).render(input_data=shown, tool=tool_name)
+                compile_template(ask.prompt).render(input_data=shown, tool=tool_name)
                 if ask.prompt
                 else f"Approve calling '{tool_name}' with these arguments?"
             )

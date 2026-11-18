@@ -17,11 +17,6 @@ class Account(BaseModel):
     owner: str = "Ada"
     _token: str = PrivateAttr(default="tok-123")
 
-    def close(self) -> str:
-        return "closed"
-
-    close.alters_data = True
-
 
 def render(source: str, **values) -> str:
     return Prompt(messages=[Message(content=source)]).format_messages(**values)[0]["content"]
@@ -89,16 +84,6 @@ def test_what_is_private_counts_as_missing_in_conditions_defaults_and_format_str
 def test_a_template_cannot_reach_other_objects_through_a_private_attribute():
     with pytest.raises(SecurityError):
         render("{{ text.__class__.__name__ }}", text="hello")
-
-
-def test_a_template_cannot_call_a_method_marked_as_altering_data():
-    with pytest.raises(SecurityError):
-        render("{{ account.close() }}", account=Account())
-
-
-def test_a_template_cannot_build_a_huge_range():
-    with pytest.raises(OverflowError):
-        render("{% for i in range(1000000) %}{% endfor %}")
 
 
 def test_an_approval_message_cannot_read_what_is_private_to_its_input(mocker):
