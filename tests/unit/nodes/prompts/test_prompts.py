@@ -237,6 +237,16 @@ class TestFunctionCallingProtocolMessages:
         for m in out:
             assert None not in m.values()
 
+    def test_format_messages_keeps_reasoning_details_on_assistant(self):
+        details = [{"id": "rs_1", "index": 0, "type": "reasoning.encrypted", "data": "enc-1"}]
+        tool_calls = [{"id": "call_a", "type": "function", "function": {"name": "search", "arguments": "{}"}}]
+        message = Message(role=MessageRole.ASSISTANT, content="", tool_calls=tool_calls, reasoning_details=details)
+
+        out = Prompt(messages=[message]).format_messages()
+
+        assert out[0]["reasoning_details"] == details
+        assert Message.from_dict(message.to_dict()).reasoning_details == details
+
     def test_model_dump_drops_unset_fc_fields_when_nested(self):
         """Plain messages must not leak None FC fields, even when dumped via a
         parent model — the path that broke orchestrator output."""
