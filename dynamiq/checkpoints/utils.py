@@ -20,6 +20,16 @@ def _is_marker(value: Any) -> bool:
     return isinstance(value, dict) and not REVERSIBLE_MARKERS.isdisjoint(value)
 
 
+def _jsonb_rejects(text: str) -> bool:
+    """Whether the text has a NUL, which Postgres jsonb cannot hold, or a surrogate, which has no UTF-8 form."""
+    if text.isascii():
+        return "\x00" in text
+    try:
+        return b"\x00" in text.encode()
+    except UnicodeEncodeError:
+        return True
+
+
 def encode_checkpoint_data(obj: Any) -> Any:
     """Recursively pre-encode non-serializable values in a nested structure.
 
@@ -29,17 +39,20 @@ def encode_checkpoint_data(obj: Any) -> Any:
     tuples, sets, dicts with non-string keys) get markers too, so a resumed run sees exactly
     what the run produced, and so does whatever a model or an object holds. A dict whose own
     keys look like markers is kept as pairs, so decoding does not mistake it for one.
+    Text with a NUL or a surrogate, which Postgres jsonb refuses, gets a marker as a value and as a key.
     Dict keys other than primitives are coerced to strings (e.g. UUID).
     """
     if isinstance(obj, int) and not _INT64_MIN <= obj <= _UINT64_MAX:
         return {"__int__": str(obj)}
     if isinstance(obj, float) and not math.isfinite(obj):
         return {"__float__": str(obj)}
+    if isinstance(obj, str) and _jsonb_rejects(obj):
+        return {"__str__": obj.encode("unicode_escape").decode()}
     if obj is None or isinstance(obj, (str, int, float, bool)):
         return obj
     if isinstance(obj, dict):
         items = [(_encode_dict_key(k), encode_checkpoint_data(v)) for k, v in obj.items()]
-        if all(isinstance(k, str) and k not in REVERSIBLE_MARKERS for k, _ in items):
+        if all(isinstance(k, str) and k not in REVERSIBLE_MARKERS and not _jsonb_rejects(k) for k, _ in items):
             return dict(items)
         return {"__dict_items__": [[encode_checkpoint_data(k), v] for k, v in items]}
     if isinstance(obj, list):

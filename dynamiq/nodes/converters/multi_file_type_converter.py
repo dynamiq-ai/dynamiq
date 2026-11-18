@@ -1,6 +1,7 @@
 import copy
 import csv
 import logging
+import threading
 from concurrent.futures import wait
 from io import BytesIO
 from pathlib import Path
@@ -55,6 +56,10 @@ DEFAULT_TIMEOUT_SECONDS = 600.0
 
 # How often the main thread polls for cancellation while parallel conversions run.
 _CANCELLATION_POLL_INTERVAL = 0.05
+
+
+class _SkippedAfterFailure(Exception):
+    """A file not converted because an earlier file failed; never surfaced, as that earlier failure is raised first."""
 
 
 class MultiFileTypeConverterInputSchema(BaseModel):
@@ -425,11 +430,28 @@ class MultiFileTypeConverter(Node):
 
         max_workers = self._resolve_max_workers(len(work_items), config)
 
+        # The lowest index that failed. A worker skips any later file instead of starting it, so a failure stops the
+        # files after it however soon the main thread sees it; earlier files still run, keeping the first error the
+        # one sequential processing would raise.
+        first_failure = len(work_items)
+        failure_lock = threading.Lock()
+
+        def convert(index: int, file: BytesIO, filename: str, meta: dict) -> tuple[list, list[dict]]:
+            nonlocal first_failure
+            if index > first_failure:
+                raise _SkippedAfterFailure(filename)
+            try:
+                return self._convert_one(file, filename, meta, base_run_depends, config, **kwargs)
+            except Exception:
+                with failure_lock:
+                    first_failure = min(first_failure, index)
+                raise
+
         executor = ContextAwareThreadPoolExecutor(max_workers=max_workers)
         try:
             futures = [
-                executor.submit(self._convert_one, file, filename, meta, base_run_depends, config, **kwargs)
-                for file, filename, meta in work_items
+                executor.submit(convert, index, file, filename, meta)
+                for index, (file, filename, meta) in enumerate(work_items)
             ]
             # Resolve futures in input order so the first surfaced error matches sequential
             # processing, while still polling for cancellation; ``finally`` cancels the unstarted

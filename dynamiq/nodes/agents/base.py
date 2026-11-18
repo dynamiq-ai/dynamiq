@@ -61,6 +61,7 @@ from dynamiq.nodes.agents.hooks import (
     current_hook_ctx,
     resolve_hook,
 )
+from dynamiq.nodes.agents.hooks.builtin import map_strings
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.agents.shared_session import (
@@ -610,20 +611,21 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             self.tools.extend(sandbox_tools)
 
         elif self.file_store_backend:
-            self.tools.extend(
-                [
-                    FileReadTool(file_store=self.file_store_backend, llm=self.llm),
-                    FileSearchTool(file_store=self.file_store_backend),
-                    FileListTool(file_store=self.file_store_backend),
-                ]
-            )
+            file_tools = [
+                FileReadTool(file_store=self.file_store_backend, llm=self.llm),
+                FileSearchTool(file_store=self.file_store_backend),
+                FileListTool(file_store=self.file_store_backend),
+            ]
             if self.file_store.agent_file_write_enabled:
-                self.tools.append(FileWriteTool(file_store=self.file_store_backend))
+                file_tools.append(FileWriteTool(file_store=self.file_store_backend))
             elif self.artifacts_backend:
                 logger.warning(
                     f"Agent {self.name} - {self.id}: artifacts move as files, but agent_file_write_enabled is off, "
                     "so the agent can publish only files already in its file store and cannot edit loaded ones."
                 )
+            # The agent recreates these tools from its file_store config on load, so they are not serialized.
+            self._excluded_tool_ids.update(t.id for t in file_tools)
+            self.tools.extend(file_tools)
 
         if self._skills_should_init():
             self._init_skills()
@@ -1084,6 +1086,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             try:
                 try:
                     input_message = self._apply_input_hooks(input_message, config, **kwargs)
+                    self._apply_input_hooks_to_context(input_data, config, **kwargs)
                     result = self._run_agent(input_message, history_messages, config=config, **kwargs)
                     result = self._run_hooks(HookPoint.ON_OUTPUT, result, config, **kwargs).value
                 except HookAnswerException as blocked:
@@ -1327,8 +1330,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         if message.role == MessageRole.USER:
             return content.startswith("Observation:")
 
+        if message.role == MessageRole.TOOL:
+            return True
+
         if message.role == MessageRole.ASSISTANT:
-            if content.startswith("Thought:") or content.startswith("Function call:"):
+            # In function calling the final answer is itself a tool call, made before the on_output hooks ran.
+            if content.startswith("Thought:") or content.startswith("Function call:") or message.tool_calls:
                 return True
 
             if self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
@@ -2025,6 +2032,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             config=config,
             hooks=[*inherited, *self._own_hook_pairs()],
             trusted=dict(getattr(config, "trusted_context", None) or {}),
+            parent=parent,
         )
         if parent is not None:
             ctx.lock = parent.lock
@@ -2124,10 +2132,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         *,
         call: ToolCall | None = None,
         tool_call_id: str | None = None,
+        runner: HookRunner | None = None,
         **kwargs,
     ) -> HookRun:
-        """Run one hook point, record its events on this agent's run (trace) and stream a block if there is one."""
-        runner = self._hook_runner()
+        """Run one hook point, record its events on this agent's run (trace) and stream a block if there is one.
+        ``runner`` narrows the hooks to a subset of the run's."""
+        runner = runner or self._hook_runner()
         if not runner.has(point):
             return HookRun(value=value)
         ctx = current_hook_ctx.get() or HookContext(agent_name=self.name, agent_id=self.id)
@@ -2260,6 +2270,22 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             return message.model_copy(update={"content": hooked})
         media = [part for part in message.content if not isinstance(part, VisionMessageTextContent)]
         return message.model_copy(update={"content": [VisionMessageTextContent(text=hooked), *media]})
+
+    def _apply_input_hooks_to_context(self, input_data: AgentInputSchema, config, **kwargs) -> None:
+        """``on_input`` of the hooks that set ``screens_context`` on each text of the run input's ``context``, dict
+        keys included, which the system prompt shows the model. A list or dict keeps its shape."""
+        context = (input_data.model_extra or {}).get("context")
+        runner = self._hook_runner()
+        pairs = [(key, hook) for key, hook in zip(runner.keys, runner.hooks) if hook.screens_context]
+        if context is None or not pairs:
+            return
+        screening = HookRunner([hook for _, hook in pairs], [key for key, _ in pairs])
+
+        def screen(text: str) -> str:
+            return self._run_hooks(HookPoint.ON_INPUT, text, config, runner=screening, **kwargs).value if text else text
+
+        if (hooked := map_strings(context, screen)) != context:
+            self.system_prompt_manager.update_variables({"context": hooked})
 
     def _run_tool(
         self,
@@ -2929,13 +2955,14 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         had_artifacts = bool(self.artifacts_backend)
         self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
         self._file_store_auto_created = True
-        self.tools.extend(
-            [
-                FileReadTool(file_store=self.file_store_backend, llm=self.llm),
-                FileSearchTool(file_store=self.file_store_backend),
-                FileListTool(file_store=self.file_store_backend),
-            ]
-        )
+        file_tools = [
+            FileReadTool(file_store=self.file_store_backend, llm=self.llm),
+            FileSearchTool(file_store=self.file_store_backend),
+            FileListTool(file_store=self.file_store_backend),
+        ]
+        # The agent recreates these tools from its file_store config on load, so they are not serialized.
+        self._excluded_tool_ids.update(t.id for t in file_tools)
+        self.tools.extend(file_tools)
         new_tool_description = self.tool_description
         self.system_prompt_manager.set_initial_variable("tool_description", new_tool_description)
         gained_artifacts = bool(self.artifacts_backend) and not had_artifacts

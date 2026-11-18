@@ -1,13 +1,43 @@
-from functools import lru_cache
+from functools import cache, lru_cache
+from threading import Lock
 
+import ply.yacc
 from jsonpath_ng import JSONPath
-from jsonpath_ng import parse as parse_jsonpath
 from jsonpath_ng.exceptions import JsonPathParserError
+from jsonpath_ng.lexer import JsonPathLexer
+from jsonpath_ng.parser import IteratorToTokenStream, JsonPathParser
+from jsonpath_ng.parser import logger as jsonpath_ng_logger
 
 JSONPATH_EXPRESSION_PREFIXES = ("$", "@")
 JSONPATH_ROOT_ACCESSORS = (".", "[")
 COALESCE_SEPARATOR = "||"
 PARSED_EXPRESSIONS_CACHE_SIZE = 1024
+
+# A PLY parser keeps the state of a parse on itself, so threads take turns on the one parser. A parser per thread would
+# be built again in every flow run, since each run starts threads of its own.
+_PARSER_LOCK = Lock()
+
+
+@cache
+def _parser() -> ply.yacc.LRParser:
+    # jsonpath_ng.parse builds the tables of this parser again for every expression, nearly all of what a parse costs.
+    return ply.yacc.yacc(
+        module=JsonPathParser(), start="jsonpath", debug=False, write_tables=False, errorlog=jsonpath_ng_logger
+    )
+
+
+def parse_jsonpath(path: str) -> JSONPath:
+    """
+    Parse a JSONPath expression as jsonpath_ng.parse does, on parse tables built once.
+
+    Args:
+        path (str): The JSONPath expression.
+
+    Returns:
+        JSONPath: The parsed expression.
+    """
+    with _PARSER_LOCK:
+        return _parser().parse(lexer=IteratorToTokenStream(JsonPathLexer().tokenize(path)))
 
 
 @lru_cache(maxsize=PARSED_EXPRESSIONS_CACHE_SIZE)
@@ -15,10 +45,9 @@ def parse(path: str) -> JSONPath:
     """
     Parse a JSONPath expression, reusing the result for an expression parsed before.
 
-    jsonpath_ng builds a new lexer and parser for every expression it parses, which costs
-    milliseconds of CPU, while nodes resolve the same few selectors on every run. A parsed
-    expression is never mutated, so threads share it. An expression that fails to parse is
-    not cached and raises every time.
+    A parse costs a fraction of a millisecond of CPU, while nodes resolve the same few
+    selectors on every run. A parsed expression is never mutated, so threads share it. An
+    expression that fails to parse is not cached and raises every time.
 
     Args:
         path (str): The JSONPath expression.

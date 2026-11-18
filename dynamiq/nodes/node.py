@@ -48,6 +48,7 @@ from dynamiq.nodes.schema_utils import apply_param_modes, strip_inaccessible_fie
 from dynamiq.nodes.types import ActionType, Behavior, ChoiceCondition, DependencyTrigger, InputParamMode, NodeGroup
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.storages.vector.base import BaseVectorStoreParams
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.dry_run import DryRunConfig
@@ -163,25 +164,25 @@ def is_retryable_error(exc: BaseException) -> bool:
     """
     if getattr(exc, "retryable", True) is False:
         return False
-    if "litellm" not in sys.modules:  # the error cannot come from litellm, and importing it takes seconds
-        return True
-    try:
-        from litellm.exceptions import (
-            AuthenticationError,
-            BadRequestError,
-            BudgetExceededError,
-            NotFoundError,
-            PermissionDeniedError,
-        )
-    except ImportError:  # provider library unavailable: keep retrying as before
-        return True
-
+    # Only a litellm that finished importing raises its own errors, so its exceptions are read where its import left
+    # them. Importing them here would take seconds where litellm is not imported, and could deadlock on the import
+    # lock of a litellm that another thread is still importing.
+    exceptions = sys.modules.get("litellm.exceptions")
     # BadRequestError also covers ContextWindowExceededError and UnsupportedParamsError.
     # RateLimitError is deliberately absent — retryable, and does not subclass these.
-    return not isinstance(
-        exc,
-        (AuthenticationError, PermissionDeniedError, BadRequestError, NotFoundError, BudgetExceededError),
+    permanent = tuple(
+        getattr(exceptions, name, None)
+        for name in (
+            "AuthenticationError",
+            "PermissionDeniedError",
+            "BadRequestError",
+            "NotFoundError",
+            "BudgetExceededError",
+        )
     )
+    if None in permanent:
+        return True
+    return not isinstance(exc, permanent)
 
 
 # The time.monotonic() by which the innermost node with a timeout that is running this code must finish.
@@ -246,6 +247,26 @@ def share_input_queues(nodes: Iterable["Node"], config: RunnableConfig) -> Itera
                 shared.maps -= 1
                 if not shared.maps:
                     del _shared_input_queues[key]
+
+
+# The copies made on this thread while isolated_in_memory_file_stores runs, by the id of the store copied.
+_in_memory_file_store_copies = threading.local()
+
+
+@contextmanager
+def isolated_in_memory_file_stores() -> Iterator[None]:
+    """Make the nodes cloned on this thread while the block runs copy the in-memory file stores they hold.
+
+    Node.clone() shares a file store, so that the copy of a tool run in parallel writes where its agent reads. In the
+    block each store is copied once, with the files it holds, and every node cloned there holds that copy in its place,
+    so an agent and its file tools still share one store. A store that keeps its files elsewhere stays shared.
+    """
+    previous = getattr(_in_memory_file_store_copies, "copies", None)
+    _in_memory_file_store_copies.copies = {}
+    try:
+        yield
+    finally:
+        _in_memory_file_store_copies.copies = previous
 
 
 class ErrorHandling(BaseModel):
@@ -681,8 +702,16 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             NodeConditionFailedException: If the dependency option is not met.
             NodeConditionSkippedException: If the dependency option is skipped.
         """
+        dep_output_data = depends_result.get(depend.node.id)
+        # A Choice that failed or was skipped took no option. Under behavior "return" its dependents still get here,
+        # and what it returned holds no option to check, so each of its branches would run.
+        if dep_output_data and dep_output_data.status != RunnableStatus.SUCCESS:
+            raise NodeConditionSkippedException(
+                failed_depend=depend,
+                message=f"Dependency {depend.node.id} option {depend.option}: not taken, the node did not succeed",
+            )
         if (
-            (dep_output_data := depends_result.get(depend.node.id))
+            dep_output_data
             and (isinstance(dep_output_data.output, dict))
             and (dep_condition_result := dep_output_data.output.get(depend.option))
         ):
@@ -884,10 +913,15 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
     def clone(self) -> "Node":
         """Create a safe clone of the node."""
         cloned_node = self.model_copy(deep=False)
+        file_store_copies = getattr(_in_memory_file_store_copies, "copies", None)
 
         def _clone_nested(value: Any) -> Any:
             if isinstance(value, (ModuleType, FunctionType)) or isinstance(value, type) or callable(value):
                 return value
+            if file_store_copies is not None and isinstance(value, InMemoryFileStore):
+                if id(value) not in file_store_copies:
+                    file_store_copies[id(value)] = value.model_copy(deep=True)
+                return file_store_copies[id(value)]
             if getattr(value, "_clone_shared", False):
                 return value
             if isinstance(value, Node):

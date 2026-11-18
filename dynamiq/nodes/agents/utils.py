@@ -1091,10 +1091,10 @@ def bytes_to_data_url(image_bytes: bytes) -> str:
 def decode_text_payload(value: bytes | bytearray) -> str | None:
     """The text a byte string holds, or ``None`` when it is genuinely binary.
 
-    Tools hand back `bytes` for both: `HttpApiCall` leaves any body that is not exactly
-    ``application/json`` as bytes, so most JSON, HTML and XML answers arrive this way and the model
-    has to be able to read them. A NUL byte or a failed UTF-8 decode is what separates those from
-    audio, images and archives.
+    Tools hand back `bytes` for both: `HttpApiCall` leaves as bytes any body it does not read as JSON,
+    so HTML, XML, JSON under another label and a JSON-labelled body that does not parse arrive this
+    way and the model has to be able to read them. A NUL byte or a failed UTF-8 decode is what
+    separates those from audio, images and archives.
     """
     try:
         text = bytes(value).decode("utf-8")
@@ -1136,6 +1136,13 @@ def _json_fallback(value: Any) -> str:
     return str(value)
 
 
+def _dump_for_agent(value: Any) -> str:
+    """``value`` as indented JSON with its text as written, except a lone surrogate, which no UTF-8 request to the
+    model can carry: it keeps its ``\\u`` escape, as an SMS cut inside an emoji parses to one."""
+    text = json.dumps(value, indent=2, default=_json_fallback, ensure_ascii=False)
+    return text if text.isascii() else text.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
 def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKENS, truncate: bool = True) -> str:
     """
     Process tool output for agent consumption.
@@ -1167,9 +1174,9 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
                 elif isinstance(inner_content, (bytes, bytearray)):
                     content = decode_text_payload(inner_content) or describe_binary(inner_content)
                 else:
-                    content = json.dumps(inner_content, indent=2, default=_json_fallback)
+                    content = _dump_for_agent(inner_content)
             else:
-                content = json.dumps(filtered_content, indent=2, default=_json_fallback) if filtered_content else ""
+                content = _dump_for_agent(filtered_content) if filtered_content else ""
         elif isinstance(content, (list, tuple)):
             content = "\n".join(str(item) for item in content)
         else:

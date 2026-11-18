@@ -88,8 +88,21 @@ class CheckpointBackend(ABC, BaseModel):
         continues from it. ``max_ttl_minutes`` still removes it, and ``keep_count=0`` removes every checkpoint.
         """
         checkpoints = self.get_list_by_flow(flow_id, limit=self.max_cleanup_results)
-        continued_from = {cp.parent_checkpoint_id for cp in checkpoints}
         deleted = 0
+
+        for cp in self._select_for_cleanup(checkpoints, keep_count=keep_count, max_ttl_minutes=max_ttl_minutes):
+            if self.delete(cp.id):
+                deleted += 1
+
+        return deleted
+
+    @staticmethod
+    def _select_for_cleanup(
+        checkpoints: list[FlowCheckpoint], *, keep_count: int, max_ttl_minutes: int | None
+    ) -> list[FlowCheckpoint]:
+        """Pick which of a flow's checkpoints (newest first) ``cleanup_by_flow`` removes."""
+        continued_from = {cp.parent_checkpoint_id for cp in checkpoints}
+        selected = []
 
         for i, cp in enumerate(checkpoints):
             waiting = (
@@ -101,10 +114,10 @@ class CheckpointBackend(ABC, BaseModel):
             if max_ttl_minutes is not None and not should_delete:
                 age_minutes = (datetime.now(timezone.utc) - cp.created_at).total_seconds() / 60
                 should_delete = age_minutes > max_ttl_minutes
-            if should_delete and self.delete(cp.id):
-                deleted += 1
+            if should_delete:
+                selected.append(cp)
 
-        return deleted
+        return selected
 
     def get_list_by_run(self, run_id: str, *, limit: int | None = None) -> list[FlowCheckpoint]:
         """List checkpoints matching run_id or wf_run_id. Use limit=None to get all."""
