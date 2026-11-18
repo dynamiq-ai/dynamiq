@@ -34,20 +34,26 @@ class RecursiveCharacterSplitterComponent(SplitterComponentBase):
     def _split_text(self, text: str, separators: list[str]) -> list[str]:
         final_chunks: list[str] = []
         separator = separators[-1]
+        merge_separator = separator
         new_separators: list[str] = []
         for index, candidate in enumerate(separators):
             candidate_pattern = candidate if self.is_separator_regex else re.escape(candidate)
             if candidate == "":
                 separator = candidate
+                merge_separator = candidate
                 break
-            if re.search(candidate_pattern, text):
+            match = re.search(candidate_pattern, text)
+            if match:
                 separator = candidate
+                # A regex separator is not literal text: rejoin pieces with what it actually matched.
+                merge_separator = match.group(0) if self.is_separator_regex else candidate
                 new_separators = separators[index + 1 :]
                 break
 
         splits = self._split_with_separator(text, separator)
         good_splits: list[str] = []
-        merge_separator = "" if self.keep_separator else separator
+        if self.keep_separator:
+            merge_separator = ""
         for piece in splits:
             if self._length(piece) < self.chunk_size:
                 good_splits.append(piece)
