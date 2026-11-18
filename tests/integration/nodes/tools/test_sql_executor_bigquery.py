@@ -307,7 +307,6 @@ def test_dict_parameters_are_bound_by_name(client, connection):
         "since": date(2026, 1, 1),
         "after": datetime(2026, 1, 1, tzinfo=timezone.utc),
         "amount": Decimal("1.50"),
-        "region": None,
     }
 
     SQLExecutor(connection=connection).run({"query": QUERY, "parameters": parameters})
@@ -320,7 +319,6 @@ def test_dict_parameters_are_bound_by_name(client, connection):
         ScalarQueryParameter("since", "DATE", date(2026, 1, 1)),
         ScalarQueryParameter("after", "TIMESTAMP", datetime(2026, 1, 1, tzinfo=timezone.utc)),
         ScalarQueryParameter("amount", "BIGNUMERIC", Decimal("1.50")),
-        ScalarQueryParameter("region", "STRING", None),
     ]
     assert [config.query_parameters for config in job_configs(client)] == [expected, expected]
 
@@ -341,6 +339,18 @@ def test_a_parameter_without_a_bigquery_type_is_refused(client, connection):
 
     assert result.status == RunnableStatus.FAILURE
     assert result.error.message.startswith("BigQuery: parameter 'ids' is a list, which cannot be bound.")
+    assert job_configs(client) == []
+
+
+@pytest.mark.parametrize("parameters", [{"region": None}, [None]], ids=["named", "positional"])
+def test_a_null_parameter_is_refused(client, connection, parameters):
+    answer(client)
+
+    result = SQLExecutor(connection=connection).run({"query": QUERY, "parameters": parameters})
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "is null, which cannot be bound" in result.error.message
+    assert "Write NULL or IS NULL into the query." in result.error.message
     assert job_configs(client) == []
 
 
@@ -430,7 +440,9 @@ def test_an_agent_learns_the_rules_and_moves_on_from_a_refusal(client, connectio
     result, recorder = run_scripted(agent, mode, [*steps, final_step("3 orders are paid")])
 
     assert result.status == RunnableStatus.SUCCESS
-    assert "BigQuery Standard SQL" in recorder.sent_text(0)
+    # The tool's description reaches the model in the prompt, or in function calling mode in the tool schemas.
+    fc_tools, _ = agent._effective_inference_schemas()
+    assert "BigQuery Standard SQL" in recorder.sent_text(0) + json.dumps(fc_tools or [])
     assert "BigQuery: only SELECT queries are allowed (got DELETE)" in recorder.sent_text(1)
     assert "status: paid" in recorder.sent_text(2)
 

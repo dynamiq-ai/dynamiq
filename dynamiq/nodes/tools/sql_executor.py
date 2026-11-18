@@ -84,8 +84,8 @@ Exploring the data:
 
 Parameter Guide:
 - query: the SQL to run (required)
-- parameters: values to bind, a dict for @name placeholders or a list for ? placeholders. Bind strings, numbers,
-  booleans and nulls; write lists into the query.
+- parameters: values to bind, a dict for @name placeholders or a list for ? placeholders. Bind strings, numbers
+  and booleans; write lists and NULL (IS NULL to compare) into the query.
 
 Examples:
 - {"query": "SELECT status, COUNT(*) AS orders FROM `shop.sales.orders` GROUP BY status ORDER BY orders DESC"}
@@ -349,8 +349,15 @@ def _bigquery_parameter_type(parameter: str, value: Any) -> str:
     """The BigQuery type of a parameter's value.
 
     Raises:
-        ToolExecutionException: If the value has no BigQuery scalar type, such as a list or a dict.
+        ToolExecutionException: If the value is None, whose type BigQuery cannot tell from the value, or has no
+            BigQuery scalar type, such as a list or a dict.
     """
+    if value is None:
+        # Bound with a guessed type, a NULL fails against a column of any other type, and `= NULL` is never true.
+        raise ToolExecutionException(
+            f"BigQuery: parameter {parameter} is null, which cannot be bound. Write NULL or IS NULL into the query.",
+            recoverable=True,
+        )
     if isinstance(value, bool):
         return "BOOL"
     if isinstance(value, int):
@@ -360,8 +367,8 @@ def _bigquery_parameter_type(parameter: str, value: Any) -> str:
     if isinstance(value, Decimal):
         # BIGNUMERIC holds any NUMERIC value too, and NUMERIC columns compare with it.
         return "BIGNUMERIC"
-    # A NULL needs a type as well, and STRING also coerces to the date and time types.
-    if isinstance(value, str) or value is None:
+    # STRING also coerces to the date and time types.
+    if isinstance(value, str):
         return "STRING"
     if isinstance(value, bytes):
         return "BYTES"
@@ -372,8 +379,8 @@ def _bigquery_parameter_type(parameter: str, value: Any) -> str:
     if isinstance(value, time):
         return "TIME"
     raise ToolExecutionException(
-        f"BigQuery: parameter {parameter} is a {type(value).__name__}, which cannot be bound. Bind a string, number, "
-        "boolean or null, and write lists into the query.",
+        f"BigQuery: parameter {parameter} is a {type(value).__name__}, which cannot be bound. Bind a string, number "
+        "or boolean, and write lists into the query.",
         recoverable=True,
     )
 
