@@ -307,6 +307,54 @@ class TestNativeStreaming:
         streamed = [tc for c in collector.chunks for tc in c["choices"][0]["delta"]["tool_calls"] or []]
         assert len(streamed) == 4 and {tc["type"] for tc in streamed} == {"function"}
 
+    @pytest.mark.asyncio
+    async def test_parallel_tool_calls_sharing_one_index_stay_separate(self, async_sdk_client):
+        # Some OpenAI-compatible servers repeat the same index for every parallel call.
+        chunks = [
+            _chunk(
+                {"tool_calls": [{"index": 0, "id": "call_1", "function": {"name": "search", "arguments": '{"q": 1}'}}]}
+            ),
+            _chunk(
+                {"tool_calls": [{"index": 0, "id": "call_2", "function": {"name": "calc", "arguments": '{"n": 2}'}}]}
+            ),
+            _chunk({}, finish_reason="tool_calls"),
+        ]
+        fake = FakeOpenAI(chunks=chunks)
+        node = make_node(fake, streaming=StreamingConfig(enabled=True))
+
+        with async_sdk_client(fake):
+            result = await node.run_async(input_data={}, config=RunnableConfig(callbacks=[Collector()]))
+
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        assert [(c["id"], c["function"]["name"], c["function"]["arguments"]) for c in result.output["tool_calls"]] == [
+            ("call_1", "search", {"q": 1}),
+            ("call_2", "calc", {"n": 2}),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_parallel_tool_calls_without_an_index_stay_separate(self, async_sdk_client):
+        # OpenAI-compatible servers such as Gemini's omit the index on streamed tool calls.
+        chunks = [
+            _chunk(
+                {"tool_calls": [{"id": "call_1", "function": {"name": "search", "arguments": '{"q": 1}'}}]}
+            ),
+            _chunk(
+                {"tool_calls": [{"id": "call_2", "function": {"name": "calc", "arguments": '{"n": 2}'}}]}
+            ),
+            _chunk({}, finish_reason="tool_calls"),
+        ]
+        fake = FakeOpenAI(chunks=chunks)
+        node = make_node(fake, streaming=StreamingConfig(enabled=True))
+
+        with async_sdk_client(fake):
+            result = await node.run_async(input_data={}, config=RunnableConfig(callbacks=[Collector()]))
+
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        assert [(c["id"], c["function"]["name"], c["function"]["arguments"]) for c in result.output["tool_calls"]] == [
+            ("call_1", "search", {"q": 1}),
+            ("call_2", "calc", {"n": 2}),
+        ]
+
     def test_sync_stream_matches_the_litellm_path(self):
         outputs, streamed = {}, {}
         for native in (False, True):

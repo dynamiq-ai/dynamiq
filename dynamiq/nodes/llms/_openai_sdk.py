@@ -391,7 +391,8 @@ class _Assembly:
         self._refusal: list[str] = []
         self._reasoning: list[str] = []
         self._reasoning_details: dict[int, dict[str, Any]] = {}
-        self._tool_calls: dict[int, dict[str, Any]] = {}
+        # Keyed by (index, n): a server that reuses one index for several calls gets one slot per call id.
+        self._tool_calls: dict[tuple[int, int], dict[str, Any]] = {}
         self._finish_reason = None
         self._usage: dict | None = None
 
@@ -420,14 +421,27 @@ class _Assembly:
                     elif value is not None:
                         merged[key] = copy.deepcopy(value)
             for tool_call in delta.get("tool_calls") or ():
-                call = self._tool_calls.setdefault(
-                    tool_call["index"], {"id": None, "type": "function", "function": {"name": None, "arguments": ""}}
-                )
+                call = self._tool_call_slot(tool_call["index"], tool_call["id"])
                 call["id"] = tool_call["id"] or call["id"]
                 if function := tool_call["function"]:
                     call["function"]["name"] = function["name"] or call["function"]["name"]
                     call["function"]["arguments"] += function["arguments"] or ""
             self._finish_reason = choice["finish_reason"] or self._finish_reason
+
+    def _tool_call_slot(self, index: int, call_id: str | None) -> dict[str, Any]:
+        """Return the tool call a delta belongs to.
+
+        A delta with the index of an earlier call and a different non-empty id starts a new call: some
+        OpenAI-compatible servers, such as Gemini's, send every parallel call with index 0.
+        """
+        n = max((slot for idx, slot in self._tool_calls if idx == index), default=None)
+        if n is None:
+            n = 0
+        elif call_id and self._tool_calls[(index, n)]["id"] not in (None, call_id):
+            n += 1
+        return self._tool_calls.setdefault(
+            (index, n), {"id": None, "type": "function", "function": {"name": None, "arguments": ""}}
+        )
 
     def response(self, messages: list[dict], model: str) -> ChatCompletion:
         message: dict[str, Any] = {
@@ -441,7 +455,7 @@ class _Assembly:
         if self._reasoning_details:
             message["reasoning_details"] = [self._reasoning_details[index] for index in sorted(self._reasoning_details)]
         if self._tool_calls:
-            message["tool_calls"] = [self._tool_calls[index] for index in sorted(self._tool_calls)]
+            message["tool_calls"] = [self._tool_calls[slot] for slot in sorted(self._tool_calls)]
 
         usage_data = self._usage
         if usage_data is None:
