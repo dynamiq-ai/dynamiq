@@ -604,6 +604,8 @@ class MCPServer(ConnectionNode):
       exclude_tools (list[str]): Names of tools to exclude.
       discover_per_run (bool): List tools at the start of each agent run, with that run's
         ``mcp_http_headers``, instead of once when the agent is built.
+      discovery_required (bool): Whether a failure to list the server's tools, for any reason, fails the
+        agent. When False, the agent goes on without this server's tools.
       _mcp_tools (dict[str, MCPTool]): Internal dict of initialized MCP tools.
     """
 
@@ -634,6 +636,13 @@ Usage Strategy:
             "List the server's tools at the start of every agent run, sending that run's mcp_http_headers "
             "from tool_params, instead of once when the agent is built. For servers that list different "
             "tools to different callers."
+        ),
+    )
+    discovery_required: bool = Field(
+        default=True,
+        description=(
+            "When False, a failure to list the server's tools is logged as a warning and the agent goes on "
+            "without them, instead of failing. A listing that neither fails nor answers is still waited for."
         ),
     )
     _mcp_tools: dict[str, MCPTool] = PrivateAttr(default_factory=dict)
@@ -703,6 +712,13 @@ Usage Strategy:
                     f"its tools. The agent will not see this server's tools this run. Error: {error}"
                 )
                 return discovered
+            if not self.discovery_required:
+                # A listing that failed part-way is left out whole rather than offered as an arbitrary subset.
+                logger.warning(
+                    f"Tool {self.name} - {self.id}: failed to initialize session; continuing without its tools "
+                    f"because discovery_required is off. Error: {error}"
+                )
+                return {}
             logger.error(f"Tool {self.name} - {self.id}: failed to initialize session. Error: {error}")
             raise ToolExecutionException(f"Tool {self.name} - {self.id}: failed to initialize session. Error: {error}")
         return discovered
