@@ -122,6 +122,47 @@ EVERY_KIND = [
 
 
 @pytest.mark.integration
+def test_an_apps_end_user_is_given_no_link_to_the_platforms_app(api):
+    """An app's end user has no account on the platform, so its page of the artifact is not theirs to open."""
+    backend = DynamiqArtifacts(
+        connection=DynamiqConnection(url=API_URL, api_key="simulated-key"),
+        artifact_store_id="store-1",
+        user_id="customer-42",
+    )
+    workspace = InMemoryFileStore()
+    workspace.store("invoice.md", b"# Invoice 1042", overwrite=True)
+    tool = ArtifactTool(backend=backend, workspace=workspace)
+
+    created = _tool_run(tool, action="create", path="invoice.md", name="Invoice 1042")
+    artifact_id = created["artifact"]["id"]
+    workspace.store("invoice.md", b"# Invoice 1042, paid", overwrite=True)
+    updated = _tool_run(tool, action="update", path="invoice.md", artifact_id=artifact_id)
+    listed = _tool_run(tool, action="list")
+
+    assert created["content"] == f"Artifact 'Invoice 1042' v1 created (id {artifact_id}) from invoice.md"
+    assert updated["content"] == f"Artifact 'Invoice 1042' v2 updated (id {artifact_id}) from invoice.md"
+    assert listed["content"] == f"- {artifact_id}: 'Invoice 1042' (markdown, v2)"
+    link = f"https://app.simulated/artifacts/{artifact_id}"
+    assert (created["artifact"]["url"], updated["artifact"]["url"]) == (link, link)
+
+
+@pytest.mark.integration
+def test_a_platform_user_is_given_the_link_to_their_artifact(api, backend):
+    workspace = InMemoryFileStore()
+    workspace.store("plan.md", b"# Plan", overwrite=True)
+    tool = ArtifactTool(backend=backend, workspace=workspace)
+
+    created = _tool_run(tool, action="create", path="plan.md", name="Plan")
+    artifact_id = created["artifact"]["id"]
+    listed = _tool_run(tool, action="list")
+
+    link = f"https://app.simulated/artifacts/{artifact_id}"
+    assert created["content"] == f"Artifact 'Plan' v1 created (id {artifact_id}) from plan.md: {link}"
+    assert listed["content"] == f"- {artifact_id}: 'Plan' (markdown, v1) {link}"
+    assert created["artifact"]["url"] == link
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("file_name, v1, kind, v2_path, v2", EVERY_KIND)
 def test_every_kind_is_created_loaded_and_updated_through_the_tool(api, backend, file_name, v1, kind, v2_path, v2):
     """The tool's requests for each kind are ones the platform accepts, and its bytes come back intact.

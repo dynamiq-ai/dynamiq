@@ -22,6 +22,7 @@ from dynamiq.sandboxes.base import SandboxConfig
 from dynamiq.sandboxes.e2b import E2BSandbox
 from dynamiq.storages.file import FileStoreConfig, InMemoryFileStore
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
+from tests.helpers.artifact_api import API_URL, ArtifactAPISimulator
 from tests.unit.artifacts.conftest import FakeArtifactBackend
 
 
@@ -360,6 +361,40 @@ def test_an_output_file_beside_artifacts_reaches_the_run_output(llm, store, mock
 
     assert result.status == RunnableStatus.SUCCESS
     assert [f.name for f in result.output["files"]] == ["totals.csv"]
+
+
+def test_an_apps_run_keeps_the_link_in_its_output_and_out_of_what_the_model_reads(llm, mocker, monkeypatch):
+    api = ArtifactAPISimulator()
+    monkeypatch.setattr(Dynamiq, "connect", lambda self: api)
+    in_a_store = DynamiqArtifacts(
+        connection=Dynamiq(url=API_URL, api_key="simulated-key"), artifact_store_id="store-1", user_id="customer-42"
+    )
+    completion = _replies(
+        mocker,
+        _file_write({"action": "write", "file_path": "invoice.md", "content": "# Invoice 1042"}),
+        _action({"action": "create", "path": "invoice.md", "name": "Invoice 1042"}),
+        "Thought: Done.\nAnswer: Your invoice is ready.",
+    )
+    agent = Agent(
+        name="a", llm=llm, file_store=_files(), artifacts=_artifacts(in_a_store), inference_mode=InferenceMode.DEFAULT
+    )
+
+    result = agent.run({"input": "Send me my invoice"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    (artifact_id,) = api.artifacts
+    version_id = api.artifacts[artifact_id]["versions"][0]["id"]
+    assert json.loads(json.dumps(result.output["artifacts"])) == [
+        {
+            "id": artifact_id,
+            "version_id": version_id,
+            "version": 1,
+            "name": "Invoice 1042",
+            "kind": "markdown",
+            "url": f"https://app.simulated/artifacts/{artifact_id}",
+        }
+    ]
+    assert "app.simulated" not in json.dumps(completion.call_args_list[-1].kwargs["messages"], default=str)
 
 
 def _new_llm():
