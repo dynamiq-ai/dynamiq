@@ -75,6 +75,153 @@ def test_http_success_with_empty_body_is_not_a_successful_fetch(mocker, provider
     assert recorder.receipts[0]["error_code"] == "empty_content"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_mode", [False, True])
+@pytest.mark.parametrize(
+    "format_,data,success",
+    [
+        ("screenshot", {"screenshotUrl": "https://asset.example/private-image.png"}, True),
+        ("pageshot", {"pageshotUrl": "https://asset.example/private-image.png"}, True),
+        ("screenshot", {"screenshotUrl": " "}, False),
+        ("screenshot", {"content": "unexpected text"}, False),
+        ("markdown", {"screenshotUrl": "https://asset.example/private-image.png"}, False),
+        ("html", {"html": "<p>document text</p>"}, True),
+        ("text", {"text": "document text"}, True),
+    ],
+)
+async def test_jina_receipt_tracks_its_requested_representation_without_retaining_assets(
+    mocker, async_mode, format_, data, success
+):
+    response = MagicMock(status_code=200, headers={"X-Usage-Tokens": "7"})
+    response.json.return_value = {"data": data}
+    tool = JinaScrapeTool(connection=Jina(api_key="test"), response_format=format_, unit_price_usd=0.01)
+    recorder = ReceiptRecorder()
+    config = RunnableConfig(callbacks=[recorder])
+    if async_mode:
+        request = AsyncMock(return_value=response)
+        mocker.patch.object(type(tool), "get_async_client", AsyncMock(return_value=MagicMock(request=request)))
+        result = await tool.run_async({"url": "https://authority.example"}, config=config)
+    else:
+        request = mocker.patch("requests.request", return_value=response)
+        result = tool.run_sync({"url": "https://authority.example"}, config=config)
+    assert result.status.value == "success"
+    request.assert_called_once()
+    (receipt,) = recorder.receipts
+    assert receipt["status"] == ("succeeded" if success else "failed")
+    assert receipt["usage_units"] == 7
+    assert Decimal(receipt["cost_usd"]) == Decimal("0.07")
+    assert receipt["url"] == "https://authority.example"
+    assert "private-image" not in str(receipt)
+    assert "document text" not in str(receipt)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_mode", [False, True])
+@pytest.mark.parametrize(
+    "formats,data,success",
+    [
+        (["links"], {"links": ["https://asset.example/private-link"]}, True),
+        (["links"], {"links": []}, True),
+        (["links"], {"links": {}}, False),
+        (["summary"], {"summary": "private summary"}, True),
+        (["summary"], {"summary": " "}, False),
+        (["screenshot"], {"screenshot": "https://asset.example/private-image.png"}, True),
+        ([{"type": "screenshot", "fullPage": True}], {"screenshot": "https://asset.example/private-image.png"}, True),
+        (["screenshot"], {"screenshot": " "}, False),
+        ([{"type": "json"}], {"json": {}}, True),
+        ([{"type": "json"}], {"json": False}, True),
+        ([{"type": "json"}], {"json": 0}, True),
+        ([{"type": "json", "schema": {"type": ["object", "null"]}}], {"json": None}, True),
+        ([{"type": "json"}], {}, False),
+        ([{"type": []}], {"json": {"private": "unrecognized representation"}}, False),
+        (["branding"], {"branding": {}}, True),
+        (["changeTracking"], {"changeTracking": {}}, True),
+        (["markdown", "links"], {"markdown": "", "links": ["https://asset.example/private-link"]}, False),
+        (["markdown", "screenshot"], {"markdown": "", "screenshot": "https://asset.example/private-image.png"}, False),
+        (["html", "json"], {"html": "", "json": {"private": "extracted data"}}, False),
+        (["markdown", "links"], {"markdown": "private document", "links": []}, True),
+        (["markdown", "html"], {"markdown": "", "html": "<p>private document</p>"}, True),
+        (["html"], {"html": "<p>access denied</p>", "metadata": {"statusCode": 403}}, False),
+        (["markdown"], {"markdown": "private document", "metadata": {"statusCode": 404}}, False),
+        (["html"], {"html": "<p>private document</p>", "metadata": {"statusCode": 200}}, True),
+        (["markdown"], {"markdown": "private cached document", "metadata": {"statusCode": 304}}, True),
+    ],
+)
+async def test_firecrawl_requested_formats_keep_text_read_grounding_separate_from_nontext_success(
+    mocker, async_mode, formats, data, success
+):
+    response = MagicMock(status_code=200, headers={})
+    response.json.return_value = {
+        "success": True,
+        "data": {**data, "metadata": {"creditsUsed": 7, **data.get("metadata", {})}},
+    }
+    tool = FirecrawlTool(connection=Firecrawl(api_key="test"), formats=formats, unit_price_usd=0.01)
+    recorder = ReceiptRecorder()
+    config = RunnableConfig(callbacks=[recorder])
+    if async_mode:
+        request = AsyncMock(return_value=response)
+        mocker.patch.object(type(tool), "get_async_client", AsyncMock(return_value=MagicMock(request=request)))
+        result = await tool.run_async({"url": "https://authority.example/notice.pdf"}, config=config)
+    else:
+        request = mocker.patch("requests.request", return_value=response)
+        result = tool.run_sync({"url": "https://authority.example/notice.pdf"}, config=config)
+    assert result.status.value == "success"
+    request.assert_called_once()
+    (receipt,) = recorder.receipts
+    assert receipt["status"] == ("succeeded" if success else "failed")
+    assert receipt["usage_units"] == 7
+    assert Decimal(receipt["cost_usd"]) == Decimal("0.07")
+    assert "private" not in str(receipt)
+    assert receipt["url"] == "https://authority.example/notice.pdf"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_mode", [False, True])
+async def test_firecrawl_uses_per_call_hidden_formats_without_changing_the_shared_configuration(mocker, async_mode):
+    tool = FirecrawlTool(connection=Firecrawl(api_key="test"), formats=["markdown", "links"])
+    response = MagicMock(status_code=200, headers={})
+    response.json.return_value = {"success": True, "data": {"links": []}}
+    recorder = ReceiptRecorder()
+    config = RunnableConfig(callbacks=[recorder])
+    if async_mode:
+        request = AsyncMock(return_value=response)
+        mocker.patch.object(type(tool), "get_async_client", AsyncMock(return_value=MagicMock(request=request)))
+        await tool.run_async({"url": "https://authority.example", "formats": ["links"]}, config=config)
+        await tool.run_async({"url": "https://authority.example"}, config=config)
+    else:
+        request = mocker.patch("requests.request", return_value=response)
+        tool.run_sync({"url": "https://authority.example", "formats": ["links"]}, config=config)
+        tool.run_sync({"url": "https://authority.example"}, config=config)
+    assert [item["status"] for item in recorder.receipts] == ["succeeded", "failed"]
+    assert [call.kwargs["json"]["formats"] for call in request.call_args_list] == [["links"], ["markdown", "links"]]
+    assert tool.formats == ["markdown", "links"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_mode", [False, True])
+async def test_jina_unexpected_binary_response_stays_failed_and_never_enters_receipt(mocker, async_mode):
+    response = MagicMock(status_code=200, headers={"Content-Type": "image/png", "X-Usage-Tokens": "7"})
+    response.content = b"private-image-bytes"
+    response.json.side_effect = ValueError("not JSON")
+    tool = JinaScrapeTool(connection=Jina(api_key="test"), response_format="screenshot", unit_price_usd=0.01)
+    recorder = ReceiptRecorder()
+    config = RunnableConfig(callbacks=[recorder])
+    if async_mode:
+        request = AsyncMock(return_value=response)
+        mocker.patch.object(type(tool), "get_async_client", AsyncMock(return_value=MagicMock(request=request)))
+        result = await tool.run_async({"url": "https://authority.example"}, config=config)
+    else:
+        request = mocker.patch("requests.request", return_value=response)
+        result = tool.run_sync({"url": "https://authority.example"}, config=config)
+    assert result.status.value == "failure"
+    request.assert_called_once()
+    (receipt,) = recorder.receipts
+    assert receipt["status"] == "failed"
+    assert "cost_usd" not in receipt
+    assert "usage_units" not in receipt
+    assert "private-image-bytes" not in str(receipt)
+
+
 def test_transport_failure_receipt_excludes_exception_text(mocker):
     mocker.patch("requests.request", side_effect=RuntimeError("private-secret-failure"))
     recorder = ReceiptRecorder()

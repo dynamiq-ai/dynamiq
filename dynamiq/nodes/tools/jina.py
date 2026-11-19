@@ -338,11 +338,7 @@ class JinaScrapeTool(ConnectionNode):
             )
             raise self._wrap_request_exception(e)
 
-        usable = (
-            isinstance(scrape_result, str)
-            and bool(scrape_result.strip())
-            and self.response_format not in (JinaResponseFormat.SCREENSHOT, JinaResponseFormat.PAGESHOT)
-        )
+        usable = isinstance(scrape_result, str) and bool(scrape_result.strip())
         emit_research_receipt(
             self,
             config,
@@ -393,11 +389,7 @@ class JinaScrapeTool(ConnectionNode):
             )
             raise self._wrap_request_exception(e)
 
-        usable = (
-            isinstance(scrape_result, str)
-            and bool(scrape_result.strip())
-            and self.response_format not in (JinaResponseFormat.SCREENSHOT, JinaResponseFormat.PAGESHOT)
-        )
+        usable = isinstance(scrape_result, str) and bool(scrape_result.strip())
         emit_research_receipt(
             self,
             config,

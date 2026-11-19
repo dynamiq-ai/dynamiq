@@ -704,7 +704,8 @@ class BaseLLM(ConnectionNode):
             total_tokens_cost_usd=total_tokens_cost_usd,
             cache_read_input_tokens=cache_read_input_tokens,
             cache_creation_input_tokens=cache_creation_input_tokens,
-            complete=observed,
+            # Native SDK parsing can normalize estimates or malformed raw counters into integers.
+            complete=observed and getattr(completion, "_dynamiq_usage_observed", True) is not False,
         )
 
     @classmethod

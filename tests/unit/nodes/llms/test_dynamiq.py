@@ -336,6 +336,32 @@ class TestRetryConfiguration:
 
 
 class TestResponse:
+    @pytest.mark.parametrize("run_async", [False, True])
+    @pytest.mark.parametrize("streaming", [False, True])
+    @pytest.mark.parametrize(
+        "usage, complete",
+        [
+            (None, False),
+            ({"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost": 0}, True),
+            ({"prompt_tokens": "11", "completion_tokens": "7", "total_tokens": "18", "cost": 0}, False),
+        ],
+        ids=["missing", "reported-zero", "coerced"],
+    )
+    def test_raw_usage_confidence_survives_the_shared_native_transport(
+        self, router, monkeypatch, run_async, streaming, usage, complete
+    ):
+        monkeypatch.setitem(globals(), "USAGE", usage)
+        collector = Collector()
+        node = make_node(streaming=StreamingConfig(enabled=streaming), num_retries=0)
+        result = run(node, run_async, collector)
+
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        assert result.output["content"] == "Hello"
+        assert len(router.requests) == 1
+        assert collector.usage["complete"] is complete
+        assert collector.usage["total_tokens_cost_usd"] == (None if usage is None else 0)
+        assert "_dynamiq_usage_observed" not in json.dumps(result.to_dict())
+
     @pytest.mark.parametrize("streaming", [False, True])
     def test_takes_usage_and_cost_from_the_router(self, router, streaming):
         collector = Collector()
