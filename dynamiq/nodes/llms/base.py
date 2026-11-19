@@ -1566,6 +1566,13 @@ class BaseLLM(ConnectionNode):
             return True
         return any(indicator in error_str for indicator in LLM_CONNECTION_ERROR_INDICATORS)
 
+    @staticmethod
+    def _is_hook_blocked_error(exception_type: type[Exception]) -> bool:
+        # Deferred: hooks import BaseLLM, and ordinary runs need no agents import.
+        from dynamiq.nodes.agents.exceptions import HookBlockedException
+
+        return issubclass(exception_type, HookBlockedException)
+
     def _should_trigger_fallback(self, exception_type: type[Exception], exception_message: str | None = None) -> bool:
         """Determine if exception should trigger fallback to secondary LLM.
 
@@ -1577,6 +1584,9 @@ class BaseLLM(ConnectionNode):
             bool: True if fallback should be triggered, False otherwise.
         """
         if not self.fallback or not self.fallback.enabled or not self.fallback.llm:
+            return False
+
+        if self._is_hook_blocked_error(exception_type):
             return False
 
         triggers = set(self.fallback.triggers)
@@ -1681,6 +1691,9 @@ class BaseLLM(ConnectionNode):
                 output=transformed_output,
             )
 
+        if fallback_result.error and self._is_hook_blocked_error(fallback_result.error.type):
+            return fallback_result
+
         logger.error(f"LLM {self.name} - {self.id}: Fallback LLM ({fallback_llm.model}) failed.")
         return result
 
@@ -1756,6 +1769,9 @@ class BaseLLM(ConnectionNode):
                 input=result.input,
                 output=transformed_output,
             )
+
+        if fallback_result.error and self._is_hook_blocked_error(fallback_result.error.type):
+            return fallback_result
 
         logger.error(f"LLM {self.name} - {self.id}: Fallback LLM ({fallback_llm.model}) failed.")
         return result

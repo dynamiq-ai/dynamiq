@@ -29,6 +29,7 @@ from dynamiq.nodes.agents.hooks import (
     current_hook_ctx,
 )
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.llms.base import FallbackConfig
 from dynamiq.nodes.node import CachingConfig, ErrorHandling, InputTransformer
 from dynamiq.nodes.operators import SubWorkflow
 from dynamiq.nodes.tools import RemoteContextTool
@@ -424,6 +425,136 @@ def make_hook(response=None):
     hook._client = MagicMock()
     hook._client.post.return_value = reply
     return hook, reply
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("failure", ["deny", "timeout", "invalid"])
+async def test_remote_model_stop_never_uses_an_allowed_fallback(mocker, asynchronous, failure):
+    hook, reply = make_hook()
+    client = hook._client
+    if failure == "timeout":
+        client.post.side_effect = [TimeoutError("private-upstream-detail"), reply]
+    else:
+        first = b'{"allow":false}' if failure == "deny" else b'{"allow":"invalid"}'
+        reply.iter_content.side_effect = [[first], [b'{"allow":true}']]
+    fallback = OpenAI(connection=OpenAIConnection(api_key="test"), model="gpt-4o", error_handling={"max_retries": 0})
+    primary = OpenAI(
+        connection=OpenAIConnection(api_key="test"),
+        model="gpt-4o-mini",
+        prompt=Prompt(messages=[Message(role="user", content="private-fixture")]),
+        fallback=FallbackConfig(llm=fallback, enabled=True),
+        error_handling={"max_retries": 0},
+    )
+    response = ModelResponse(choices=[{"message": {"content": "must not fall back"}}])
+    primary_transport = mocker.patch.object(primary, "_acall_completion" if asynchronous else "_call_completion")
+    fallback_transport = mocker.patch.object(
+        fallback,
+        "_acall_completion" if asynchronous else "_call_completion",
+        AsyncMock(return_value=response) if asynchronous else MagicMock(return_value=response),
+    )
+    ctx = context()
+    ctx.hooks = [("lifecycle", hook)]
+    token = current_hook_ctx.set(ctx)
+    try:
+        result = (
+            await primary.run_async({}, config=ctx.config) if asynchronous else primary.run_sync({}, config=ctx.config)
+        )
+    finally:
+        current_hook_ctx.reset(token)
+    assert result.status == RunnableStatus.FAILURE
+    assert issubclass(result.error.type, HookStopException)
+    assert client.post.call_count == 1
+    primary_transport.assert_not_called()
+    fallback_transport.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_provider_failure_can_still_use_an_authorized_fallback(mocker, asynchronous):
+    hook, _ = make_hook()
+    fallback = OpenAI(connection=OpenAIConnection(api_key="test"), model="gpt-4o", error_handling={"max_retries": 0})
+    primary = OpenAI(
+        connection=OpenAIConnection(api_key="test"),
+        model="gpt-4o-mini",
+        prompt=Prompt(messages=[Message(role="user", content="private-fixture")]),
+        fallback=FallbackConfig(llm=fallback, enabled=True),
+        error_handling={"max_retries": 0},
+    )
+    primary_transport = mocker.patch.object(
+        primary,
+        "_acall_completion" if asynchronous else "_call_completion",
+        (
+            AsyncMock(side_effect=ValueError("synthetic provider failure"))
+            if asynchronous
+            else MagicMock(side_effect=ValueError("synthetic provider failure"))
+        ),
+    )
+    response = ModelResponse(choices=[{"message": {"content": "authorized fallback"}}])
+    fallback_transport = mocker.patch.object(
+        fallback,
+        "_acall_completion" if asynchronous else "_call_completion",
+        AsyncMock(return_value=response) if asynchronous else MagicMock(return_value=response),
+    )
+    ctx = context()
+    ctx.hooks = [("lifecycle", hook)]
+    token = current_hook_ctx.set(ctx)
+    try:
+        result = (
+            await primary.run_async({}, config=ctx.config) if asynchronous else primary.run_sync({}, config=ctx.config)
+        )
+    finally:
+        current_hook_ctx.reset(token)
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == "authorized fallback"
+    assert primary_transport.call_count == fallback_transport.call_count == 1
+    assert hook._client.post.call_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("nested", [False, True])
+async def test_fallback_guard_stop_survives_nested_fallback_and_agent_node_retries(mocker, asynchronous, nested):
+    hook, reply = make_hook()
+    client = hook._client
+    agent = build_agent(hooks=[hook], tools=[])
+    hook._client = client
+    agent.error_handling.max_retries = 1
+    use_mode(agent, InferenceMode.FUNCTION_CALLING)
+    fallback = OpenAI(connection=OpenAIConnection(api_key="test"), model="gpt-4o", error_handling={"max_retries": 0})
+    agent.llm.fallback = FallbackConfig(llm=fallback, enabled=True)
+    response = provider_response(InferenceMode.FUNCTION_CALLING, final_step("must not bypass denial"))
+    reply.iter_content.side_effect = [
+        [b'{"allow":true}'],
+        [b'{"allow":false}'],
+        [b'{"allow":true}'],
+        [b'{"allow":true}'],
+    ]
+    provider = mocker.patch.object(
+        agent.llm,
+        "_call_completion",
+        side_effect=[ValueError("synthetic provider failure"), response],
+    )
+    fallback_provider = mocker.patch.object(fallback, "_call_completion", return_value=response)
+    nested_provider = None
+    if nested:
+        last = OpenAI(
+            connection=OpenAIConnection(api_key="test"), model="gpt-4o-mini", error_handling={"max_retries": 0}
+        )
+        fallback.fallback = FallbackConfig(llm=last, enabled=True)
+        nested_provider = mocker.patch.object(last, "_call_completion", return_value=response)
+    result = (
+        await agent.run_async({"input": "hello"}, config=context().config)
+        if asynchronous
+        else agent.run_sync({"input": "hello"}, config=context().config)
+    )
+    assert result.status == RunnableStatus.FAILURE
+    assert issubclass(result.error.type, HookStopException)
+    assert provider.call_count == 1
+    fallback_provider.assert_not_called()
+    if nested_provider is not None:
+        nested_provider.assert_not_called()
+    assert client.post.call_count == 2
 
 
 def context():
