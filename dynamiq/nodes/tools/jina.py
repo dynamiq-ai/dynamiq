@@ -7,7 +7,13 @@ from dynamiq.connections import Jina
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.tools.research_receipts import emit_research_receipt
+from dynamiq.nodes.tools.research_receipts import (
+    UnitPrice,
+    emit_research_receipt,
+    estimated_receipt_cost,
+    receipt_header_units,
+    receipt_units,
+)
 from dynamiq.nodes.tools.utils import http_error_detail
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
@@ -112,6 +118,9 @@ class JinaScrapeTool(ConnectionNode):
     connection: Jina
     timeout: int = 60
     url: str | None = Field(None, description="URL to scrape")
+    unit_price_usd: UnitPrice | None = Field(
+        default=None, description="Declared estimated USD per Reader token. No price is assumed when unset."
+    )
 
     # Advanced options
     target_selector: str | None = Field(None, description="CSS selector to focus on specific elements")
@@ -238,15 +247,19 @@ class JinaScrapeTool(ConnectionNode):
             recoverable=True,
         )
 
-    def _extract_scrape_payload(self, response: Any) -> tuple[Any, dict, dict]:
-        """Pull ``(scrape_result, links, images)`` from the response.
+    def _extract_scrape_payload(self, response: Any) -> tuple[Any, dict, dict, int | None]:
+        """Pull content and optional reported tokens from one decoded response.
 
         Kept separate from rendering so this stays inside the request try/except (it
         calls ``response.json()`` and ``_parse_response``, both of which can raise on
         malformed payloads), while output formatting runs outside.
         """
         response_data = response.json()
-        return self._parse_response(response_data)
+        tokens = receipt_header_units(response.headers.get("X-Usage-Tokens"))
+        if tokens is None and isinstance(response_data, dict) and isinstance(data := response_data.get("data"), dict):
+            if isinstance(usage := data.get("usage"), dict):
+                tokens = receipt_units(usage.get("tokens"))
+        return *self._parse_response(response_data), tokens
 
     def _render_scrape_output(
         self,
@@ -311,7 +324,7 @@ class JinaScrapeTool(ConnectionNode):
                 json=request_body,
             )
             response.raise_for_status()
-            scrape_result, links, images = self._extract_scrape_payload(response)
+            scrape_result, links, images, usage_tokens = self._extract_scrape_payload(response)
         except Exception as e:
             emit_research_receipt(
                 self,
@@ -340,6 +353,9 @@ class JinaScrapeTool(ConnectionNode):
             url=request_body["url"],
             status_code=getattr(response, "status_code", None),
             error_code=None if usable else "empty_content",
+            usage_units=usage_tokens,
+            usage_unit="tokens",
+            cost_usd=estimated_receipt_cost(usage_tokens, self.unit_price_usd),
         )
         return self._render_scrape_output(scrape_result, links, images, request_body, headers)
 
@@ -363,7 +379,7 @@ class JinaScrapeTool(ConnectionNode):
                 json=request_body,
             )
             response.raise_for_status()
-            scrape_result, links, images = self._extract_scrape_payload(response)
+            scrape_result, links, images, usage_tokens = self._extract_scrape_payload(response)
         except Exception as e:
             emit_research_receipt(
                 self,
@@ -392,6 +408,9 @@ class JinaScrapeTool(ConnectionNode):
             url=request_body["url"],
             status_code=getattr(response, "status_code", None),
             error_code=None if usable else "empty_content",
+            usage_units=usage_tokens,
+            usage_unit="tokens",
+            cost_usd=estimated_receipt_cost(usage_tokens, self.unit_price_usd),
         )
         return self._render_scrape_output(scrape_result, links, images, request_body, headers)
 

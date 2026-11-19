@@ -8,7 +8,7 @@ from dynamiq.connections import Firecrawl
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.tools.research_receipts import emit_research_receipt
+from dynamiq.nodes.tools.research_receipts import UnitPrice, emit_research_receipt, estimated_receipt_cost
 from dynamiq.nodes.tools.utils import http_error_detail
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
@@ -191,6 +191,10 @@ class FirecrawlTool(ConnectionNode):
     is_parallel_execution_allowed: bool = True
     connection: Firecrawl
     url: str | None = None
+    unit_price_usd: UnitPrice | None = Field(
+        default=None,
+        description="Declared estimated USD per reported Firecrawl credit. No price is assumed when unset.",
+    )
     input_schema: ClassVar[type[FirecrawlInputSchema]] = FirecrawlInputSchema
 
     formats: list[str | dict[str, Any]] = Field(default_factory=lambda: ["markdown"])
@@ -422,6 +426,9 @@ class FirecrawlTool(ConnectionNode):
             final_url=metadata.get("url") or metadata.get("sourceURL"),
             status_code=metadata.get("statusCode") or getattr(response, "status_code", None),
             error_code=None if usable else "empty_content",
+            usage_units=metadata.get("creditsUsed"),
+            usage_unit="credits",
+            cost_usd=estimated_receipt_cost(metadata.get("creditsUsed"), self.unit_price_usd),
         )
         return self._format_scrape_output(url, scrape_result)
 
@@ -474,5 +481,8 @@ class FirecrawlTool(ConnectionNode):
             final_url=metadata.get("url") or metadata.get("sourceURL"),
             status_code=metadata.get("statusCode") or getattr(response, "status_code", None),
             error_code=None if usable else "empty_content",
+            usage_units=metadata.get("creditsUsed"),
+            usage_unit="credits",
+            cost_usd=estimated_receipt_cost(metadata.get("creditsUsed"), self.unit_price_usd),
         )
         return self._format_scrape_output(url, scrape_result)
