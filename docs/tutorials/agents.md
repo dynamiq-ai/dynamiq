@@ -221,11 +221,22 @@ their output is a fixture, not proof that authorization succeeded.
 The `Dynamiq` router LLM maps an explicitly configured `num_retries` to the
 OpenAI SDK client's per-call `max_retries`; unset values preserve that client's
 default. These internal HTTP retries still occur inside one SDK invocation.
+The native `OpenAI` transport honors the same setting. Native `OpenAI` and
+`DynamiqRouter` share the standard SDK raw-response interface to distinguish reported
+usage from local compatibility estimates without another HTTP request. Non-streaming
+calls add the SDK's `x-stainless-raw-response: true` header; the streaming path already
+uses that interface. Authentication, configured headers and request bodies remain
+intact, but the header set is not byte-for-byte identical. The `OpenAI` node has the
+existing `use_native_sdk=False` option for a gateway that rejects this SDK header;
+`DynamiqRouter` has no corresponding opt-out.
 
-LLM usage metadata now includes `complete`: false means required provider counters
-were absent or invalid, even when compatibility token fields contain zero.
-Unknown prices remain null. Hosts must preserve this distinction when recording
-spend after failures or cancellation.
+LLM usage metadata includes `complete`: missing or invalid required counters and
+known local token estimates make it false, even when compatibility token or cost
+fields remain populated. Reported zero counters are distinct from missing usage.
+Completeness describes what the SDK adapter can observe, including usage supplied
+by upstream libraries; it is not invoice reconciliation or proof about hidden
+library/provider work. Unknown prices remain null. Hosts must preserve these
+distinctions when recording spend after failures or cancellation.
 
 `dynamiq.nodes.tools.RemoteContextTool` uses the same fixed connection transport for
 host-authorized tools. Configure its `parameters` with an object JSON Schema. It
@@ -237,9 +248,20 @@ private data.
 
 Exa search, Jina search/Reader and Firecrawl scrape emit a `research_receipt`
 callback observation. It contains bounded query/URL/status metadata from the
-actual transport, independently of the model-facing output format. Empty scraped
-content does not count as a successful fetch. Receipts contain no document
-bodies, headers or error messages. Exa's `costDollars.total`, when valid, is
+actual transport, independently of rendering the model-facing output. Receipt
+status describes delivery of the configured requested representation, not a
+universal claim that document text was read. When Firecrawl requests any of
+`markdown`, `html` or `rawHtml`, at least one requested text representation must
+be nonempty; a links list, screenshot or extracted JSON cannot substitute for
+missing text. An observed unsuccessful source HTTP status also fails that
+receipt, even when Firecrawl's API returns HTTP 200.
+
+Non-text-only requests can succeed with a valid corresponding payload, including
+an empty links list or JSON object. Hosts that use receipts as document-read
+evidence must pin and verify text-extraction formats in their deployed workflow.
+Jina screenshot/pageshot keep their existing JSON image-URL output; no image is
+fetched, hashed or stored in a receipt. Receipts contain no document bodies,
+asset URLs, image bytes, headers or error messages. Exa's `costDollars.total`, when valid, is
 retained as its estimated `cost_usd`, not an invoice. Jina Reader reports
 `usage_units` in `tokens` from `X-Usage-Tokens` or `data.usage.tokens`;
 Firecrawl reports `credits` from `data.metadata.creditsUsed`. Zero differs from
