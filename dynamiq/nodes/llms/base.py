@@ -939,7 +939,24 @@ class BaseLLM(ConnectionNode):
 
     def _build_streamed_response(self, chunks: list, messages: list[dict], stream: Any = None) -> "ModelResponse":
         """Assemble a streamed response's chunks into one complete response. `stream` is the response they came from."""
-        return self._stream_chunk_builder(chunks=chunks, messages=messages)
+        # The builder may estimate missing/zero counters; snapshot what reached the SDK before it runs.
+        reported = {field: set() for field in ("prompt_tokens", "completion_tokens")}
+        for chunk in chunks:
+            usage = self._extract_usage(chunk)
+            for field, values in reported.items():
+                value = self._usage_value(usage, field)
+                if type(value) is int and value >= 0:
+                    values.add(value)
+        response = self._stream_chunk_builder(chunks=chunks, messages=messages)
+        if response is None:
+            return response
+        usage = self._extract_usage(response)
+        observed = all(
+            type(value := self._usage_value(usage, field)) is int and value in values
+            for field, values in reported.items()
+        )
+        object.__setattr__(response, "_dynamiq_usage_observed", observed)
+        return response
 
     def _get_response_format_and_tools(
         self,
