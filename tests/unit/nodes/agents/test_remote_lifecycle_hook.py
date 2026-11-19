@@ -10,6 +10,7 @@ import yaml
 from litellm import ModelResponse
 from pydantic import ValidationError
 
+from dynamiq.cache import CacheConfig
 from dynamiq.callbacks.base import BaseCallbackHandler
 from dynamiq.connections import Exa as ExaConnection
 from dynamiq.connections import Http, HTTPMethod
@@ -28,7 +29,8 @@ from dynamiq.nodes.agents.hooks import (
     current_hook_ctx,
 )
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.node import ErrorHandling, InputTransformer
+from dynamiq.nodes.node import CachingConfig, ErrorHandling, InputTransformer
+from dynamiq.nodes.operators import SubWorkflow
 from dynamiq.nodes.tools import RemoteContextTool
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
@@ -36,6 +38,7 @@ from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Message, MessageRole, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.mocking import MockConfig
 from dynamiq.workflow import Workflow
 from tests.helpers.agent_hooks import (
     ALL_MODES,
@@ -57,6 +60,206 @@ class CallRecorder(BaseCallbackHandler):
     def on_node_execute_run(self, serialized, **kwargs):
         if call := kwargs.get("model_call"):
             self.calls.append(call)
+
+
+class CachedSearchTool(SearchTool):
+    async def execute_async(self, input_data, config=None, **kwargs):
+        return self.execute(input_data, config, **kwargs)
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("kind", ["tool", "model"])
+@pytest.mark.parametrize("control_on_config", [False, True])
+@pytest.mark.asyncio
+async def test_guarded_node_cannot_return_another_principals_cached_result(
+    mocker, asynchronous, kind, control_on_config
+):
+    cache = CacheConfig(backend="Redis")
+    config = RunnableConfig(cache=cache)
+    if kind == "tool":
+        node = CachedSearchTool(result="private-first-user", caching=CachingConfig(enabled=True))
+        execute = mocker.spy(type(node), "execute")
+        data = {"query": "same query"}
+    else:
+        node = OpenAI(
+            connection=OpenAIConnection(api_key="test"),
+            model="gpt-4o",
+            caching=CachingConfig(enabled=True),
+            prompt=Prompt(messages=[Message(role=MessageRole.USER, content="same prompt")]),
+        )
+        reply = provider_response(InferenceMode.XML, final_step("private-first-user"))
+        execute = (
+            mocker.patch.object(node, "_acall_completion", new=AsyncMock(return_value=reply))
+            if asynchronous
+            else mocker.patch.object(node, "_call_completion", return_value=reply)
+        )
+        data = {}
+    first = await node.run_async(data, config=config) if asynchronous else node.run_sync(data, config=config)
+    assert first.status == RunnableStatus.SUCCESS
+    hook, _ = make_hook({"allow": False})
+    ctx = context()
+    ctx.hooks = [("lifecycle", hook)]
+    guarded_config = ctx.config if control_on_config else config
+    guarded_config.cache = cache
+    token = current_hook_ctx.set(ctx)
+    try:
+        result = (
+            await node.run_async(data, config=guarded_config)
+            if asynchronous
+            else node.run_sync(data, config=guarded_config)
+        )
+    finally:
+        current_hook_ctx.reset(token)
+    assert result.status == RunnableStatus.FAILURE
+    assert "private-first-user" not in str(result.output)
+    assert hook._client.post.call_count == 1
+    assert hook._client.post.call_args.kwargs["json"]["phase"] == f"before_{kind}"
+    assert execute.call_count == 1
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.asyncio
+async def test_controlled_nodes_bypass_cache_but_unguarded_cache_is_unchanged(mocker, asynchronous):
+    tool = CachedSearchTool(result="first-user", caching=CachingConfig(enabled=True))
+    execute = mocker.spy(type(tool), "execute")
+    config = RunnableConfig(cache=CacheConfig(backend="Redis"))
+    data = {"query": "same"}
+    first = await tool.run_async(data, config=config) if asynchronous else tool.run_sync(data, config=config)
+    assert first.output == {"content": "first-user"}
+    tool.result = "controlled-user"
+    controlled = config.model_copy(update={"trusted_context": {"control_context": {"token": "new-user"}}})
+    second = await tool.run_async(data, config=controlled) if asynchronous else tool.run_sync(data, config=controlled)
+    assert second.output == {"content": "controlled-user"}
+    third = await tool.run_async(data, config=config) if asynchronous else tool.run_sync(data, config=config)
+    assert third.output == {"content": "first-user"}
+    assert execute.call_count == 2
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.asyncio
+async def test_authorized_cache_bypass_checks_once_and_does_not_overwrite_shared_cache(mocker, asynchronous):
+    tool = CachedSearchTool(result="first-user", caching=CachingConfig(enabled=True))
+    execute = mocker.spy(type(tool), "execute")
+    cache = CacheConfig(backend="Redis")
+    config = RunnableConfig(cache=cache)
+    first = (
+        await tool.run_async({"query": "same"}, config=config)
+        if asynchronous
+        else tool.run_sync({"query": "same"}, config=config)
+    )
+    assert first.output == {"content": "first-user"}
+    hook, _ = make_hook()
+    ctx = context()
+    ctx.config.cache = cache
+    ctx.hooks = [("lifecycle", hook)]
+    tool.result = "second-user"
+    token = current_hook_ctx.set(ctx)
+    try:
+        second = (
+            await tool.run_async({"query": "same"}, config=ctx.config)
+            if asynchronous
+            else tool.run_sync({"query": "same"}, config=ctx.config)
+        )
+    finally:
+        current_hook_ctx.reset(token)
+    assert second.status == RunnableStatus.SUCCESS
+    assert second.output == {"content": "second-user"}
+    assert hook._client.post.call_count == 1
+    third = (
+        await tool.run_async({"query": "same"}, config=config)
+        if asynchronous
+        else tool.run_sync({"query": "same"}, config=config)
+    )
+    assert third.output == {"content": "first-user"}
+    assert execute.call_count == 2
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.asyncio
+async def test_agent_own_hook_prevents_whole_agent_cache_from_bypassing_missing_control(mocker, asynchronous):
+    hook, _ = make_hook()
+    client = hook._client
+    agent = build_agent(hooks=[hook], tools=[])
+    hook._client = client
+    agent.caching.enabled = True
+    use_mode(agent, InferenceMode.XML)
+    provider = mocker.patch.object(
+        agent.llm, "_call_completion", return_value=provider_response(InferenceMode.XML, final_step("private"))
+    )
+    config = context().config
+    config.cache = CacheConfig(backend="Redis")
+    first = (
+        await agent.run_async({"input": "same"}, config=config)
+        if asynchronous
+        else agent.run_sync({"input": "same"}, config=config)
+    )
+    assert first.status == RunnableStatus.SUCCESS
+    missing_control = config.model_copy(update={"trusted_context": {}})
+    second = (
+        await agent.run_async({"input": "same"}, config=missing_control)
+        if asynchronous
+        else agent.run_sync({"input": "same"}, config=missing_control)
+    )
+    assert second.status == RunnableStatus.FAILURE
+    assert provider.call_count == 1
+    assert hook._client.post.call_count == 1
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.asyncio
+async def test_controlled_subworkflow_parent_cannot_replay_its_guarded_child_cache(mocker, asynchronous):
+    hook, _ = make_hook()
+    agent = build_agent(hooks=[hook], tools=[])
+    use_mode(agent, InferenceMode.XML)
+    provider = mocker.patch.object(
+        OpenAI, "_call_completion", return_value=provider_response(InferenceMode.XML, final_step("private"))
+    )
+    check = mocker.patch(
+        "dynamiq.nodes.agents.hooks.remote.post_control_json",
+        side_effect=lambda client, connection, payload, *args: {
+            "allow": payload["control_context"]["token"] == "first"
+        },
+    )
+    parent = SubWorkflow(flow=Flow(nodes=[agent]), caching=CachingConfig(enabled=True))
+    config = RunnableConfig(cache=CacheConfig(backend="Redis"), trusted_context={"control_context": {"token": "first"}})
+    first = (
+        await parent.run_async({"input": "same"}, config=config)
+        if asynchronous
+        else parent.run_sync({"input": "same"}, config=config)
+    )
+    assert first.status == RunnableStatus.SUCCESS
+    denied = config.model_copy(update={"trusted_context": {"control_context": {"token": "revoked"}}})
+    second = (
+        await parent.run_async({"input": "same"}, config=denied)
+        if asynchronous
+        else parent.run_sync({"input": "same"}, config=denied)
+    )
+    assert second.status == RunnableStatus.FAILURE
+    assert provider.call_count == 1
+    assert check.call_count == 2
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.asyncio
+async def test_operator_authored_mock_does_no_external_work_or_lifecycle_request(mocker, asynchronous):
+    hook, _ = make_hook({"allow": False})
+    ctx = context()
+    ctx.hooks = [("lifecycle", hook)]
+    tool = CachedSearchTool(mock=MockConfig(enabled=True, output={"content": "operator fixture"}))
+    execute = mocker.spy(type(tool), "execute")
+    token = current_hook_ctx.set(ctx)
+    try:
+        result = (
+            await tool.run_async({"query": "same"}, config=ctx.config)
+            if asynchronous
+            else tool.run_sync({"query": "same"}, config=ctx.config)
+        )
+    finally:
+        current_hook_ctx.reset(token)
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output == {"content": "operator fixture"}
+    execute.assert_not_called()
+    hook._client.post.assert_not_called()
 
 
 def test_real_workflow_keeps_platform_run_identity_for_hooks_and_remote_child_tools():

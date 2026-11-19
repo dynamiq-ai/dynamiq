@@ -96,18 +96,19 @@ class FakeRouter:
     """The router's chat completions and model list endpoints on an httpx MockTransport.
 
     It answers the first chat completion requests with the `errors` status codes, then each later one with the next
-    of `replies`, the last one repeated. Its errors say "x-should-retry: false", so the SDK does not retry them itself.
+    of `replies`, the last one repeated. By default errors say "x-should-retry: false", so the SDK does not retry them.
     It lists `models`, answering with `models_status`, and keeps those requests in `model_requests`.
     """
 
     def __init__(self):
         self.replies: list[dict] = [HELLO]
-        self.errors: list[int] = []
+        self.errors: list[int | Exception] = []
         self.requests: list[httpx.Request] = []
         self.models: list[dict] = []
         self.models_status = 200
         self.model_requests: list[httpx.Request] = []
         self._replied = 0
+        self.retryable_errors = False
 
     @property
     def bodies(self) -> list[dict]:
@@ -121,9 +122,12 @@ class FakeRouter:
             return httpx.Response(200, json={"object": "list", "data": self.models})
         self.requests.append(request)
         if self.errors:
+            error = self.errors.pop(0)
+            if isinstance(error, Exception):
+                raise error
             return httpx.Response(
-                self.errors.pop(0),
-                headers={"x-should-retry": "false"},
+                error,
+                headers={"x-should-retry": "true" if self.retryable_errors else "false"},
                 json={"error": {"code": "provider_error", "message": "boom"}},
             )
         body = json.loads(request.content)
@@ -305,6 +309,30 @@ class TestRequest:
         assert not litellm_only & set(body)
         assert body["tools"] == tools
         assert body["max_completion_tokens"] == 100
+
+
+class TestRetryConfiguration:
+    @pytest.mark.parametrize("run_async", [False, True])
+    @pytest.mark.parametrize("failure", ["http500", "connect"])
+    @pytest.mark.parametrize("limit, expected", [(None, 3), (0, 1), (1, 2), (3, 4)])
+    def test_maps_node_retry_limit_to_the_router_sdk_without_changing_shared_client(
+        self, router, monkeypatch, run_async, limit, expected, failure
+    ):
+        from openai._base_client import BaseClient
+
+        monkeypatch.setattr(BaseClient, "_calculate_retry_timeout", lambda *args, **kwargs: 0)
+        router.errors = [
+            500 if failure == "http500" else httpx.ConnectError("synthetic connect error") for _ in range(6)
+        ]
+        router.retryable_errors = True
+        node = make_node(num_retries=limit)
+        original = node.client.max_retries
+        result = run(node, run_async)
+
+        assert result.status == RunnableStatus.FAILURE
+        assert len(router.requests) == expected
+        assert node.client.max_retries == original
+        assert all("num_retries" not in body for body in router.bodies)
 
 
 class TestResponse:

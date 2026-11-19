@@ -204,6 +204,24 @@ Provider libraries may retry an already-dispatched HTTP operation internally;
 configure those libraries' retry limits separately when an individual HTTP attempt
 needs to be controlled.
 
+SDK node output caching is bypassed when the run supplies the `control_context`
+key, or the node has an authored/inherited remote lifecycle hook. This prevents
+cached model, tool or whole-agent results from bypassing live authorization or
+being reused across opaque private contexts. Supplying the required trusted
+context at the top level also covers cached composite parents before their child
+agent installs its hooks. Unguarded runs that omit the key retain their cache
+behavior. An admission layer may normalize an opted-in request's absent context
+to an empty object; those runs conservatively bypass caching too. Do not strip
+authorization context to reenable caching.
+Hosts wrapping guarded agents in arbitrary Python closures must still supply that
+top-level context and control their own caches; the SDK cannot discover hidden
+calls. Operator-authored mocks suppress external work and lifecycle requests;
+their output is a fixture, not proof that authorization succeeded.
+
+The `Dynamiq` router LLM maps an explicitly configured `num_retries` to the
+OpenAI SDK client's per-call `max_retries`; unset values preserve that client's
+default. These internal HTTP retries still occur inside one SDK invocation.
+
 LLM usage metadata now includes `complete`: false means required provider counters
 were absent or invalid, even when compatibility token fields contain zero.
 Unknown prices remain null. Hosts must preserve this distinction when recording
