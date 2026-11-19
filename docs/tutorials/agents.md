@@ -192,6 +192,14 @@ Authorization runs once immediately before each SDK-controlled model transport
 request or tool execution, including automatic node retries, parameter recovery,
 and context-summary requests. Other agent hooks still run at their normal logical
 boundaries; a skipped or policy-blocked tool does not make an authorization request.
+Tool selection retains the agent's authored identity, including MCP server groups
+and sub-agent metadata, after a factory resolves or a parallel call clones its
+target. Every node group dispatched as an agent tool is checked. A composite
+tool's ordinary tool descendants and internal model requests retain their own
+checks, using their own identities. This dispatch state is private to the current
+call and is not serialized. A remote context failure raises a terminal node error;
+it does not become an observation for another model turn. Explicit node retry policies
+remain separate; those attempts still receive their own authorization check.
 Provider libraries may retry an already-dispatched HTTP operation internally;
 configure those libraries' retry limits separately when an individual HTTP attempt
 needs to be controlled.

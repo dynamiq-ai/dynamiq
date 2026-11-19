@@ -61,7 +61,7 @@ from dynamiq.nodes.agents.hooks import (
     resolve_hook,
 )
 from dynamiq.nodes.agents.hooks.builtin import map_strings
-from dynamiq.nodes.agents.hooks.remote import RemoteLifecycleHook
+from dynamiq.nodes.agents.hooks.remote import RemoteLifecycleHook, remote_tool_dispatch
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.agents.shared_session import (
@@ -2559,12 +2559,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     with run_ctx.lock:
                         run_ctx.pending_calls[reservation_id] = (run_ctx, hook_call(merged_input))
                 try:
-                    tool_result = tool_to_run.run(
-                        input_data=merged_input,
-                        config=tool_config,
-                        run_depends=deepcopy(self._run_depends),
-                        **child_kwargs,
-                    )
+                    with remote_tool_dispatch(tool_to_run, hook_call(merged_input)):
+                        tool_result = tool_to_run.run(
+                            input_data=merged_input,
+                            config=tool_config,
+                            run_depends=deepcopy(self._run_depends),
+                            **child_kwargs,
+                        )
                 finally:
                     if run_ctx is not None:
                         with run_ctx.lock:

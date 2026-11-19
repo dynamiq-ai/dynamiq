@@ -5,6 +5,7 @@ import pytest
 
 from dynamiq.connections import Http, HTTPMethod
 from dynamiq.flows import Flow
+from dynamiq.nodes.exceptions import NodeFailedException
 from dynamiq.nodes.tools import RemoteContextTool
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.workflow import Workflow
@@ -69,7 +70,7 @@ def test_remote_tool_forwards_host_context_separately_and_validates_arguments():
 
 
 @pytest.mark.parametrize("failure", ["missing_context", "redirect", "transport", "oversized"])
-def test_remote_tool_fails_closed_without_exposing_credentials(failure):
+def test_remote_tool_fails_closed_without_exposing_credentials(failure, caplog):
     tool, response = make_tool()
     config = trusted_config()
     if failure == "missing_context":
@@ -82,8 +83,11 @@ def test_remote_tool_fails_closed_without_exposing_credentials(failure):
         response.iter_content.return_value = [b"x" * (1024 * 1024 + 1)]
     result = tool.run({"kind": "alerts"}, config=config)
     assert result.status == RunnableStatus.FAILURE
-    assert "private-control-token" not in str(result.output)
-    assert "endpoint-body" not in str(result.output)
+    assert result.error.type is NodeFailedException
+    assert result.error.recoverable is False
+    assert result.error.message == "Remote context tool request failed"
+    assert "private-control-token" not in caplog.text
+    assert "endpoint-body" not in caplog.text
 
 
 def test_remote_tool_yaml_round_trip_preserves_schema_and_fixed_connection(tmp_path):
