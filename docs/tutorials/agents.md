@@ -213,8 +213,19 @@ Exa search, Jina search/Reader and Firecrawl scrape emit a `research_receipt`
 callback observation. It contains bounded query/URL/status metadata from the
 actual transport, independently of the model-facing output format. Empty scraped
 content does not count as a successful fetch. Receipts contain no document
-bodies, headers or error messages. These providers do not report USD per
-request, so an absent receipt price is unknown usage.
+bodies, headers or error messages. Exa's `costDollars.total`, when valid, is
+retained as its estimated `cost_usd`, not an invoice. Jina Reader reports
+`usage_units` in `tokens` from `X-Usage-Tokens` or `data.usage.tokens`;
+Firecrawl reports `credits` from `data.metadata.creditsUsed`. Zero differs from
+unknown, and malformed optional accounting stays unknown. No USD conversion is
+inferred from units; an absent receipt price remains unknown usage.
+
+Jina Reader and Firecrawl scrape optionally accept a static `unit_price_usd`
+configuration, in USD per reported token or credit respectively. It defaults to
+`None`. Only observed units multiplied by an explicitly declared, validated rate
+produce an estimated receipt cost. The rate is a JSON number, survives YAML
+loading (including explicit zero), and is not a model input or upstream parameter.
+It is a host-declared accounting estimate, not provider billing reconciliation.
 
 Jina Reader has optional `page_timeout_seconds`, `proxy` (`auto`, `none`, or a
 two-letter country), `token_budget`, `wait_for_selector`, and

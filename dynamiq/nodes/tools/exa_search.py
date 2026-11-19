@@ -677,6 +677,11 @@ class ExaTool(ConnectionNode):
             query=input_data.query,
             status_code=getattr(response, "status_code", None),
             result_urls=[item.get("url") for item in search_result.get("results", []) if isinstance(item, dict)],
+            cost_usd=(
+                (search_result.get("costDollars") or {}).get("total")
+                if isinstance(search_result.get("costDollars"), dict)
+                else None
+            ),
         )
         return self._format_search_response(search_result)
 
@@ -723,5 +728,10 @@ class ExaTool(ConnectionNode):
             query=input_data.query,
             status_code=getattr(response, "status_code", None),
             result_urls=[item.get("url") for item in search_result.get("results", []) if isinstance(item, dict)],
+            cost_usd=(
+                (search_result.get("costDollars") or {}).get("total")
+                if isinstance(search_result.get("costDollars"), dict)
+                else None
+            ),
         )
         return self._format_search_response(search_result)
