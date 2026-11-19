@@ -3,7 +3,7 @@ import json
 import pytest
 
 from dynamiq.connections import Dynamiq
-from dynamiq.storages.memory import CompositeMemoryStore, DynamiqMemoryStore, MemoryStoreError
+from dynamiq.storages.memory import CompositeMemoryStore, DynamiqMemoryStore, MemoryHit, MemoryStoreError
 from dynamiq.storages.memory.composite import normalize_path
 from tests.unit.storages.memory.conftest import FakeMemoryStore
 
@@ -243,3 +243,27 @@ def test_same_id_on_a_different_deployment_is_allowed():
     )
 
     assert list(composite.routes) == ["user/", "team/"]
+
+
+def test_search_merges_routes_and_mounts_paths():
+    user, team = FakeMemoryStore(), FakeMemoryStore()
+    user.write("oncall.md", "billing billing weekend")
+    team.write("oncall.md", "billing rota")
+    store = CompositeMemoryStore(routes={"user/": user, "team/": team})
+
+    assert [hit.path for hit in store.search("billing weekend")] == ["user/oncall.md", "team/oncall.md"]
+    assert [hit.path for hit in store.search("billing", prefix="team/")] == ["team/oncall.md"]
+
+
+def test_search_keeps_each_route_order_among_equal_scores():
+    class NewestFirst(FakeMemoryStore):
+        def search(self, query, prefix="", limit=10, user_id=None):
+            return [MemoryHit(path="zeta.md", score=1.0), MemoryHit(path="alpha.md", score=1.0)]
+
+    store = CompositeMemoryStore(routes={"user/": NewestFirst(), "team/": FakeMemoryStore()})
+
+    assert [hit.path for hit in store.search("billing")] == ["user/zeta.md", "user/alpha.md"]
+
+
+def test_scope_of_names_the_route_holding_a_path(store):
+    assert store.scope_of("team/playbook/refunds.md") == "team/"

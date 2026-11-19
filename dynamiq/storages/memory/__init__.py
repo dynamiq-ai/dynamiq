@@ -5,6 +5,7 @@ from dynamiq.utils.lazy_imports import lazy_exports
 if TYPE_CHECKING:
     from .base import (
         MemoryEntry,
+        MemoryHit,
         MemoryNotFoundError,
         MemoryPermissionError,
         MemoryStore,
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
 
 _LAZY_EXPORTS = {
     "MemoryEntry": ".base",
+    "MemoryHit": ".base",
     "MemoryNotFoundError": ".base",
     "MemoryPermissionError": ".base",
     "MemoryStore": ".base",
@@ -31,6 +33,7 @@ lazy_exports(__name__, _LAZY_EXPORTS, globals())
 
 __all__ = [
     "MemoryEntry",
+    "MemoryHit",
     "MemoryNotFoundError",
     "MemoryPermissionError",
     "MemoryStore",

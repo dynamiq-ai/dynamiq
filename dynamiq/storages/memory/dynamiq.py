@@ -11,7 +11,7 @@ from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections import HTTPMethod
 from dynamiq.utils.logger import logger
 
-from .base import MemoryEntry, MemoryNotFoundError, MemoryPermissionError, MemoryStore, MemoryStoreError
+from .base import MemoryEntry, MemoryHit, MemoryNotFoundError, MemoryPermissionError, MemoryStore, MemoryStoreError
 
 
 class DynamiqMemoryStore(MemoryStore):
@@ -170,6 +170,35 @@ class DynamiqMemoryStore(MemoryStore):
             raise MemoryNotFoundError(f"Memory '{path}' not found", operation="read", path=path)
         return data.get("content") or ""
 
+    def search(
+        self, query: str, prefix: str = "", limit: int = 10, user_id: str | None = None
+    ) -> builtins.list[MemoryHit]:
+        """Search memories under ``prefix`` with the platform's full-text index.
+
+        Raises:
+            MemoryStoreError: If the platform predates search, so the caller can fall back to list and read.
+        """
+        try:
+            data = self._request(
+                HTTPMethod.GET,
+                "/search",
+                params={"q": query, "path": prefix, "limit": limit, "user_id": self._scope(user_id, "search", prefix)},
+                operation="search",
+                memory_path=prefix,
+            )
+        except MemoryNotFoundError:
+            raise MemoryStoreError(
+                "This memory cannot be searched yet; use action 'list' and 'read' instead.", operation="search"
+            ) from None
+        return [
+            MemoryHit(
+                **self._to_entry(hit).model_dump(),
+                snippet=hit.get("snippet") or "",
+                score=float(hit.get("score") or 0.0),
+            )
+            for hit in (data or [])
+        ]
+
     def write(self, path: str, content: str, user_id: str | None = None) -> MemoryEntry:
         """Create or replace one memory.
 
@@ -223,7 +252,12 @@ class DynamiqMemoryStore(MemoryStore):
             content = data.get("content")
             size = len(content) if content is not None else fallback_size
 
-        return MemoryEntry(path=data.get("path") or fallback_path, size=size, updated_at=updated_at)
+        return MemoryEntry(
+            path=data.get("path") or fallback_path,
+            size=size,
+            updated_at=updated_at,
+            description=data.get("description") or "",
+        )
 
 
 def _error_detail(response: Any) -> str:

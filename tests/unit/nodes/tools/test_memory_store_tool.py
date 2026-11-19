@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -5,7 +6,7 @@ import pytest
 from dynamiq.connections import Dynamiq
 from dynamiq.nodes.tools.memory_store_tool import MemoryStoreTool, MemoryStoreToolInputSchema
 from dynamiq.runnables import RunnableStatus
-from dynamiq.storages.memory import CompositeMemoryStore, DynamiqMemoryStore
+from dynamiq.storages.memory import CompositeMemoryStore, DynamiqMemoryStore, MemoryEntry, MemoryStoreError
 from tests.unit.storages.memory.conftest import FakeMemoryStore
 
 
@@ -284,3 +285,78 @@ def test_the_listing_of_an_undescribed_memory_still_shows_paths(backend):
     content(tool, action="write", path="notes.md", content="x")
 
     assert "notes.md" in content(tool, action="list")
+
+
+def test_a_large_listing_describes_the_most_recent_memories_that_fit():
+    start = datetime(2026, 1, 1)
+    entries = [
+        MemoryEntry(
+            path=f"notes/n{i:03}.md",
+            size=10,
+            description="Note on one topic. " * 6,
+            updated_at=start + timedelta(days=i),
+        )
+        for i in range(250)
+    ]
+    entries[0] = entries[0].model_copy(update={"updated_at": None})
+    entries[1] = entries[1].model_copy(update={"updated_at": entries[1].updated_at.replace(tzinfo=timezone.utc)})
+
+    class ManyMemories(FakeMemoryStore):
+        def list(self, prefix: str = "", user_id: str | None = None):
+            return entries
+
+    result = run(MemoryStoreTool(backend=ManyMemories()), action="list")
+    text = result.output["content"]
+    described = text.count(" — Note on one topic.")
+
+    assert 0 < described < 250
+    assert "notes/n249.md — Note on one topic." in text
+    assert "  - notes/n000.md (10 chars)" in text
+    assert f"250 memories; the {described} changed most recently are described." in text
+    assert len(result.output["paths"]) == 250
+
+
+def test_search_finds_a_memory_by_its_content(tool):
+    content(tool, action="write", path="team/oncall.md", content="Billing pages go to Marco at weekends.")
+    content(tool, action="write", path="preferences.md", content="Prefers British English.")
+
+    result = run(tool, action="search", query="who is paged at weekends")
+
+    assert result.output["paths"] == ["team/oncall.md"]
+    assert "No memories" in content(tool, action="search", query="kubernetes")
+
+
+def test_search_needs_a_query(tool):
+    result = run(tool, action="search", query="  ")
+
+    assert result.status == RunnableStatus.FAILURE
+
+
+def test_write_names_memories_on_the_same_topic(tool):
+    content(tool, action="write", path="playbook/refund-policy.md", content="Refunds over 500 EUR need approval.")
+
+    text = content(tool, action="write", path="playbook/refund-exceptions.md", content="Exceptions for refunds.")
+
+    assert "Memories on nearby topics: playbook/refund-policy.md" in text
+
+
+def test_write_names_no_memory_that_shares_only_a_common_word(tool):
+    content(tool, action="write", path="customers/larkspur.md", content="Larkspur renews in March.")
+
+    assert "nearby topics" not in content(tool, action="write", path="team/march-offsite-agenda.md", content="Agenda.")
+
+
+def test_write_names_related_memories_only_inside_its_own_memory():
+    user, team = FakeMemoryStore(), FakeMemoryStore()
+    team.write("timezone-policy.md", "Everyone schedules in the user's timezone.")
+    tool = MemoryStoreTool(backend=CompositeMemoryStore(routes={"user/": user, "team/": team}))
+
+    assert content(tool, action="write", path="user/timezone.md", content="Works from Kyiv.") == (
+        "Remembered in 'user/timezone.md'."
+    )
+
+
+def test_write_survives_a_failing_search(tool, backend, monkeypatch):
+    monkeypatch.setattr(type(backend), "search", MagicMock(side_effect=MemoryStoreError("index down")))
+
+    assert content(tool, action="write", path="a.md", content="x") == "Remembered in 'a.md'."

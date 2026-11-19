@@ -9,10 +9,13 @@ built on top of it.
 
 import abc
 import builtins
+import re
 from datetime import datetime
 from typing import Any, ClassVar, Hashable
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+
+_WORD = re.compile(r"\w+")
 
 
 class MemoryStoreError(Exception):
@@ -34,11 +37,28 @@ class MemoryPermissionError(MemoryStoreError):
 
 
 class MemoryEntry(BaseModel):
-    """One memory, without its content."""
+    """One memory, without its content.
+
+    ``description`` is what the store reports the memory holds: its ``description`` property, else its
+    first line of prose. A store that reports none leaves it empty.
+    """
 
     path: str
     size: int = 0
     updated_at: datetime | None = None
+    description: str = ""
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _absent_is_empty(cls, value: Any) -> Any:
+        return "" if value is None else value
+
+
+class MemoryHit(MemoryEntry):
+    """A memory that matches a search, with the passage that matched."""
+
+    snippet: str = ""
+    score: float = 0.0
 
 
 class MemoryStore(abc.ABC, BaseModel):
@@ -80,6 +100,10 @@ class MemoryStore(abc.ABC, BaseModel):
         data = self.model_dump(exclude=exclude, **kwargs)
         data["type"] = self.type
         return data
+
+    def scope_of(self, path: str) -> str:
+        """The prefix of the memory that holds ``path``; links between memories resolve inside it."""
+        return ""
 
     def describe_namespaces(self) -> dict[str, str]:
         """Path prefix -> what lives there.
@@ -126,6 +150,29 @@ class MemoryStore(abc.ABC, BaseModel):
     @abc.abstractmethod
     def delete(self, path: str, user_id: str | None = None) -> bool:
         """Delete one memory. Returns False when it was not there."""
+
+    def search(
+        self, query: str, prefix: str = "", limit: int = 10, user_id: str | None = None
+    ) -> builtins.list[MemoryHit]:
+        """Memories under ``prefix`` that hold the words of ``query``, best first.
+
+        The default reads every memory and counts the query's words in each, which is fine for the few
+        hundred short notes a memory holds; a store with an index of its own overrides it.
+        """
+        words = {word for word in _WORD.findall(query.lower()) if len(word) > 2}
+        if not words:
+            return []
+        hits: builtins.list[MemoryHit] = []
+        for entry in self.list(prefix, user_id):
+            try:
+                text = f"{entry.path} {self.read(entry.path, user_id)}".lower()
+            except MemoryNotFoundError:
+                continue
+            score = sum(1 for word in words if word in text) / len(words)
+            if score:
+                hits.append(MemoryHit(**entry.model_dump(), score=score))
+        hits.sort(key=lambda hit: (-hit.score, hit.path))
+        return hits[:limit]
 
 
 class MemoryStoreConfig(BaseModel):

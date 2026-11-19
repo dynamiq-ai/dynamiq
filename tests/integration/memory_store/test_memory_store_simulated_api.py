@@ -66,3 +66,27 @@ def test_store_error_branches(memory_store):
     with pytest.raises(MemoryStoreError) as excinfo:
         CompositeMemoryStore(routes={"user/": store}).write("outside.md", "x", user_id=USER_ID)
     assert "user/" in str(excinfo.value)
+
+
+@pytest.mark.integration
+def test_search_against_the_api(memory_store):
+    """The search route and the description every entry carries, as the client calls them."""
+    store = memory_store
+    store.write("team/oncall.md", "Billing pages go to Marco at weekends.", user_id=USER_ID)
+    store.write("preferences.md", "Prefers British English.", user_id=USER_ID)
+
+    hits = store.search("weekend billing", user_id=USER_ID)
+    assert [hit.path for hit in hits] == ["team/oncall.md"]
+    assert hits[0].snippet and hits[0].score > 0
+    assert hits[0].description == "Billing pages go to Marco at weekends."
+
+
+@pytest.mark.integration
+def test_search_on_a_platform_without_it(monkeypatch):
+    """A platform older than search answers its route with 404; the agent is told what to use instead."""
+    simulator = MemoryStoreAPISimulator(search_enabled=False)
+    monkeypatch.setattr(DynamiqConnection, "connect", lambda self: simulator)
+    store = _store(MEMORY_STORE_ID, "What you learn about this user.")
+
+    with pytest.raises(MemoryStoreError, match="cannot be searched yet"):
+        store.search("anything", user_id=USER_ID)

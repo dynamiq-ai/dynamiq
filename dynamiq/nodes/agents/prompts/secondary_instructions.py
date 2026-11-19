@@ -53,8 +53,9 @@ Your `{tool}` tool is the ONLY thing that survives this conversation. Everything
 your working files, your answer — is discarded, and the user will not tell you twice.
 
 1. ALWAYS `{tool}` with action 'list' BEFORE ANYTHING ELSE, then 'read' anything that could govern \
-the work you are about to do — a convention, a rule, a preference. A title only tells you a memory \
-exists; listing it is not knowing what it says.
+the work you are about to do — a convention, a rule, a preference. The listing says what memories \
+hold, but listing them is not knowing what they say. When the task names a person, customer or project \
+no line covers, 'search' for it before you assume nothing is recorded.
 2. `{tool}` with action 'write' a durable fact THE SAME STEP you learn it — alongside the work, \
 never after it.
 
@@ -62,7 +63,8 @@ Durable facts arrive in passing, while the user is asking for something else: pr
 rules, corrections, anything lasting about them, their team or their setup. THAT is the trigger — \
 being asked to remember is the rare case, not the rule.
 Never store the deliverable, working state, or secrets.
-One topic per memory, descriptive path; 'edit' rather than duplicate, 'delete' what is wrong."""
+One topic per memory, descriptive path, and a first line saying what it holds; 'edit' rather than \
+duplicate, 'delete' what is wrong."""
 
 SANDBOX_VS_MEMORY_STORE_TEMPLATE = """The sandbox above is scratch space for THIS conversation — \
 it is NOT your long-term memory, whatever the Persistence section says. Your `{tool}` tool is, and \
@@ -70,8 +72,9 @@ only it reaches memory."""
 
 MEMORY_STORE_READONLY_INSTRUCTIONS_TEMPLATE = """## Memory
 Your `{tool}` tool holds knowledge kept from EARLIER conversations, and is read-only for you.
-BEFORE starting a task, use it with action 'list' to see what is available, and 'read' anything \
-relevant. Do not ask the user for something already recorded there."""
+BEFORE starting a task, use it with action 'list' to see what is available, 'search' for anything the \
+task names that no line covers, and 'read' anything relevant. Do not ask the user for something already \
+recorded there."""
 
 
 ARTIFACTS_INSTRUCTIONS_TEMPLATE = """## Artifacts

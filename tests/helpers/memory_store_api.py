@@ -43,7 +43,9 @@ class MemoryStoreAPISimulator:
 
     max_content_length = 8192
 
-    def __init__(self):
+    def __init__(self, search_enabled: bool = True):
+        # A platform older than search has no route for it and answers 404.
+        self.search_enabled = search_enabled
         # Keyed as the platform scopes memories, so two stores or users never share one.
         self.memories: dict[tuple[str, str, str], str] = {}
         self.calls: list[tuple[str, str]] = []
@@ -68,11 +70,32 @@ class MemoryStoreAPISimulator:
         scope = (url.split("/memory-stores/")[1].split("/")[0], source["user_id"])
         if url.endswith("/files/content"):
             return self._read(scope, path)
+        if url.endswith("/files/search"):
+            if not self.search_enabled:
+                return _error(404, "not_found", "Not found.")
+            return self._search(scope, params.get("q") or "", params.get("path") or "", int(params.get("limit") or 10))
         if verb == "PUT":
             return self._write(scope, body)
         if verb == "DELETE":
             return self._delete(scope, path)
         return self._list(scope, params.get("path") or "")
+
+    def _search(self, scope, query, prefix, limit):
+        """Any word of the query, best match first; the platform ranks with full-text search."""
+        if not query.strip():
+            return _error(400, "bad_input", "Query is required.")
+        words = {w for w in query.lower().split() if len(w) > 2}
+        hits = []
+        for store, user, path in self.memories:
+            if (store, user) != scope or not path.startswith(prefix):
+                continue
+            text = f"{path} {self.memories[(store, user, path)]}".lower()
+            score = sum(w in text for w in words)
+            if score:
+                hit = self._as_json(scope, path, include_content=False)
+                hits.append({**hit, "score": float(score), "snippet": self.memories[(store, user, path)][:80]})
+        hits.sort(key=lambda h: (-h["score"], h["path"]))
+        return _Response(200, {"data": hits[:limit]})
 
     def _read(self, scope, path):
         if (*scope, path) not in self.memories:
@@ -120,6 +143,8 @@ class MemoryStoreAPISimulator:
             "path": path,
             "size": len(self.memories[(*scope, path)]),
             "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            # The platform reads a description property, else the first line of prose.
+            "description": self.memories[(*scope, path)].strip().splitlines()[0][:160],
         }
         if include_content:
             payload["content"] = self.memories[(*scope, path)]

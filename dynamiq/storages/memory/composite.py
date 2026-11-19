@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import ConfigDict, Field, field_validator
 
-from .base import MemoryEntry, MemoryNotFoundError, MemoryStore, MemoryStoreError
+from .base import MemoryEntry, MemoryHit, MemoryNotFoundError, MemoryStore, MemoryStoreError
 
 
 def normalize_path(path: str) -> str:
@@ -104,6 +104,10 @@ class CompositeMemoryStore(MemoryStore):
         }
         return data
 
+    def scope_of(self, path: str) -> str:
+        store, inner, route = self._resolve(path)
+        return f"{route}{store.scope_of(inner)}"
+
     def describe_namespaces(self) -> dict[str, str]:
         """Compose the routes' descriptions the same way routing composes the routes themselves."""
         described: dict[str, str] = {}
@@ -141,31 +145,29 @@ class CompositeMemoryStore(MemoryStore):
         return [entry.model_copy(update={"path": f"{route}{entry.path}"}) for entry in entries]
 
     def list(self, prefix: str = "", user_id: str | None = None) -> builtins.list[MemoryEntry]:
-        """List memories under ``prefix``: the route it falls inside, plus every route at or below it.
+        """List memories under ``prefix``: the route it falls inside, plus every route at or below it."""
+        entries: list[MemoryEntry] = []
+        for route, store, inner in self._routes_under(prefix):
+            entries.extend(self._mounted(route, store.list(inner, user_id)))
+        return entries
 
-        Both must answer, or a nested route's memories are missing from a listing of their own
-        directory. They never overlap: an enclosing route is no longer than ``prefix``, one at or
-        below it is strictly longer.
+    def _routes_under(self, prefix: str) -> builtins.list[tuple[str, MemoryStore, str]]:
+        """Each route a listing or search of ``prefix`` reaches, with the prefix inside that route.
+
+        Both the route ``prefix`` falls inside and every route at or below it, or a nested route's
+        memories go missing from a listing of their own directory. They never overlap: an enclosing
+        route is no longer than ``prefix``, one at or below it is strictly longer.
         """
         normalized = normalize_path(prefix)
         scope = f"{normalized}/" if normalized else ""
-        entries: list[MemoryEntry] = []
-
+        reached: list[tuple[str, MemoryStore, str]] = []
         if normalized:
             for route in sorted(self.routes, key=len, reverse=True):
                 if normalized.startswith(route):
-                    entries.extend(
-                        self._mounted(route, self.routes[route].list(normalized[len(route) :], user_id))
-                    )
+                    reached.append((route, self.routes[route], normalized[len(route) :]))
                     break
-
-        entries.extend(
-            entry
-            for route, store in self.routes.items()
-            if route.startswith(scope)
-            for entry in self._mounted(route, store.list(user_id=user_id))
-        )
-        return entries
+        reached.extend((route, store, "") for route, store in self.routes.items() if route.startswith(scope))
+        return reached
 
     def read(self, path: str, user_id: str | None = None) -> str:
         """Read from the memory owning the path."""
@@ -175,6 +177,23 @@ class CompositeMemoryStore(MemoryStore):
         except MemoryNotFoundError:
             # Name the path the caller used, not the one inside the store.
             raise MemoryNotFoundError(f"Memory '{route}{inner}' not found", operation="read", path=path) from None
+
+    def search(
+        self, query: str, prefix: str = "", limit: int = 10, user_id: str | None = None
+    ) -> builtins.list[MemoryHit]:
+        """Search every route the prefix reaches, as ``list`` does, and merge the hits by score.
+
+        A score is the share of the query's words a memory holds, so scores for one query compare
+        across routes; equal scores keep each route's own order.
+        """
+        hits: list[MemoryHit] = []
+        for route, store, inner in self._routes_under(prefix):
+            hits.extend(
+                hit.model_copy(update={"path": f"{route}{hit.path}"})
+                for hit in store.search(query, inner, limit, user_id)
+            )
+        hits.sort(key=lambda hit: -hit.score)
+        return hits[:limit]
 
     def write(self, path: str, content: str, user_id: str | None = None) -> MemoryEntry:
         """Write to the memory owning the path."""
