@@ -4,6 +4,7 @@
 client, URLs, query strings and status codes.
 """
 
+import hashlib
 import json as json_lib
 from datetime import datetime, timezone
 
@@ -52,8 +53,9 @@ class MemoryStoreAPISimulator:
 
     def request(self, verb, url, headers=None, params=None, json=None, timeout=None):
         self.calls.append((verb, url))
+        headers = headers or {}
 
-        if not (headers or {}).get("Authorization"):
+        if not headers.get("Authorization"):
             return _error(401, "unauthorized", "Missing bearer token.")
 
         params, body = params or {}, json or {}
@@ -75,8 +77,19 @@ class MemoryStoreAPISimulator:
                 return _error(404, "not_found", "Not found.")
             return self._search(scope, params.get("q") or "", params.get("path") or "", int(params.get("limit") or 10))
         if verb == "PUT":
+            if headers.get("If-None-Match") == "*" and (*scope, body.get("path")) in self.memories:
+                return _error(412, "precondition_failed", "A memory already exists at this path.")
+            if_match = headers.get("If-Match", "").strip('"')
+            if if_match:
+                current = self.memories.get((*scope, body.get("path")))
+                if current is None or hashlib.sha256(current.encode()).hexdigest() != if_match:
+                    return _error(412, "precondition_failed", "The memory changed since it was read.")
             return self._write(scope, body)
         if verb == "DELETE":
+            if_match = headers.get("If-Match", "").strip('"')
+            current = self.memories.get((*scope, path))
+            if if_match and current is not None and hashlib.sha256(current.encode()).hexdigest() != if_match:
+                return _error(412, "precondition_failed", "The memory changed since it was read.")
             return self._delete(scope, path)
         return self._list(scope, params.get("path") or "")
 
@@ -145,6 +158,7 @@ class MemoryStoreAPISimulator:
             "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             # The platform reads a description property, else the first line of prose.
             "description": self.memories[(*scope, path)].strip().splitlines()[0][:160],
+            "content_hash": hashlib.sha256(self.memories[(*scope, path)].encode()).hexdigest(),
         }
         if include_content:
             payload["content"] = self.memories[(*scope, path)]

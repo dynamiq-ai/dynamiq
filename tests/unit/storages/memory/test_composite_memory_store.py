@@ -6,6 +6,7 @@ from dynamiq.connections import Dynamiq
 from dynamiq.storages.memory import (
     CompositeMemoryStore,
     DynamiqMemoryStore,
+    MemoryChangedError,
     MemoryHit,
     MemoryLink,
     MemoryNote,
@@ -293,3 +294,23 @@ def test_read_note_mounts_links_on_the_note_route():
     assert note.path == "team/a.md"
     assert [link.path for link in note.links] == ["team/b.md", None]
     assert note.backlinks == ["team/c.md"]
+
+
+def test_write_if_unchanged_follows_the_route(store, team):
+    store.write("team/oncall.md", "Marco covers weekends.")
+    note = store.read_note("team/oncall.md")
+    team.write("oncall.md", "Priya covers weekends.")
+
+    with pytest.raises(MemoryChangedError):
+        store.write_if_unchanged("team/oncall.md", "Ana covers weekends.", note.content_hash)
+
+    fresh = store.read_note("team/oncall.md")
+    entry = store.write_if_unchanged("team/oncall.md", "Ana covers weekends.", fresh.content_hash)
+    assert entry.path == "team/oncall.md"
+    assert team.read("oncall.md") == "Ana covers weekends."
+
+    with pytest.raises(MemoryChangedError):
+        store.write_if_unchanged("team/oncall.md", "Created over it.", None)
+    assert (
+        store.write_if_unchanged("team/escalation.md", "Escalate after 15 minutes.", None).path == "team/escalation.md"
+    )

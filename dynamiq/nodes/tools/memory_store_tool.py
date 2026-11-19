@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -12,10 +12,12 @@ from dynamiq.nodes.tools.utils import find_positions
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.memory.base import (
+    MemoryChangedError,
     MemoryEntry,
     MemoryNotFoundError,
     MemoryStore,
     MemoryStoreError,
+    content_hash,
     render_namespaces,
 )
 from dynamiq.types.cancellation import check_cancellation
@@ -29,10 +31,11 @@ Actions:
 - search: memories that mention something, best first, with the passage that matched. Requires 'query': \
 the words the answer would use. Optional 'path' narrows to a prefix.
 - read: the content of one memory, and the memories it links to and that link to it. Requires 'path'.
-- write: create or replace a memory. Requires 'path' and 'content'.
+- write: create a memory, or replace one you have read in this conversation. Requires 'path' and 'content'.
 - edit: change part of a memory in place. Requires 'path', 'find' and 'replace'; 'find' must match \
 exactly one place unless 'replace_all' is true.
-- delete: remove a memory that has become wrong. Requires 'path'.
+- delete: remove a memory that has become wrong. Requires 'path'. A memory you have read is deleted only \
+while it still says what you read.
 
 Record facts that will still matter next time — preferences, standing rules, corrections, anything \
 lasting about the user, their team or their setup. Never the deliverable, working state, or secrets.
@@ -134,6 +137,11 @@ class MemoryStoreTool(Node):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[MemoryStoreToolInputSchema]] = MemoryStoreToolInputSchema
 
+    # The content hash of each memory as this run last read or wrote it, "" from a store that reports
+    # none. A write over a memory changed since, or over one this run never saw, is refused instead of
+    # erasing someone else's change.
+    _seen: dict[str, str] = PrivateAttr(default_factory=dict)
+
     @model_validator(mode="after")
     def describe_memories(self):
         """Tell the model what each memory holds, straight from the stores themselves.
@@ -156,6 +164,9 @@ class MemoryStoreTool(Node):
     @property
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"backend": True}
+
+    def reset_run_state(self):
+        self._seen = {}
 
     def execute(
         self, input_data: MemoryStoreToolInputSchema, config: RunnableConfig | None = None, **kwargs
@@ -240,9 +251,11 @@ class MemoryStoreTool(Node):
         try:
             note = self.backend.read_note(path, user_id)
         except MemoryNotFoundError:
+            self._seen.pop(path, None)
             raise ToolExecutionException(
                 f"No memory at '{path}'. Use action 'list' to see what exists.", recoverable=True
             ) from None
+        self._seen[path] = note.content_hash
         linked = [link.path for link in note.links if link.path]
         unresolved = [link.target for link in note.links if not link.path]
         around = []
@@ -275,7 +288,7 @@ class MemoryStoreTool(Node):
 
         Best effort: a failed search must not turn a saved memory into a failed call.
         """
-        entry = self.backend.write(path, content, user_id)
+        entry = self._store(path, content, user_id)
         message = f"Remembered in '{entry.path}'."
         # Within the memory that holds it: links resolve inside one memory, and a route's name is not a topic.
         scope = self.backend.scope_of(entry.path)
@@ -297,11 +310,12 @@ class MemoryStoreTool(Node):
     def _edit(self, input_data: MemoryStoreToolInputSchema, user_id: str | None = None) -> dict[str, Any]:
         path, find, replace = input_data.path, input_data.find, input_data.replace
         try:
-            current = self.backend.read(path, user_id)
+            note = self.backend.read_note(path, user_id)
         except MemoryNotFoundError:
             raise ToolExecutionException(
                 f"No memory at '{path}' to edit. Use action 'write' to create it.", recoverable=True
             ) from None
+        current = note.content
 
         # Candidate positions, not str.count: overlapping matches ("---" in "-----") are what
         # make a find string ambiguous, and counting only non-overlapping ones would let an
@@ -319,13 +333,52 @@ class MemoryStoreTool(Node):
             )
 
         updated = current.replace(find, replace) if input_data.replace_all else current.replace(find, replace, 1)
-        self.backend.write(path, updated, user_id)
+        self._seen[path] = note.content_hash
+        self._store(path, updated, user_id)
         # How many a replacement actually consumes is str.count's question, not the candidates'.
         changed = current.count(find) if input_data.replace_all else 1
         return {"content": f"Updated '{path}' ({changed} replacement{'s' if changed > 1 else ''})."}
 
+    def _store(self, path: str, content: str, user_id: str | None) -> MemoryEntry:
+        """Write over only what this run has seen: the content it read, or no memory at all."""
+        seen = self._seen.get(path)
+        try:
+            if seen == "":
+                entry = self.backend.write(path, content, user_id)
+            else:
+                entry = self.backend.write_if_unchanged(path, content, seen, user_id)
+        except MemoryChangedError:
+            if seen is None:
+                raise ToolExecutionException(
+                    f"'{path}' already exists and you haven't read it here, so nothing was saved. Read it, then "
+                    "apply your change to what it says.",
+                    recoverable=True,
+                ) from None
+            raise ToolExecutionException(
+                f"'{path}' changed since you read it, so nothing was saved. Read it again and apply your change "
+                "to what it says now.",
+                recoverable=True,
+            ) from None
+        # A store that reports no hash on write still holds what was written, so the next write stays
+        # conditional.
+        self._seen[path] = entry.content_hash or content_hash(content)
+        return entry
+
     def _delete(self, path: str, user_id: str | None = None) -> dict[str, Any]:
-        deleted = self.backend.delete(path, user_id)
+        """Delete over only what this run has seen, when it has read the memory; otherwise delete as asked."""
+        seen = self._seen.get(path)
+        try:
+            if seen:
+                deleted = self.backend.delete_if_unchanged(path, seen, user_id)
+            else:
+                deleted = self.backend.delete(path, user_id)
+        except MemoryChangedError:
+            raise ToolExecutionException(
+                f"'{path}' changed since you read it, so it was not deleted. Read it again and decide whether it "
+                "should still go.",
+                recoverable=True,
+            ) from None
+        self._seen.pop(path, None)
         return {"content": f"Deleted '{path}'." if deleted else f"There was no memory at '{path}'."}
 
 

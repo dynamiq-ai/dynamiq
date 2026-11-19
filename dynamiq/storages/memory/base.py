@@ -9,6 +9,7 @@ built on top of it.
 
 import abc
 import builtins
+import hashlib
 import re
 from datetime import datetime
 from typing import Any, ClassVar, Hashable
@@ -36,19 +37,30 @@ class MemoryPermissionError(MemoryStoreError):
     """Raised when a memory operation is not permitted."""
 
 
+class MemoryChangedError(MemoryStoreError):
+    """Raised when a memory changed or was deleted since it was read, so a write would lose that change."""
+
+
+def content_hash(content: str) -> str:
+    """The hex SHA-256 of a memory's text, as the platform reports it in ``content_hash``."""
+    return hashlib.sha256(content.encode()).hexdigest()
+
+
 class MemoryEntry(BaseModel):
     """One memory, without its content.
 
     ``description`` is what the store reports the memory holds: its ``description`` property, else its
-    first line of prose. A store that reports none leaves it empty.
+    first line of prose. ``content_hash`` identifies the content, for ``write_if_unchanged``. A store that
+    reports neither leaves them empty.
     """
 
     path: str
     size: int = 0
     updated_at: datetime | None = None
     description: str = ""
+    content_hash: str = ""
 
-    @field_validator("description", mode="before")
+    @field_validator("description", "content_hash", mode="before")
     @classmethod
     def _absent_is_empty(cls, value: Any) -> Any:
         return "" if value is None else value
@@ -174,7 +186,51 @@ class MemoryStore(abc.ABC, BaseModel):
         Raises:
             MemoryNotFoundError: If the path does not exist.
         """
-        return MemoryNote(path=path, content=self.read(path, user_id))
+        content = self.read(path, user_id)
+        return MemoryNote(path=path, content=content, content_hash=content_hash(content))
+
+    def write_if_unchanged(
+        self, path: str, content: str, expected_hash: str | None, user_id: str | None = None
+    ) -> MemoryEntry:
+        """Replace a memory only while it still holds the content ``expected_hash`` identifies; with no
+        hash, create it only while no memory exists at the path.
+
+        The default checks, then writes, so a write landing in between goes unnoticed; a store that can
+        check both at once overrides it.
+
+        Raises:
+            MemoryChangedError: If the memory changed or was deleted since it was read, or, with no hash,
+                already exists.
+        """
+        try:
+            current = self.read(path, user_id)
+        except MemoryNotFoundError:
+            if expected_hash is None:
+                return self.write(path, content, user_id)
+            raise MemoryChangedError(f"'{path}' was deleted since it was read", operation="write", path=path) from None
+        if expected_hash is None:
+            raise MemoryChangedError(f"'{path}' already exists", operation="write", path=path)
+        if content_hash(current) != expected_hash:
+            raise MemoryChangedError(f"'{path}' changed since it was read", operation="write", path=path)
+        return self.write(path, content, user_id)
+
+    def delete_if_unchanged(self, path: str, expected_hash: str, user_id: str | None = None) -> bool:
+        """Delete a memory only while it still holds the content ``expected_hash`` identifies. Returns False
+        when it was not there.
+
+        The default checks, then deletes, so a write landing in between goes unnoticed; a store that can
+        check both at once overrides it.
+
+        Raises:
+            MemoryChangedError: If the memory changed since it was read.
+        """
+        try:
+            current = self.read(path, user_id)
+        except MemoryNotFoundError:
+            return False
+        if content_hash(current) != expected_hash:
+            raise MemoryChangedError(f"'{path}' changed since it was read", operation="delete", path=path)
+        return self.delete(path, user_id)
 
     def search(
         self, query: str, prefix: str = "", limit: int = 10, user_id: str | None = None

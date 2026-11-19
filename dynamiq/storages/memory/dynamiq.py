@@ -12,6 +12,7 @@ from dynamiq.connections import HTTPMethod
 from dynamiq.utils.logger import logger
 
 from .base import (
+    MemoryChangedError,
     MemoryEntry,
     MemoryHit,
     MemoryLink,
@@ -98,6 +99,7 @@ class DynamiqMemoryStore(MemoryStore):
         json: dict[str, Any] | None = None,
         operation: str = "",
         memory_path: str = "",
+        extra_headers: dict[str, str] | None = None,
     ) -> Any:
         """Execute a request against the memory API and unwrap its ``data`` envelope."""
         conn_params = self.connection.conn_params
@@ -110,6 +112,7 @@ class DynamiqMemoryStore(MemoryStore):
         conn_headers = conn_params.get("headers")
         if isinstance(conn_headers, dict):
             headers.update(conn_headers)
+        headers.update(extra_headers or {})
 
         client = self.connection.connect()
         verb = method.value if isinstance(method, HTTPMethod) else method
@@ -146,6 +149,10 @@ class DynamiqMemoryStore(MemoryStore):
             raise MemoryNotFoundError(f"Memory '{memory_path}' not found", operation=operation, path=memory_path)
         if status == 403:
             raise MemoryPermissionError(f"Permission denied for '{memory_path}'", operation=operation, path=memory_path)
+        if status == 412:
+            raise MemoryChangedError(
+                f"'{memory_path}' changed since it was read", operation=operation, path=memory_path
+            )
 
         raise MemoryStoreError(
             f"Dynamiq API returned {status}: {_error_detail(response)}", operation=operation, path=memory_path
@@ -225,6 +232,24 @@ class DynamiqMemoryStore(MemoryStore):
         Raises:
             MemoryStoreError: If the content is longer than ``max_content_length``, before any request.
         """
+        return self._put(path, content, user_id)
+
+    def write_if_unchanged(
+        self, path: str, content: str, expected_hash: str | None, user_id: str | None = None
+    ) -> MemoryEntry:
+        """Replace one memory only while it holds the content ``expected_hash`` identifies, or with no
+        hash create it only while none exists, checked by the platform in the same step as the write.
+
+        Raises:
+            MemoryChangedError: If the memory changed or was deleted since it was read, or, with no hash,
+                already exists.
+        """
+        precondition = {"If-Match": f'"{expected_hash}"'} if expected_hash else {"If-None-Match": "*"}
+        return self._put(path, content, user_id, extra_headers=precondition)
+
+    def _put(
+        self, path: str, content: str, user_id: str | None, extra_headers: dict[str, str] | None = None
+    ) -> MemoryEntry:
         if len(content) > self.max_content_length:
             raise MemoryStoreError(
                 f"'{path}' would be {len(content):,} characters, and a memory holds at most "
@@ -237,17 +262,31 @@ class DynamiqMemoryStore(MemoryStore):
             json={"path": path, "content": content, "user_id": self._scope(user_id, "write", path)},
             operation="write",
             memory_path=path,
+            extra_headers=extra_headers,
         )
         return self._to_entry(data or {}, fallback_path=path, fallback_size=len(content))
 
     def delete(self, path: str, user_id: str | None = None) -> bool:
         """Delete one memory. A 404 means it was not there, which is not an error."""
+        return self._delete(path, user_id)
+
+    def delete_if_unchanged(self, path: str, expected_hash: str, user_id: str | None = None) -> bool:
+        """Delete one memory only while it holds the content ``expected_hash`` identifies, checked by the
+        platform in the same step as the delete.
+
+        Raises:
+            MemoryChangedError: If the memory changed since it was read.
+        """
+        return self._delete(path, user_id, extra_headers={"If-Match": f'"{expected_hash}"'})
+
+    def _delete(self, path: str, user_id: str | None, extra_headers: dict[str, str] | None = None) -> bool:
         try:
             data = self._request(
                 HTTPMethod.DELETE,
                 params={"path": path, "user_id": self._scope(user_id, "delete", path)},
                 operation="delete",
                 memory_path=path,
+                extra_headers=extra_headers,
             )
         except MemoryNotFoundError:
             return False
@@ -277,6 +316,7 @@ class DynamiqMemoryStore(MemoryStore):
             size=size,
             updated_at=updated_at,
             description=data.get("description") or "",
+            content_hash=data.get("content_hash") or "",
         )
 
 

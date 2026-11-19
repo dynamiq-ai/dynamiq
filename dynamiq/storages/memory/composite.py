@@ -222,7 +222,20 @@ class CompositeMemoryStore(MemoryStore):
         entry = store.write(inner, content, user_id)
         return entry.model_copy(update={"path": f"{route}{entry.path}"})
 
+    def write_if_unchanged(
+        self, path: str, content: str, expected_hash: str | None, user_id: str | None = None
+    ) -> MemoryEntry:
+        """Write to the memory owning the path, only while it holds what was read, or is absent."""
+        store, inner, route = self._resolve(path)
+        entry = store.write_if_unchanged(inner, content, expected_hash, user_id)
+        return entry.model_copy(update={"path": f"{route}{entry.path}"})
+
     def delete(self, path: str, user_id: str | None = None) -> bool:
         """Delete from the memory owning the path."""
         store, inner, _route = self._resolve(path)
         return store.delete(inner, user_id)
+
+    def delete_if_unchanged(self, path: str, expected_hash: str, user_id: str | None = None) -> bool:
+        """Delete from the memory owning the path, only while it holds what was read."""
+        store, inner, _route = self._resolve(path)
+        return store.delete_if_unchanged(inner, expected_hash, user_id)

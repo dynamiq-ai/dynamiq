@@ -388,3 +388,101 @@ def test_read_names_the_memories_around_it():
         "12% discount.\n\n[Links, not part of the memory]\nLinks to: people/dana-okafor.md\n"
         "Unresolved links, no memory has these names: msa\nLinked from: projects/q3-pricing.md"
     )
+
+
+@pytest.mark.parametrize("change", ["rewritten", "deleted"])
+def test_write_refuses_to_replace_a_change_made_since_the_read(tool, backend, change):
+    content(tool, action="write", path="team/oncall.md", content="Marco covers weekends.")
+    content(tool, action="read", path="team/oncall.md")
+    if change == "rewritten":
+        backend.write("team/oncall.md", "Priya covers weekends from March.")
+    else:
+        backend.delete("team/oncall.md")
+    current = backend._memories.get("team/oncall.md")
+
+    for _ in range(2):
+        result = run(tool, action="write", path="team/oncall.md", content="Marco covers weekends and holidays.")
+        assert result.status == RunnableStatus.FAILURE
+        assert "changed since you read it" in result.error.message
+    assert backend._memories.get("team/oncall.md") == current
+
+    run(tool, action="read", path="team/oncall.md")
+    assert "Remembered" in content(tool, action="write", path="team/oncall.md", content="Both cover holidays.")
+
+
+def test_edit_applies_only_to_the_text_it_read():
+    class RacedMemoryStore(FakeMemoryStore):
+        def read_note(self, path: str, user_id: str | None = None) -> MemoryNote:
+            note = super().read_note(path, user_id)
+            self.write(path, "Priya covers weekends.")
+            return note
+
+    store = RacedMemoryStore()
+    store.write("team/oncall.md", "Marco covers weekends.")
+
+    result = run(MemoryStoreTool(backend=store), action="edit", path="team/oncall.md", find="Marco", replace="Ana")
+
+    assert result.status == RunnableStatus.FAILURE
+    assert store.read("team/oncall.md") == "Priya covers weekends."
+
+
+def test_a_write_over_a_memory_the_run_never_read_is_refused(tool, backend):
+    backend.write("notes.md", "Marco covers weekends.")
+    content(tool, action="read", path="notes.md")
+    other_run = tool.clone()
+
+    assert (
+        "already exists and you haven't read it"
+        in run(other_run, action="write", path="notes.md", content="Ana covers weekends.").error.message
+    )
+    assert backend.read("notes.md") == "Marco covers weekends."
+
+    content(other_run, action="read", path="notes.md")
+    assert "Remembered" in content(other_run, action="write", path="notes.md", content="Ana covers weekends.")
+    assert "Remembered" in content(other_run, action="write", path="new.md", content="Created without a read.")
+
+
+def test_delete_refuses_a_change_made_since_the_read(tool, backend):
+    content(tool, action="write", path="team/oncall.md", content="Marco covers weekends.")
+    content(tool, action="read", path="team/oncall.md")
+    backend.write("team/oncall.md", "Priya covers weekends from March.")
+
+    result = run(tool, action="delete", path="team/oncall.md")
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "changed since you read it, so it was not deleted" in result.error.message
+    assert backend.read("team/oncall.md") == "Priya covers weekends from March."
+
+    content(tool, action="read", path="team/oncall.md")
+    assert "Deleted" in content(tool, action="delete", path="team/oncall.md")
+
+
+def test_a_store_that_reports_no_hash_on_write_keeps_later_writes_conditional():
+    class UnhashedWritesMemoryStore(FakeMemoryStore):
+        def write(self, path: str, content: str, user_id: str | None = None) -> MemoryEntry:
+            return super().write(path, content, user_id).model_copy(update={"content_hash": ""})
+
+    store = UnhashedWritesMemoryStore()
+    tool = MemoryStoreTool(backend=store)
+    content(tool, action="write", path="team/oncall.md", content="Marco covers weekends.")
+    store.write("team/oncall.md", "Priya covers weekends.")
+
+    result = run(tool, action="write", path="team/oncall.md", content="Marco covers holidays.")
+
+    assert result.status == RunnableStatus.FAILURE
+    assert store.read("team/oncall.md") == "Priya covers weekends."
+
+
+def test_a_store_without_content_hashes_writes_unconditionally():
+    class UnhashedMemoryStore(FakeMemoryStore):
+        def read_note(self, path: str, user_id: str | None = None) -> MemoryNote:
+            return MemoryNote(path=path, content=self.read(path, user_id))
+
+    store = UnhashedMemoryStore()
+    tool = MemoryStoreTool(backend=store)
+    store.write("a.md", "one")
+    content(tool, action="read", path="a.md")
+    store.write("a.md", "two")
+
+    assert "Remembered" in content(tool, action="write", path="a.md", content="three")
+    assert store.read("a.md") == "three"
