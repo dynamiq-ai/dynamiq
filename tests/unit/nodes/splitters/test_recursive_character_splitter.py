@@ -101,3 +101,48 @@ def test_recursive_character_parent_chunks_are_positionally_matched():
         child_start = child.metadata["start_index"]
         parent_start = parent.metadata["start_index"]
         assert parent_start <= child_start < parent_start + len(parent.content)
+
+
+def test_regex_separator_is_not_joined_literally():
+    splitter = RecursiveCharacterSplitter(
+        chunk_size=40,
+        chunk_overlap=0,
+        separators=[r"\n+"],
+        is_separator_regex=True,
+        add_start_index=False,
+    )
+    splitter.init_components()
+
+    chunks = splitter.execute(splitter.input_schema(documents=[Document(content="alpha\n\nbeta\ngamma")]))["documents"]
+
+    assert len(chunks) == 1
+    assert "\n+" not in chunks[0].content
+    assert chunks[0].content.split() == ["alpha", "beta", "gamma"]
+
+
+def test_markdown_language_preset_keeps_headings_clean_when_merging():
+    splitter = RecursiveCharacterSplitter(chunk_size=200, chunk_overlap=0, language=Language.MARKDOWN)
+    splitter.init_components()
+    text = "# Title\n\nIntro text.\n\n## Section\n\nBody text."
+
+    chunks = splitter.execute(splitter.input_schema(documents=[Document(content=text)]))["documents"]
+
+    assert chunks
+    for chunk in chunks:
+        assert "\\" not in chunk.content
+        assert "{1,6}" not in chunk.content
+
+
+def test_zero_width_regex_separator_merges_without_extra_text():
+    splitter = RecursiveCharacterSplitter(
+        chunk_size=20,
+        chunk_overlap=0,
+        separators=[r"(?=\d)"],
+        is_separator_regex=True,
+        add_start_index=False,
+    )
+    splitter.init_components()
+
+    chunks = splitter.execute(splitter.input_schema(documents=[Document(content="a1b2c3")]))["documents"]
+
+    assert [chunk.content for chunk in chunks] == ["a1b2c3"]
