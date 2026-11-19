@@ -1436,9 +1436,15 @@ class BaseLLM(ConnectionNode):
             else self._handle_completion_response
         )
 
-        return handle_completion(
-            response=response, messages=messages, config=config, input_data=dict(input_data), **call_kwargs
-        )
+        try:
+            return handle_completion(
+                response=response, messages=messages, config=config, input_data=dict(input_data), **call_kwargs
+            )
+        except BaseException:
+            self.run_on_node_execute_run(
+                config.callbacks, model_call={"id": call_kwargs["model_call_id"], "status": "failed"}, **kwargs
+            )
+            raise
 
     async def execute_async(
         self,
@@ -1511,13 +1517,19 @@ class BaseLLM(ConnectionNode):
                 raise e
 
         # Keyed off the params that produced the response: a recovery may have turned streaming on.
-        if used_params.get("stream"):
-            return await self._handle_streaming_completion_response_async(
+        try:
+            if used_params.get("stream"):
+                return await self._handle_streaming_completion_response_async(
+                    response=response, messages=messages, config=config, input_data=dict(input_data), **call_kwargs
+                )
+            return self._handle_completion_response(
                 response=response, messages=messages, config=config, input_data=dict(input_data), **call_kwargs
             )
-        return self._handle_completion_response(
-            response=response, messages=messages, config=config, input_data=dict(input_data), **call_kwargs
-        )
+        except BaseException:
+            self.run_on_node_execute_run(
+                config.callbacks, model_call={"id": call_kwargs["model_call_id"], "status": "failed"}, **kwargs
+            )
+            raise
 
     def _is_rate_limit_error(self, exception_type: type[Exception], error_str: str) -> bool:
         """Check if the error is a rate limit error.

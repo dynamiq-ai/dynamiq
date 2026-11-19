@@ -4,6 +4,7 @@ import pytest
 from litellm import ModelResponse
 
 from dynamiq.nodes.llms.base import BaseLLM
+from dynamiq.nodes.llms.ollama import Ollama
 
 
 def _response(**usage):
@@ -42,3 +43,34 @@ def test_a_priced_model_keeps_litellm_s_price():
 def test_usage_completeness_requires_both_observed_counters(raw, complete):
     usage = BaseLLM.get_usage_data(model="gpt-4o-mini", completion=SimpleNamespace(usage=raw))
     assert usage.complete is complete
+
+
+@pytest.mark.parametrize(
+    ("raw", "complete"),
+    [
+        ({"prompt_eval_count": 0, "eval_count": 0}, True),
+        ({"prompt_eval_count": 12, "eval_count": 7}, True),
+        ({"prompt_tokens": 0, "completion_tokens": 0}, True),
+        ({"prompt_tokens": 12, "completion_tokens": 7}, True),
+        ({"prompt_eval_count": 12}, False),
+        ({"eval_count": 7}, False),
+        ({}, False),
+        ({"prompt_eval_count": True, "eval_count": 7}, False),
+        ({"prompt_eval_count": -1, "eval_count": 7}, False),
+        ({"prompt_tokens": 12, "completion_tokens": False}, False),
+        ({"prompt_tokens": 12, "completion_tokens": -1}, False),
+        ({"prompt_eval_count": None, "eval_count": 7}, False),
+    ],
+)
+def test_ollama_usage_completeness_distinguishes_reported_zero_from_missing_or_invalid(raw, complete):
+    usage = Ollama.get_usage_data(model="ollama/llama32", completion=SimpleNamespace(usage=raw))
+    assert usage.complete is complete
+    assert usage.total_tokens_cost_usd is None
+    assert usage.prompt_tokens_cost_usd is None
+    assert usage.completion_tokens_cost_usd is None
+    if complete:
+        prompt = raw.get("prompt_eval_count", raw.get("prompt_tokens"))
+        output = raw.get("eval_count", raw.get("completion_tokens"))
+        assert usage.prompt_tokens == prompt
+        assert usage.completion_tokens == output
+        assert usage.total_tokens == prompt + output
