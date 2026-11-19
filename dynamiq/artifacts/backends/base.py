@@ -31,6 +31,11 @@ class ArtifactBackend(abc.ABC, BaseModel):
         return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
     @property
+    def is_url_for_reader(self) -> bool:
+        """Whether the person an agent answers can open an artifact's ``url``; the artifact tool shows it only then."""
+        return True
+
+    @property
     def to_dict_exclude_params(self) -> dict[str, bool]:
         """Parameters to drop when serializing."""
         return {}
