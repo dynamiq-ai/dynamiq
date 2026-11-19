@@ -61,6 +61,21 @@ class MemoryHit(MemoryEntry):
     score: float = 0.0
 
 
+class MemoryLink(BaseModel):
+    """A link one memory makes. ``path`` is None when no memory of that name exists yet."""
+
+    target: str
+    path: str | None = None
+
+
+class MemoryNote(MemoryEntry):
+    """One memory with its content, the memories it links to and the memories that link to it."""
+
+    content: str
+    links: list[MemoryLink] = Field(default_factory=list)
+    backlinks: list[str] = Field(default_factory=list)
+
+
 class MemoryStore(abc.ABC, BaseModel):
     """Abstract base class for memory backends.
 
@@ -150,6 +165,16 @@ class MemoryStore(abc.ABC, BaseModel):
     @abc.abstractmethod
     def delete(self, path: str, user_id: str | None = None) -> bool:
         """Delete one memory. Returns False when it was not there."""
+
+    def read_note(self, path: str, user_id: str | None = None) -> MemoryNote:
+        """Read one memory with the memories it links to and that link to it.
+
+        The default knows nothing beyond the content; a store that tracks links overrides it.
+
+        Raises:
+            MemoryNotFoundError: If the path does not exist.
+        """
+        return MemoryNote(path=path, content=self.read(path, user_id))
 
     def search(
         self, query: str, prefix: str = "", limit: int = 10, user_id: str | None = None

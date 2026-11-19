@@ -55,7 +55,8 @@ your working files, your answer — is discarded, and the user will not tell you
 1. ALWAYS `{tool}` with action 'list' BEFORE ANYTHING ELSE, then 'read' anything that could govern \
 the work you are about to do — a convention, a rule, a preference. The listing says what memories \
 hold, but listing them is not knowing what they say. When the task names a person, customer or project \
-no line covers, 'search' for it before you assume nothing is recorded.
+no line covers, 'search' for it before you assume nothing is recorded. A read names the memories it \
+links to: read those that bear on the work.
 2. `{tool}` with action 'write' a durable fact THE SAME STEP you learn it — alongside the work, \
 never after it.
 
@@ -64,7 +65,8 @@ rules, corrections, anything lasting about them, their team or their setup. THAT
 being asked to remember is the rare case, not the rule.
 Never store the deliverable, working state, or secrets.
 One topic per memory, descriptive path, and a first line saying what it holds; 'edit' rather than \
-duplicate, 'delete' what is wrong."""
+duplicate, 'delete' what is wrong. Link related memories by name, without folders, like [[dana-okafor]], \
+so the next reader can follow them."""
 
 SANDBOX_VS_MEMORY_STORE_TEMPLATE = """The sandbox above is scratch space for THIS conversation — \
 it is NOT your long-term memory, whatever the Persistence section says. Your `{tool}` tool is, and \
@@ -73,8 +75,8 @@ only it reaches memory."""
 MEMORY_STORE_READONLY_INSTRUCTIONS_TEMPLATE = """## Memory
 Your `{tool}` tool holds knowledge kept from EARLIER conversations, and is read-only for you.
 BEFORE starting a task, use it with action 'list' to see what is available, 'search' for anything the \
-task names that no line covers, and 'read' anything relevant. Do not ask the user for something already \
-recorded there."""
+task names that no line covers, and 'read' anything relevant, following its links where they bear on \
+the task. Do not ask the user for something already recorded there."""
 
 
 ARTIFACTS_INSTRUCTIONS_TEMPLATE = """## Artifacts

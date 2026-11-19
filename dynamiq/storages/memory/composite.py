@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import ConfigDict, Field, field_validator
 
-from .base import MemoryEntry, MemoryHit, MemoryNotFoundError, MemoryStore, MemoryStoreError
+from .base import MemoryEntry, MemoryHit, MemoryNote, MemoryNotFoundError, MemoryStore, MemoryStoreError
 
 
 def normalize_path(path: str) -> str:
@@ -177,6 +177,27 @@ class CompositeMemoryStore(MemoryStore):
         except MemoryNotFoundError:
             # Name the path the caller used, not the one inside the store.
             raise MemoryNotFoundError(f"Memory '{route}{inner}' not found", operation="read", path=path) from None
+
+    def read_note(self, path: str, user_id: str | None = None) -> MemoryNote:
+        """Read from the memory owning the path, with its links mounted like its own path.
+
+        Links resolve inside one store, so a link and a backlink always share the note's route.
+        """
+        store, inner, route = self._resolve(path)
+        try:
+            note = store.read_note(inner, user_id)
+        except MemoryNotFoundError:
+            raise MemoryNotFoundError(f"Memory '{route}{inner}' not found", operation="read", path=path) from None
+        return note.model_copy(
+            update={
+                "path": f"{route}{note.path}",
+                "links": [
+                    link.model_copy(update={"path": f"{route}{link.path}"}) if link.path else link
+                    for link in note.links
+                ],
+                "backlinks": [f"{route}{backlink}" for backlink in note.backlinks],
+            }
+        )
 
     def search(
         self, query: str, prefix: str = "", limit: int = 10, user_id: str | None = None

@@ -3,7 +3,14 @@ import json
 import pytest
 
 from dynamiq.connections import Dynamiq
-from dynamiq.storages.memory import CompositeMemoryStore, DynamiqMemoryStore, MemoryHit, MemoryStoreError
+from dynamiq.storages.memory import (
+    CompositeMemoryStore,
+    DynamiqMemoryStore,
+    MemoryHit,
+    MemoryLink,
+    MemoryNote,
+    MemoryStoreError,
+)
 from dynamiq.storages.memory.composite import normalize_path
 from tests.unit.storages.memory.conftest import FakeMemoryStore
 
@@ -267,3 +274,22 @@ def test_search_keeps_each_route_order_among_equal_scores():
 
 def test_scope_of_names_the_route_holding_a_path(store):
     assert store.scope_of("team/playbook/refunds.md") == "team/"
+
+
+def test_read_note_mounts_links_on_the_note_route():
+    class Linked(FakeMemoryStore):
+        def read_note(self, path, user_id=None):
+            return MemoryNote(
+                path=path,
+                content=self.read(path),
+                links=[MemoryLink(target="b", path="b.md"), MemoryLink(target="gone")],
+                backlinks=["c.md"],
+            )
+
+    team = Linked()
+    team.write("a.md", "see [[b]]")
+    note = CompositeMemoryStore(routes={"user/": FakeMemoryStore(), "team/": team}).read_note("team/a.md")
+
+    assert note.path == "team/a.md"
+    assert [link.path for link in note.links] == ["team/b.md", None]
+    assert note.backlinks == ["team/c.md"]

@@ -6,7 +6,14 @@ import pytest
 from dynamiq.connections import Dynamiq
 from dynamiq.nodes.tools.memory_store_tool import MemoryStoreTool, MemoryStoreToolInputSchema
 from dynamiq.runnables import RunnableStatus
-from dynamiq.storages.memory import CompositeMemoryStore, DynamiqMemoryStore, MemoryEntry, MemoryStoreError
+from dynamiq.storages.memory import (
+    CompositeMemoryStore,
+    DynamiqMemoryStore,
+    MemoryEntry,
+    MemoryLink,
+    MemoryNote,
+    MemoryStoreError,
+)
 from tests.unit.storages.memory.conftest import FakeMemoryStore
 
 
@@ -360,3 +367,24 @@ def test_write_survives_a_failing_search(tool, backend, monkeypatch):
     monkeypatch.setattr(type(backend), "search", MagicMock(side_effect=MemoryStoreError("index down")))
 
     assert content(tool, action="write", path="a.md", content="x") == "Remembered in 'a.md'."
+
+
+def test_read_names_the_memories_around_it():
+    class LinkedMemoryStore(FakeMemoryStore):
+        def read_note(self, path: str, user_id: str | None = None) -> MemoryNote:
+            return MemoryNote(
+                path=path,
+                content=self.read(path, user_id),
+                links=[MemoryLink(target="dana-okafor", path="people/dana-okafor.md"), MemoryLink(target="msa")],
+                backlinks=["projects/q3-pricing.md"],
+            )
+
+    tool = MemoryStoreTool(backend=LinkedMemoryStore())
+    content(tool, action="write", path="customers/larkspur.md", content="12% discount.")
+
+    text = content(tool, action="read", path="customers/larkspur.md")
+
+    assert text == (
+        "12% discount.\n\n[Links, not part of the memory]\nLinks to: people/dana-okafor.md\n"
+        "Unresolved links, no memory has these names: msa\nLinked from: projects/q3-pricing.md"
+    )

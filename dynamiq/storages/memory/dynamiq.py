@@ -11,7 +11,16 @@ from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections import HTTPMethod
 from dynamiq.utils.logger import logger
 
-from .base import MemoryEntry, MemoryHit, MemoryNotFoundError, MemoryPermissionError, MemoryStore, MemoryStoreError
+from .base import (
+    MemoryEntry,
+    MemoryHit,
+    MemoryLink,
+    MemoryNote,
+    MemoryNotFoundError,
+    MemoryPermissionError,
+    MemoryStore,
+    MemoryStoreError,
+)
 
 
 class DynamiqMemoryStore(MemoryStore):
@@ -159,6 +168,10 @@ class DynamiqMemoryStore(MemoryStore):
 
     def read(self, path: str, user_id: str | None = None) -> str:
         """Read one memory's content."""
+        return self.read_note(path, user_id).content
+
+    def read_note(self, path: str, user_id: str | None = None) -> MemoryNote:
+        """Read one memory with its links and backlinks, in one request."""
         data = self._request(
             HTTPMethod.GET,
             "/content",
@@ -168,7 +181,14 @@ class DynamiqMemoryStore(MemoryStore):
         )
         if not data:
             raise MemoryNotFoundError(f"Memory '{path}' not found", operation="read", path=path)
-        return data.get("content") or ""
+        return MemoryNote(
+            **self._to_entry(data, fallback_path=path).model_dump(),
+            content=data.get("content") or "",
+            links=[
+                MemoryLink(target=link.get("target", ""), path=link.get("path")) for link in data.get("links") or []
+            ],
+            backlinks=data.get("backlinks") or [],
+        )
 
     def search(
         self, query: str, prefix: str = "", limit: int = 10, user_id: str | None = None

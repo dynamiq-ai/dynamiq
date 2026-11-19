@@ -28,7 +28,7 @@ Actions:
 - list: what you already know, one line per memory saying what it holds. Optional 'path' narrows to a prefix.
 - search: memories that mention something, best first, with the passage that matched. Requires 'query': \
 the words the answer would use. Optional 'path' narrows to a prefix.
-- read: the content of one memory. Requires 'path'.
+- read: the content of one memory, and the memories it links to and that link to it. Requires 'path'.
 - write: create or replace a memory. Requires 'path' and 'content'.
 - edit: change part of a memory in place. Requires 'path', 'find' and 'replace'; 'find' must match \
 exactly one place unless 'replace_all' is true.
@@ -37,7 +37,8 @@ exactly one place unless 'replace_all' is true.
 Record facts that will still matter next time — preferences, standing rules, corrections, anything \
 lasting about the user, their team or their setup. Never the deliverable, working state, or secrets.
 One topic per memory, descriptive path, and a first line saying what it holds: listings show that line.
-Edit rather than duplicate: a write names the memories on nearby topics.
+Edit rather than duplicate: a write names the memories on nearby topics. Link related memories by name, \
+without folders, e.g. [[dana-okafor]].
 
 Usage examples:
 - {"action": "list"}
@@ -232,12 +233,29 @@ class MemoryStoreTool(Node):
         return {"content": "\n".join(sections), "paths": [entry.path for entry in entries]}
 
     def _read(self, path: str, user_id: str | None = None) -> dict[str, Any]:
+        """The memory, then the memories around it, so following a link costs one read, not a search.
+
+        Paths only: the model has just listed what each one holds.
+        """
         try:
-            return {"content": self.backend.read(path, user_id)}
+            note = self.backend.read_note(path, user_id)
         except MemoryNotFoundError:
             raise ToolExecutionException(
                 f"No memory at '{path}'. Use action 'list' to see what exists.", recoverable=True
             ) from None
+        linked = [link.path for link in note.links if link.path]
+        unresolved = [link.target for link in note.links if not link.path]
+        around = []
+        if linked:
+            around.append("Links to: " + ", ".join(linked))
+        if unresolved:
+            around.append("Unresolved links, no memory has these names: " + ", ".join(unresolved))
+        if note.backlinks:
+            around.append("Linked from: " + ", ".join(note.backlinks))
+        if not around:
+            return {"content": note.content}
+        # Marked apart, so a model rewriting the memory from this output does not copy them into it.
+        return {"content": note.content + "\n\n[Links, not part of the memory]\n" + "\n".join(around)}
 
     def _search(self, query: str, prefix: str, user_id: str | None = None) -> dict[str, Any]:
         """Hits with what each memory holds and the passage that matched: enough to pick what to read."""
@@ -271,7 +289,8 @@ class MemoryStoreTool(Node):
         related = related[:RELATED_LIMIT]
         if related:
             message += (
-                " Memories on nearby topics: " + ", ".join(related) + ". If one covers the same topic, merge into it."
+                " Memories on nearby topics: " + ", ".join(related) + ". If one covers the same topic, merge into it; "
+                f"if they relate, link them by name, like [[{related[0].rsplit('/', 1)[-1].removesuffix('.md')}]]."
             )
         return {"content": message}
 
