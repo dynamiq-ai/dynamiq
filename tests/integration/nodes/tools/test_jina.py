@@ -1,7 +1,7 @@
 import pytest
 
 from dynamiq.connections import Jina
-from dynamiq.nodes.tools.jina import JinaScrapeTool, JinaSearchTool
+from dynamiq.nodes.tools.jina import JinaScrapeInputSchema, JinaScrapeTool, JinaSearchTool
 from dynamiq.runnables import RunnableResult, RunnableStatus
 
 
@@ -65,6 +65,64 @@ def mock_scrape_requests(mocker, mock_jina_scrape_response):
     # Patch at the requests level since that's what the connection uses
     mock_requests = mocker.patch("requests.request", return_value=mock_response)
     return mock_requests
+
+
+def test_reader_advanced_controls_reach_actual_request_headers(mock_scrape_requests):
+    tool = JinaScrapeTool(
+        connection=Jina(api_key="test_key"),
+        page_timeout_seconds=45,
+        proxy="auto",
+        token_budget=100000,
+        wait_for_selector="main article",
+        cache_tolerance_seconds=0,
+    )
+    result = tool.run({"url": "https://authority.example/document"})
+    assert result.status == RunnableStatus.SUCCESS
+    headers = mock_scrape_requests.call_args.kwargs["headers"]
+    assert {
+        name: headers[name]
+        for name in ("X-Timeout", "X-Proxy", "X-Token-Budget", "X-Wait-For-Selector", "X-Cache-Tolerance")
+    } == {
+        "X-Timeout": "45",
+        "X-Proxy": "auto",
+        "X-Token-Budget": "100000",
+        "X-Wait-For-Selector": "main article",
+        "X-Cache-Tolerance": "0",
+    }
+    assert "X-No-Cache" not in headers
+    tool.no_cache = True
+    headers = tool._build_headers(
+        JinaScrapeInputSchema(
+            page_timeout_seconds=30,
+            proxy="GB",
+            token_budget=2000,
+            wait_for_selector="article",
+            cache_tolerance_seconds=120,
+        )
+    )
+    assert headers["X-No-Cache"] == "true"
+    assert "X-Cache-Tolerance" not in headers
+    assert headers["X-Timeout"] == "30"
+    assert headers["X-Proxy"] == "GB"
+    assert headers["X-Token-Budget"] == "2000"
+    assert headers["X-Wait-For-Selector"] == "article"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("page_timeout_seconds", 0),
+        ("proxy", "https://proxy.example"),
+        ("token_budget", 0),
+        ("cache_tolerance_seconds", -1),
+        ("wait_for_selector", ""),
+    ],
+)
+def test_reader_advanced_controls_validate_boundaries(field, value):
+    with pytest.raises(ValueError):
+        JinaScrapeTool(connection=Jina(api_key="test"), **{field: value})
+    with pytest.raises(ValueError):
+        JinaScrapeInputSchema(**{field: value})
 
 
 def test_jina_basic_search(mock_search_requests, mock_jina_search_response):

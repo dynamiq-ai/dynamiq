@@ -82,7 +82,7 @@ _REQUEST_PARAMS = frozenset(
 
 # LiteLLM's own routing and filtering params. The SDK client already holds the endpoint and key, and `build_request`
 # applies LiteLLM's per-model param filter itself, so none of them goes into the request.
-_LITELLM_PARAMS = frozenset({"api_base", "api_key", "client", "drop_params", "allowed_openai_params"})
+_LITELLM_PARAMS = frozenset({"api_base", "api_key", "client", "drop_params", "allowed_openai_params", "num_retries"})
 
 # What travels with the request rather than in the model's params, so LiteLLM's param mapping never sees it.
 _REQUEST_ENVELOPE = frozenset({"model", "messages", "extra_headers", "extra_query", "extra_body", "timeout"})
@@ -374,6 +374,13 @@ def _empty_choice() -> dict:
     return _as_model_dump(ChunkChoice, {"index": 0, "delta": {}, "finish_reason": None})
 
 
+def _usage_is_observed(usage: Any) -> bool:
+    """Whether the provider supplied valid counters before SDK normalization or local estimation."""
+    return isinstance(usage, dict) and all(
+        type(usage.get(key)) is int and usage[key] >= 0 for key in ("prompt_tokens", "completion_tokens")
+    )
+
+
 class _Assembly:
     """A stream's response, merged from its chunks as LiteLLM merges them, as each chunk arrives.
 
@@ -443,6 +450,7 @@ class _Assembly:
         if self._tool_calls:
             message["tool_calls"] = [self._tool_calls[index] for index in sorted(self._tool_calls)]
 
+        observed = _usage_is_observed(self._usage)
         usage_data = self._usage
         if usage_data is None:
             completion_text = (message["content"] or "") + "".join(
@@ -451,7 +459,7 @@ class _Assembly:
             usage_data = _estimate_usage(model, messages, completion_text)
 
         chunk_id, created, chunk_model, system_fingerprint = self._first or ("", 0, model, None)
-        return ChatCompletion.construct(
+        response = ChatCompletion.construct(
             id=chunk_id,
             created=created,
             model=chunk_model,
@@ -462,6 +470,8 @@ class _Assembly:
             ],
             usage=usage_data,
         )
+        object.__setattr__(response, "_dynamiq_usage_observed", observed)
+        return response
 
 
 class _ChunkShaper:
@@ -532,17 +542,31 @@ class AsyncStream(_ChunkShaper):
         await self._stream.close()
 
 
+def _unstreamed_response(response: Any) -> Any:
+    # Normal SDK parsing coerces malformed counters into ints; retain their raw confidence first.
+    try:
+        data = response.http_response.json()
+    except ValueError:
+        data = None
+    observed = _usage_is_observed(data.get("usage") if isinstance(data, dict) else None)
+    completion = response.parse()
+    if isinstance(completion, ChatCompletion):
+        # Keep confidence outside serialized fields without retaining the raw usage payload.
+        object.__setattr__(completion, "_dynamiq_usage_observed", observed)
+    return completion
+
+
 def _send(client: OpenAI, request: dict[str, Any]) -> Any:
     """The response to `request`; a stream yields each chunk's JSON as a dict, not as the SDK's model."""
     if not request.get("stream"):
-        return client.chat.completions.create(**request)
+        return _unstreamed_response(client.chat.completions.with_raw_response.create(**request))
     return client.chat.completions.with_raw_response.create(**request).parse(to=openai.Stream[object])
 
 
 async def _asend(client: AsyncOpenAI, request: dict[str, Any]) -> Any:
     """Async `_send`."""
     if not request.get("stream"):
-        return await client.chat.completions.create(**request)
+        return _unstreamed_response(await client.chat.completions.with_raw_response.create(**request))
     response = await client.chat.completions.with_raw_response.create(**request)
     return response.parse(to=openai.AsyncStream[object])
 

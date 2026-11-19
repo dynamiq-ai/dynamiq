@@ -391,13 +391,19 @@ class Dynamiq(BaseLLM):
         from dynamiq.nodes.llms import _openai_sdk  # deferred: importing the node must not load the OpenAI SDK
 
         request, emit_usage = self._router_request(params)
-        return _openai_sdk.send(self.client, request, emit_usage)
+        client = self.client
+        if params.get("num_retries") is not None:
+            client = client.with_options(max_retries=params["num_retries"])
+        return _openai_sdk.send(client, request, emit_usage)
 
     async def _acall_completion(self, params: dict[str, Any]) -> Any:
         from dynamiq.nodes.llms import _openai_sdk  # deferred: importing the node must not load the OpenAI SDK
 
         request, emit_usage = self._router_request(params)
-        return await _openai_sdk.asend(await self._async_client(), request, emit_usage)
+        client = await self._async_client()
+        if params.get("num_retries") is not None:
+            client = client.with_options(max_retries=params["num_retries"])
+        return await _openai_sdk.asend(client, request, emit_usage)
 
     def _handle_completion_response(self, response: Any, config: RunnableConfig = None, **kwargs) -> dict:
         """The reply, with the `reasoning_details` it came with, each naming the model, which an agent sends back

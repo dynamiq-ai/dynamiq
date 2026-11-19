@@ -7,6 +7,13 @@ from dynamiq.connections import Jina
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.tools.research_receipts import (
+    UnitPrice,
+    emit_research_receipt,
+    estimated_receipt_cost,
+    receipt_header_units,
+    receipt_units,
+)
 from dynamiq.nodes.tools.utils import http_error_detail
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
@@ -61,6 +68,17 @@ class JinaScrapeInputSchema(BaseModel):
         description="Engine: 'browser' for JS-heavy sites, 'direct' for speed",
         json_schema_extra={"is_accessible_to_agent": False},
     )
+    page_timeout_seconds: int | None = Field(
+        default=None, gt=0, le=180, json_schema_extra={"is_accessible_to_agent": False}
+    )
+    proxy: str | None = Field(
+        default=None, pattern=r"^(auto|none|[a-zA-Z]{2})$", json_schema_extra={"is_accessible_to_agent": False}
+    )
+    token_budget: int | None = Field(default=None, gt=0, json_schema_extra={"is_accessible_to_agent": False})
+    wait_for_selector: str | None = Field(
+        default=None, min_length=1, max_length=4096, description="CSS selector to wait for before reading the page."
+    )
+    cache_tolerance_seconds: int | None = Field(default=None, ge=0, json_schema_extra={"is_accessible_to_agent": False})
 
 
 class JinaResponseFormat(str, enum.Enum):
@@ -100,6 +118,9 @@ class JinaScrapeTool(ConnectionNode):
     connection: Jina
     timeout: int = 60
     url: str | None = Field(None, description="URL to scrape")
+    unit_price_usd: UnitPrice | None = Field(
+        default=None, description="Declared estimated USD per Reader token. No price is assumed when unset."
+    )
 
     # Advanced options
     target_selector: str | None = Field(None, description="CSS selector to focus on specific elements")
@@ -109,6 +130,11 @@ class JinaScrapeTool(ConnectionNode):
     generate_alt_text: bool = Field(default=True, description="Generate alt text for images")
     engine: str = Field(default="direct", description="Engine: 'browser' or 'direct'")
     no_cache: bool = Field(default=False, description="Bypass cache")
+    page_timeout_seconds: int | None = Field(default=None, gt=0, le=180)
+    proxy: str | None = Field(default=None, pattern=r"^(auto|none|[a-zA-Z]{2})$")
+    token_budget: int | None = Field(default=None, gt=0)
+    wait_for_selector: str | None = Field(default=None, min_length=1, max_length=4096)
+    cache_tolerance_seconds: int | None = Field(default=None, ge=0)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[JinaScrapeInputSchema]] = JinaScrapeInputSchema
@@ -156,6 +182,24 @@ class JinaScrapeTool(ConnectionNode):
 
         if self.no_cache:
             headers["X-No-Cache"] = "true"
+        else:
+            tolerance = input_data.cache_tolerance_seconds
+            if tolerance is None:
+                tolerance = self.cache_tolerance_seconds
+            if tolerance is not None:
+                headers["X-Cache-Tolerance"] = str(tolerance)
+
+        for field_name, header_name in (
+            ("page_timeout_seconds", "X-Timeout"),
+            ("proxy", "X-Proxy"),
+            ("token_budget", "X-Token-Budget"),
+            ("wait_for_selector", "X-Wait-For-Selector"),
+        ):
+            value = getattr(input_data, field_name)
+            if value is None:
+                value = getattr(self, field_name)
+            if value is not None:
+                headers[header_name] = str(value)
 
         return headers
 
@@ -203,15 +247,19 @@ class JinaScrapeTool(ConnectionNode):
             recoverable=True,
         )
 
-    def _extract_scrape_payload(self, response: Any) -> tuple[Any, dict, dict]:
-        """Pull ``(scrape_result, links, images)`` from the response.
+    def _extract_scrape_payload(self, response: Any) -> tuple[Any, dict, dict, int | None]:
+        """Pull content and optional reported tokens from one decoded response.
 
         Kept separate from rendering so this stays inside the request try/except (it
         calls ``response.json()`` and ``_parse_response``, both of which can raise on
         malformed payloads), while output formatting runs outside.
         """
         response_data = response.json()
-        return self._parse_response(response_data)
+        tokens = receipt_header_units(response.headers.get("X-Usage-Tokens"))
+        if tokens is None and isinstance(response_data, dict) and isinstance(data := response_data.get("data"), dict):
+            if isinstance(usage := data.get("usage"), dict):
+                tokens = receipt_units(usage.get("tokens"))
+        return *self._parse_response(response_data), tokens
 
     def _render_scrape_output(
         self,
@@ -276,10 +324,35 @@ class JinaScrapeTool(ConnectionNode):
                 json=request_body,
             )
             response.raise_for_status()
-            scrape_result, links, images = self._extract_scrape_payload(response)
+            scrape_result, links, images, usage_tokens = self._extract_scrape_payload(response)
         except Exception as e:
+            emit_research_receipt(
+                self,
+                config,
+                kwargs,
+                provider="jina",
+                kind="fetch",
+                status="failed",
+                url=request_body["url"],
+                error_code="transport_error",
+            )
             raise self._wrap_request_exception(e)
 
+        usable = isinstance(scrape_result, str) and bool(scrape_result.strip())
+        emit_research_receipt(
+            self,
+            config,
+            kwargs,
+            provider="jina",
+            kind="fetch",
+            status="succeeded" if usable else "failed",
+            url=request_body["url"],
+            status_code=getattr(response, "status_code", None),
+            error_code=None if usable else "empty_content",
+            usage_units=usage_tokens,
+            usage_unit="tokens",
+            cost_usd=estimated_receipt_cost(usage_tokens, self.unit_price_usd),
+        )
         return self._render_scrape_output(scrape_result, links, images, request_body, headers)
 
     async def execute_async(
@@ -302,10 +375,35 @@ class JinaScrapeTool(ConnectionNode):
                 json=request_body,
             )
             response.raise_for_status()
-            scrape_result, links, images = self._extract_scrape_payload(response)
+            scrape_result, links, images, usage_tokens = self._extract_scrape_payload(response)
         except Exception as e:
+            emit_research_receipt(
+                self,
+                config,
+                kwargs,
+                provider="jina",
+                kind="fetch",
+                status="failed",
+                url=request_body["url"],
+                error_code="transport_error",
+            )
             raise self._wrap_request_exception(e)
 
+        usable = isinstance(scrape_result, str) and bool(scrape_result.strip())
+        emit_research_receipt(
+            self,
+            config,
+            kwargs,
+            provider="jina",
+            kind="fetch",
+            status="succeeded" if usable else "failed",
+            url=request_body["url"],
+            status_code=getattr(response, "status_code", None),
+            error_code=None if usable else "empty_content",
+            usage_units=usage_tokens,
+            usage_unit="tokens",
+            cost_usd=estimated_receipt_cost(usage_tokens, self.unit_price_usd),
+        )
         return self._render_scrape_output(scrape_result, links, images, request_body, headers)
 
 
@@ -714,8 +812,29 @@ class JinaSearchTool(ConnectionNode):
             response.raise_for_status()
             search_result = response.json()
         except Exception as e:
+            emit_research_receipt(
+                self,
+                config,
+                kwargs,
+                provider="jina",
+                kind="search",
+                status="failed",
+                query=request_body["q"],
+                error_code="transport_error",
+            )
             raise self._wrap_search_exception(e)
 
+        emit_research_receipt(
+            self,
+            config,
+            kwargs,
+            provider="jina",
+            kind="search",
+            status="succeeded",
+            query=request_body["q"],
+            status_code=getattr(response, "status_code", None),
+            result_urls=[item.get("url") for item in search_result.get("data", []) if isinstance(item, dict)],
+        )
         return self._format_search_response(search_result, request_body, headers, include_full)
 
     async def execute_async(
@@ -745,6 +864,27 @@ class JinaSearchTool(ConnectionNode):
             response.raise_for_status()
             search_result = response.json()
         except Exception as e:
+            emit_research_receipt(
+                self,
+                config,
+                kwargs,
+                provider="jina",
+                kind="search",
+                status="failed",
+                query=request_body["q"],
+                error_code="transport_error",
+            )
             raise self._wrap_search_exception(e)
 
+        emit_research_receipt(
+            self,
+            config,
+            kwargs,
+            provider="jina",
+            kind="search",
+            status="succeeded",
+            query=request_body["q"],
+            status_code=getattr(response, "status_code", None),
+            result_urls=[item.get("url") for item in search_result.get("data", []) if isinstance(item, dict)],
+        )
         return self._format_search_response(search_result, request_body, headers, include_full)

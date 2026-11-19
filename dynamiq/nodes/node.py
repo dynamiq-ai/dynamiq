@@ -1527,6 +1527,15 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             ),
         )
 
+    def _output_cache_enabled(self, config: RunnableConfig) -> bool:
+        if not self.caching.enabled or config.cache is None:
+            return False
+        if "control_context" in config.trusted_context:
+            return False
+        # A configured hook or active hook context requires this module to be loaded already.
+        remote = sys.modules.get("dynamiq.nodes.agents.hooks.remote")
+        return remote is None or not remote.has_remote_lifecycle_hook(self)
+
     def run_sync(
         self,
         input_data: dict,
@@ -1580,7 +1589,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             else:
                 cache = cache_wf_entity(
                     entity_id=self.id,
-                    cache_enabled=self.caching.enabled,
+                    cache_enabled=self._output_cache_enabled(config),
                     cache_config=config.cache,
                 )
 
@@ -1649,7 +1658,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             else:
                 cache = cache_wf_entity_async(
                     entity_id=self.id,
-                    cache_enabled=self.caching.enabled,
+                    cache_enabled=self._output_cache_enabled(config),
                     cache_config=config.cache,
                 )
                 output, from_cache = await cache(self.execute_async_with_retry)(
@@ -1828,6 +1837,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 self.log_execution_start(input_data)
 
                 try:
+                    # Deferred because agent hooks themselves depend on Node.
+                    from dynamiq.nodes.agents.hooks.remote import check_remote_tool_lifecycle
+
+                    check_remote_tool_lifecycle(config, self)
                     if executor and timeout is not None:
                         output = self.execute_with_timeout(
                             executor=executor,
@@ -1952,6 +1965,11 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             self.log_execution_start(input_data)
 
             try:
+                # Deferred because agent hooks themselves depend on Node.
+                from dynamiq.nodes.agents.hooks.remote import check_remote_tool_lifecycle, has_remote_tool_lifecycle
+
+                if has_remote_tool_lifecycle(self):
+                    await asyncio.to_thread(check_remote_tool_lifecycle, config, self)
                 if timeout is not None:
                     with _deadline_after(timeout):
                         output = await asyncio.wait_for(

@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import json
 import re
@@ -20,6 +21,7 @@ from dynamiq.prompts import Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.llm_tool import Tool
+from dynamiq.utils import generate_uuid
 from dynamiq.utils.litellm import (
     get_litellm,
     get_max_tokens,
@@ -178,6 +180,7 @@ class BaseLLMUsageData(BaseModel):
     total_tokens_cost_usd: float | None
     cache_read_input_tokens: int | None = None
     cache_creation_input_tokens: int | None = None
+    complete: bool = False
 
 
 class BaseLLMInputSchema(BaseModel):
@@ -330,6 +333,7 @@ class BaseLLM(ConnectionNode):
     group: Literal[NodeGroup.LLMS] = NodeGroup.LLMS
     temperature: float | None = None
     max_tokens: int | None = None
+    num_retries: int | None = Field(default=None, ge=0)
     model_info: ModelInfo | None = Field(
         default=None,
         description="Optional model metadata overrides (e.g. max_input_tokens, supports_vision, supports_pdf_input).",
@@ -658,6 +662,12 @@ class BaseLLM(ConnectionNode):
             BaseLLMUsageData: A model containing the usage data for the LLM.
         """
         usage = cls._extract_usage(completion=completion)
+        observed_prompt_tokens = cls._usage_value(usage, "prompt_tokens")
+        observed_completion_tokens = cls._usage_value(usage, "completion_tokens")
+        observed = all(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            for value in (observed_prompt_tokens, observed_completion_tokens)
+        )
         prompt_tokens = cls._usage_value(usage, "prompt_tokens", 0) or 0
         completion_tokens = cls._usage_value(usage, "completion_tokens", 0) or 0
         total_tokens = (
@@ -694,6 +704,8 @@ class BaseLLM(ConnectionNode):
             total_tokens_cost_usd=total_tokens_cost_usd,
             cache_read_input_tokens=cache_read_input_tokens,
             cache_creation_input_tokens=cache_creation_input_tokens,
+            # Native SDK parsing can normalize estimates or malformed raw counters into integers.
+            complete=observed and getattr(completion, "_dynamiq_usage_observed", True) is not False,
         )
 
     @classmethod
@@ -895,9 +907,56 @@ class BaseLLM(ConnectionNode):
         """Send one completion request asynchronously."""
         return await self._acompletion(**params)
 
+    def _begin_observed_call(self, config: RunnableConfig, kwargs: dict) -> dict:
+        # Deferred to break the built-in detector hooks' import of BaseLLM.
+        from dynamiq.nodes.agents.hooks.remote import check_remote_model_lifecycle
+
+        check_cancellation(config)
+        check_remote_model_lifecycle(config)
+        identity = generate_uuid()
+        self.run_on_node_execute_run(config.callbacks, model_call={"id": identity, "status": "started"}, **kwargs)
+        return kwargs | {"model_call_id": identity}
+
+    def _observed_completion(self, params: dict, config: RunnableConfig, kwargs: dict) -> tuple[Any, dict]:
+        call_kwargs = self._begin_observed_call(config, kwargs)
+        try:
+            return self._call_completion(params), call_kwargs
+        except BaseException:
+            self.run_on_node_execute_run(
+                config.callbacks, model_call={"id": call_kwargs["model_call_id"], "status": "failed"}, **kwargs
+            )
+            raise
+
+    async def _observed_acompletion(self, params: dict, config: RunnableConfig, kwargs: dict) -> tuple[Any, dict]:
+        call_kwargs = await asyncio.to_thread(self._begin_observed_call, config, kwargs)
+        try:
+            return await self._acall_completion(params), call_kwargs
+        except BaseException:
+            self.run_on_node_execute_run(
+                config.callbacks, model_call={"id": call_kwargs["model_call_id"], "status": "failed"}, **kwargs
+            )
+            raise
+
     def _build_streamed_response(self, chunks: list, messages: list[dict], stream: Any = None) -> "ModelResponse":
         """Assemble a streamed response's chunks into one complete response. `stream` is the response they came from."""
-        return self._stream_chunk_builder(chunks=chunks, messages=messages)
+        # The builder may estimate missing/zero counters; snapshot what reached the SDK before it runs.
+        reported = {field: set() for field in ("prompt_tokens", "completion_tokens")}
+        for chunk in chunks:
+            usage = self._extract_usage(chunk)
+            for field, values in reported.items():
+                value = self._usage_value(usage, field)
+                if type(value) is int and value >= 0:
+                    values.add(value)
+        response = self._stream_chunk_builder(chunks=chunks, messages=messages)
+        if response is None:
+            return response
+        usage = self._extract_usage(response)
+        observed = all(
+            type(value := self._usage_value(usage, field)) is int and value in values
+            for field, values in reported.items()
+        )
+        object.__setattr__(response, "_dynamiq_usage_observed", observed)
+        return response
 
     def _get_response_format_and_tools(
         self,
@@ -1217,6 +1276,8 @@ class BaseLLM(ConnectionNode):
         }
         if parallel_tool_calls is not None:
             common_params["parallel_tool_calls"] = parallel_tool_calls
+        if self.num_retries is not None:
+            common_params["num_retries"] = self.num_retries
         if forced_tool_params:
             common_params["allowed_openai_params"] = forced_tool_params
         if not tools and common_params.get("tool_choice") is not None:
@@ -1365,16 +1426,20 @@ class BaseLLM(ConnectionNode):
 
         used_params = common_params
         try:
-            response = self._call_completion(common_params)
+            response, call_kwargs = self._observed_completion(common_params, config, kwargs)
         except Exception as e:
+            if getattr(e, "retryable", True) is False:
+                raise
             attempt_params = common_params
             for _ in range(_MAX_COMPLETION_RECOVERIES):
                 recovered = self._recover_completion_params(e, attempt_params)
                 if recovered is None:
                     raise e
                 try:
-                    response = self._call_completion(recovered)
+                    response, call_kwargs = self._observed_completion(recovered, config, kwargs)
                 except Exception as retry_exc:
+                    if getattr(retry_exc, "retryable", True) is False:
+                        raise
                     e, attempt_params = retry_exc, recovered
                     continue
                 self._persist_completion_recovery(common_params, recovered)
@@ -1389,9 +1454,15 @@ class BaseLLM(ConnectionNode):
             else self._handle_completion_response
         )
 
-        return handle_completion(
-            response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
-        )
+        try:
+            return handle_completion(
+                response=response, messages=messages, config=config, input_data=dict(input_data), **call_kwargs
+            )
+        except BaseException:
+            self.run_on_node_execute_run(
+                config.callbacks, model_call={"id": call_kwargs["model_call_id"], "status": "failed"}, **kwargs
+            )
+            raise
 
     async def execute_async(
         self,
@@ -1441,16 +1512,20 @@ class BaseLLM(ConnectionNode):
 
         used_params = common_params
         try:
-            response = await self._acall_completion(common_params)
+            response, call_kwargs = await self._observed_acompletion(common_params, config, kwargs)
         except Exception as e:
+            if getattr(e, "retryable", True) is False:
+                raise
             attempt_params = common_params
             for _ in range(_MAX_COMPLETION_RECOVERIES):
                 recovered = self._recover_completion_params(e, attempt_params)
                 if recovered is None:
                     raise e
                 try:
-                    response = await self._acall_completion(recovered)
+                    response, call_kwargs = await self._observed_acompletion(recovered, config, kwargs)
                 except Exception as retry_exc:
+                    if getattr(retry_exc, "retryable", True) is False:
+                        raise
                     e, attempt_params = retry_exc, recovered
                     continue
                 self._persist_completion_recovery(common_params, recovered)
@@ -1460,13 +1535,19 @@ class BaseLLM(ConnectionNode):
                 raise e
 
         # Keyed off the params that produced the response: a recovery may have turned streaming on.
-        if used_params.get("stream"):
-            return await self._handle_streaming_completion_response_async(
-                response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
+        try:
+            if used_params.get("stream"):
+                return await self._handle_streaming_completion_response_async(
+                    response=response, messages=messages, config=config, input_data=dict(input_data), **call_kwargs
+                )
+            return self._handle_completion_response(
+                response=response, messages=messages, config=config, input_data=dict(input_data), **call_kwargs
             )
-        return self._handle_completion_response(
-            response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
-        )
+        except BaseException:
+            self.run_on_node_execute_run(
+                config.callbacks, model_call={"id": call_kwargs["model_call_id"], "status": "failed"}, **kwargs
+            )
+            raise
 
     def _is_rate_limit_error(self, exception_type: type[Exception], error_str: str) -> bool:
         """Check if the error is a rate limit error.
@@ -1503,6 +1584,13 @@ class BaseLLM(ConnectionNode):
             return True
         return any(indicator in error_str for indicator in LLM_CONNECTION_ERROR_INDICATORS)
 
+    @staticmethod
+    def _is_hook_blocked_error(exception_type: type[Exception]) -> bool:
+        # Deferred: hooks import BaseLLM, and ordinary runs need no agents import.
+        from dynamiq.nodes.agents.exceptions import HookBlockedException
+
+        return issubclass(exception_type, HookBlockedException)
+
     def _should_trigger_fallback(self, exception_type: type[Exception], exception_message: str | None = None) -> bool:
         """Determine if exception should trigger fallback to secondary LLM.
 
@@ -1514,6 +1602,9 @@ class BaseLLM(ConnectionNode):
             bool: True if fallback should be triggered, False otherwise.
         """
         if not self.fallback or not self.fallback.enabled or not self.fallback.llm:
+            return False
+
+        if self._is_hook_blocked_error(exception_type):
             return False
 
         triggers = set(self.fallback.triggers)
@@ -1618,6 +1709,9 @@ class BaseLLM(ConnectionNode):
                 output=transformed_output,
             )
 
+        if fallback_result.error and self._is_hook_blocked_error(fallback_result.error.type):
+            return fallback_result
+
         logger.error(f"LLM {self.name} - {self.id}: Fallback LLM ({fallback_llm.model}) failed.")
         return result
 
@@ -1693,6 +1787,9 @@ class BaseLLM(ConnectionNode):
                 input=result.input,
                 output=transformed_output,
             )
+
+        if fallback_result.error and self._is_hook_blocked_error(fallback_result.error.type):
+            return fallback_result
 
         logger.error(f"LLM {self.name} - {self.id}: Fallback LLM ({fallback_llm.model}) failed.")
         return result
