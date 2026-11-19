@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.connections import Http
 from dynamiq.nodes import NodeGroup
-from dynamiq.nodes.agents.exceptions import ToolExecutionException
+from dynamiq.nodes.exceptions import NodeFailedException
 from dynamiq.nodes.node import ConnectionNode
 from dynamiq.nodes.tools.mcp import create_input_schema_from_json_schema
 from dynamiq.runnables import RunnableConfig
@@ -57,5 +57,5 @@ class RemoteContextTool(ConnectionNode):
                 1024 * 1024,
             )
         except Exception:
-            raise ToolExecutionException("Remote context tool request failed", recoverable=False) from None
+            raise NodeFailedException(message="Remote context tool request failed") from None
         return {"content": output}
