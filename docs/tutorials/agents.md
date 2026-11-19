@@ -237,6 +237,11 @@ Completeness describes what the SDK adapter can observe, including usage supplie
 by upstream libraries; it is not invoice reconciliation or proof about hidden
 library/provider work. Unknown prices remain null. Hosts must preserve these
 distinctions when recording spend after failures or cancellation.
+The shared LiteLLM stream builder marks counters incomplete when its assembled
+values were not observed in the SDK-visible chunks, including its own replacements
+for missing or zero counters. This preserves legacy estimated counts and cost.
+An upstream library may already normalize or estimate values before yielding a
+chunk; that original field presence and provider zero cannot be recovered here.
 
 `dynamiq.nodes.tools.RemoteContextTool` uses the same fixed connection transport for
 host-authorized tools. Configure its `parameters` with an object JSON Schema. It
