@@ -44,8 +44,14 @@ class Ollama(BaseLLM):
             BaseLLMUsageData: A model containing the usage data for the LLM.
         """
         usage = cls._extract_usage(completion=completion)
-        prompt_tokens = cls._usage_value(usage, "prompt_eval_count", cls._usage_value(usage, "prompt_tokens", 0)) or 0
-        completion_tokens = cls._usage_value(usage, "eval_count", cls._usage_value(usage, "completion_tokens", 0)) or 0
+        observed_prompt_tokens = cls._usage_value(usage, "prompt_eval_count", cls._usage_value(usage, "prompt_tokens"))
+        observed_completion_tokens = cls._usage_value(usage, "eval_count", cls._usage_value(usage, "completion_tokens"))
+        observed = all(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            for value in (observed_prompt_tokens, observed_completion_tokens)
+        )
+        prompt_tokens = observed_prompt_tokens or 0
+        completion_tokens = observed_completion_tokens or 0
         total_tokens = (
             cls._usage_value(usage, "total_tokens", prompt_tokens + completion_tokens)
             or prompt_tokens + completion_tokens
@@ -58,4 +64,5 @@ class Ollama(BaseLLM):
             completion_tokens_cost_usd=None,
             total_tokens=total_tokens,
             total_tokens_cost_usd=None,
+            complete=observed,
         )

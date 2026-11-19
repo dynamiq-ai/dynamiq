@@ -98,6 +98,11 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
             params the SDK transport does not translate still go through LiteLLM. Unset (None), the default, it
             follows the ``DYNAMIQ_OPENAI_NATIVE_SDK`` environment variable when each request is sent, off when that
             is unset, so a saved workflow follows the deployment it runs in.
+            Native calls read raw usage through the SDK's ``X-Stainless-Raw-Response: true`` mode; disable native
+            transport for a gateway that rejects that standard SDK control header.
+            Nonstreamed replies incur an extra transient JSON decode to check counters before SDK coercion.
+        num_retries (int | None): Override the native SDK retry limit for this call without changing the shared
+            connection client. Unset keeps the client's configured retry policy.
     """
     connection: OpenAIConnection | None = None
     reasoning_effort: ReasoningEffort | None = ReasoningEffort.AUTO
@@ -208,7 +213,10 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
 
         if not isinstance(self.client, _openai_sdk.OpenAI):
             return super()._call_completion(params)
-        response = _openai_sdk.create(self.client, request)
+        client = self.client
+        if params.get("num_retries") is not None:
+            client = client.with_options(max_retries=params["num_retries"])
+        response = _openai_sdk.create(client, request)
         return super()._call_completion(params) if response is None else response
 
     async def _acall_completion(self, params: dict[str, Any]) -> Any:
@@ -217,7 +225,10 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
             return await super()._acall_completion(params)
         from dynamiq.nodes.llms import _openai_sdk  # deferred: importing the node must not load the OpenAI SDK
 
-        response = await _openai_sdk.acreate(await self.get_async_client(), request)
+        client = await self.get_async_client()
+        if params.get("num_retries") is not None:
+            client = client.with_options(max_retries=params["num_retries"])
+        response = await _openai_sdk.acreate(client, request)
         return await super()._acall_completion(params) if response is None else response
 
     def _build_streamed_response(self, chunks: list, messages: list[dict], stream: Any = None) -> Any:
