@@ -107,6 +107,14 @@ def check_remote_model_lifecycle(config: RunnableConfig | None) -> None:
         )
 
 
+def has_remote_lifecycle_hook(node: Any) -> bool:
+    """Whether this node has an authored or inherited remote authorization hook."""
+    ctx = current_hook_ctx.get()
+    if ctx is not None and any(isinstance(hook, RemoteLifecycleHook) for _, hook in ctx.hooks):
+        return True
+    return any(isinstance(hook, RemoteLifecycleHook) for hook in (getattr(node, "hooks", ()) or ()))
+
+
 def has_remote_tool_lifecycle(node: Any) -> bool:
     """Keep unguarded async nodes on their existing execution path."""
     ctx = current_hook_ctx.get()
