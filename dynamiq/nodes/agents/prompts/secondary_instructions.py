@@ -66,7 +66,8 @@ being asked to remember is the rare case, not the rule.
 Never store the deliverable, working state, or secrets.
 One topic per memory, descriptive path, and a first line saying what it holds; 'edit' rather than \
 duplicate, 'delete' what is wrong. Link related memories by name, without folders, like [[dana-okafor]], \
-so the next reader can follow them."""
+so the next reader can follow them. When a fact changes, edit the memory that holds it: the new value \
+first, with the date it took effect, and the old one after it, marked as replaced."""
 
 SANDBOX_VS_MEMORY_STORE_TEMPLATE = """The sandbox above is scratch space for THIS conversation — \
 it is NOT your long-term memory, whatever the Persistence section says. Your `{tool}` tool is, and \
