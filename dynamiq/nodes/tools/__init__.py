@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from .human_feedback import HumanFeedbackTool
     from .jina import JinaResponseFormat, JinaScrapeTool, JinaSearchTool
     from .judgement import ConfidenceMode, Judgement, JudgementOption, JudgementQuestion, QuestionType
+    from .keenable_search import KeenableTool
     from .linkup_search import LinkupTool
     from .llm_summarizer import SummarizerTool
     from .long_term_memory import LongTermMemoryBackend, RecallFactsTool, RememberFactTool, build_long_term_memory_tools
@@ -69,6 +70,7 @@ _LAZY_EXPORTS = {
     "JinaResponseFormat": ".jina",
     "JinaScrapeTool": ".jina",
     "JinaSearchTool": ".jina",
+    "KeenableTool": ".keenable_search",
     "ConfidenceMode": ".judgement",
     "Judgement": ".judgement",
     "JudgementOption": ".judgement",
@@ -129,6 +131,7 @@ __all__ = [
     "JinaResponseFormat",
     "JinaScrapeTool",
     "JinaSearchTool",
+    "KeenableTool",
     "ConfidenceMode",
     "Judgement",
     "JudgementOption",
