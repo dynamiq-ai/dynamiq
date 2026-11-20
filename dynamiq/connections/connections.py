@@ -9,7 +9,16 @@ from functools import cache, cached_property, partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    computed_field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 from pydantic_core.core_schema import ValidationInfo
 
 from dynamiq.utils import generate_uuid
@@ -22,6 +31,7 @@ if TYPE_CHECKING:
 
     import httpx
     from chromadb import ClientAPI as ChromaClient
+    from google.cloud.bigquery import Client as BigQueryClient
     from google.cloud.documentai import DocumentProcessorServiceClient as DocumentAIClient
     from neo4j import Driver as Neo4jDriver
     from openai import AsyncOpenAI as AsyncOpenAIClient
@@ -211,10 +221,20 @@ class Dynamiq(HttpApiKey):
 
     The base URL and API key can be provided explicitly or sourced from the
     ``DYNAMIQ_URL`` and ``DYNAMIQ_API_KEY`` environment variables.
+
+    Attributes:
+        url (str): The platform API's base URL, which the memory, skills, artifact and knowledge base clients call.
+        api_key (str): The key every call authenticates with.
+        router_url (str): The Dynamiq router's OpenAI-compatible base URL, which the Dynamiq LLM node calls. It
+            defaults to ``DYNAMIQ_ROUTER_URL``, else the public router.
+        headers (dict[str, Any]): Headers sent with every call, with the bearer token and the SDK's User-Agent added.
     """
 
     url: str = Field(default_factory=partial(get_env_var, "DYNAMIQ_URL", "https://api.getdynamiq.ai"))
     api_key: str = Field(default_factory=partial(get_env_var, "DYNAMIQ_API_KEY"))
+    router_url: str = Field(
+        default_factory=partial(get_env_var, "DYNAMIQ_ROUTER_URL", "https://router.getdynamiq.ai/v1")
+    )
     headers: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -224,6 +244,21 @@ class Dynamiq(HttpApiKey):
             self.headers.update({"Authorization": f"Bearer {self.api_key}"})
         self.headers.setdefault("User-Agent", USER_AGENT)
         return self
+
+    def connect_router(self) -> "OpenAIClient":
+        """An OpenAI SDK client for the router at `router_url`, which sends the connection's headers.
+
+        `connect()` returns the requests module for the platform API's clients, so the Dynamiq LLM node gets this one
+        from the connection manager instead.
+        """
+        from openai import OpenAI as OpenAIClient  # deferred: importing the connection must not load the OpenAI SDK
+
+        return OpenAIClient(
+            api_key=self.api_key,
+            base_url=self.router_url,
+            default_headers=self.headers,
+            http_client=_openai_http_client(),
+        )
 
     @property
     def conn_params(self) -> dict:
@@ -771,6 +806,105 @@ class GoogleDocumentAI(GoogleCloud):
         return client
 
 
+# BigQuery bills at least 10 MiB for each table a query reads, so a lower limit would fail every query.
+BIGQUERY_MINIMUM_BYTES_BILLED = 10 * 1024**2
+
+
+class BigQuery(BaseConnection):
+    """
+    Represents a connection to Google BigQuery as the service account whose key it holds.
+
+    The key is its only source of credentials: unlike the other Google Cloud connections, it never falls back to
+    Application Default Credentials or the `GOOGLE_CLOUD_*` environment variables, which on a shared runtime belong
+    to someone else.
+
+    Attributes:
+        project (str): The project that runs the query jobs and is billed for them. It may differ from the service
+            account's project and from the projects that hold the data.
+        location (str | None): Where query jobs run: "US", "EU", a region such as "europe-west2", or a BigQuery Omni
+            region such as "aws-us-east-1". Without it, BigQuery runs each job where the datasets it reads are.
+        maximum_bytes_billed (int | None): The most bytes a query may bill, at least 10 MiB. A query that would bill
+            more fails before it runs, without a charge.
+        service_account (GoogleCloud): The service account key, as the fields of its JSON key file or as the
+            file's text.
+    """
+
+    project: str = Field(min_length=1)
+    location: str | None = None
+    maximum_bytes_billed: int | None = Field(default=None, ge=BIGQUERY_MINIMUM_BYTES_BILLED)
+    service_account: GoogleCloud
+
+    # Keeps key material out of validation errors, and validates a key assigned later the same way.
+    model_config = ConfigDict(hide_input_in_errors=True, validate_assignment=True)
+
+    @field_validator("service_account", mode="before")
+    @classmethod
+    def _take_the_key_as_given(cls, key: Any) -> Any:
+        """Builds the key from its own fields only: a field it lacks is passed as None, so GoogleCloud does not
+        fill it in from the environment."""
+        if isinstance(key, str):
+            key = json.loads(key)
+        elif isinstance(key, GoogleCloud):
+            # Fields it was not given came from the environment.
+            given = key.model_fields_set & set(GoogleCloud.SERVICE_ACCOUNT_FIELDS)
+            key = {field: getattr(key, field) for field in given}
+        if isinstance(key, dict):
+            return dict.fromkeys(GoogleCloud.SERVICE_ACCOUNT_FIELDS) | key
+        return key
+
+    @field_serializer("service_account")
+    def _dump_the_key(self, key: GoogleCloud) -> dict[str, str | None]:
+        """Dumps only the key's fields: the nested GoogleCloud gets a new id on every build, and ConnectionManager
+        caches clients by the dump."""
+        return {field: getattr(key, field) for field in GoogleCloud.SERVICE_ACCOUNT_FIELDS}
+
+    def _service_account_info(self) -> dict[str, str]:
+        """The key's set fields for google-auth: an unset universe_domain passed as None would make it switch to
+        self-signed JWTs.
+
+        Raises:
+            ConnectionError: If the key lacks a field that google-auth needs to sign in.
+        """
+        key = self.service_account
+        if missing := [field for field in GoogleCloud.SERVICE_ACCOUNT_REQUIRED_FIELDS if not getattr(key, field)]:
+            raise ConnectionError(
+                f"The BigQuery connection's service account key has no {', '.join(missing)}. "
+                "Give the connection the service account's complete JSON key."
+            )
+        return {field: value for field in GoogleCloud.SERVICE_ACCOUNT_FIELDS if (value := getattr(key, field))}
+
+    def connect(self) -> "BigQueryClient":
+        """
+        Connects to BigQuery as the connection's service account.
+
+        Returns:
+            google.cloud.bigquery.Client: A client that bills its query jobs to `project` and runs them in `location`.
+
+        Raises:
+            ConnectionError: If the service account key is incomplete or not valid.
+        """
+        try:
+            from google.cloud.bigquery import Client
+        except ModuleNotFoundError as error:
+            if error.name != "google.cloud":
+                raise
+            # Without any Google Cloud package even the shared namespace is missing, which ConnectionManager would
+            # put down to the gcp extra.
+            raise ModuleNotFoundError(
+                "No module named 'google.cloud.bigquery'", name="google.cloud.bigquery"
+            ) from error
+        from google.oauth2 import service_account
+
+        try:
+            credentials = service_account.Credentials.from_service_account_info(self._service_account_info())
+        except ValueError as error:
+            raise ConnectionError(f"The BigQuery connection's service account key is not valid: {error}") from error
+
+        client = Client(project=self.project, credentials=credentials, location=self.location)
+        logger.debug(f"Connected to BigQuery with project={self.project}, location={self.location}.")
+        return client
+
+
 class Cohere(BaseApiKeyConnection):
     api_key: str = Field(default_factory=partial(get_env_var, "COHERE_API_KEY"))
 
@@ -1059,6 +1193,11 @@ class Weaviate(BaseApiKeyConnection):
     timeout_init: int = Field(default=180, description="Timeout for initialization checks in seconds")
     timeout_query: int = Field(default=180, description="Timeout for query operations in seconds")
     timeout_insert: int = Field(default=120, description="Timeout for insert operations in seconds")
+    secure: bool = Field(
+        default=True,
+        description="Whether a custom deployment is reached over TLS. Set to False for a self-hosted Weaviate "
+        "served over plain HTTP, such as a local one; an empty api_key then connects without authentication.",
+    )
 
     def connect(self) -> "WeaviateClient":
         """
@@ -1088,11 +1227,11 @@ class Weaviate(BaseApiKeyConnection):
             weaviate_client = connect_to_custom(
                 http_host=self.http_host,
                 http_port=self.http_port,
-                http_secure=True,
+                http_secure=self.secure,
                 grpc_host=self.grpc_host,
                 grpc_port=self.grpc_port,
-                grpc_secure=True,
-                auth_credentials=Auth.api_key(self.api_key),
+                grpc_secure=self.secure,
+                auth_credentials=Auth.api_key(self.api_key) if self.api_key else None,
                 additional_config=AdditionalConfig(
                     timeout=Timeout(
                         init=self.timeout_init, query=self.timeout_query, insert=self.timeout_insert
@@ -1407,6 +1546,14 @@ class Daytona(BaseApiKeyConnection):
 
 class HuggingFace(BaseApiKeyConnection):
     api_key: str = Field(default_factory=partial(get_env_var, "HUGGINGFACE_API_KEY"))
+    url: str | None = Field(
+        default=None,
+        description=(
+            "Endpoint of a dedicated or self-hosted model for the PII or prompt-injection detector, such as an "
+            "Inference Endpoint or Text Embeddings Inference. It serves one model, so each detector needs a connection "
+            "of its own. Left empty, the detectors call the Hugging Face router for their model."
+        ),
+    )
 
     def connect(self):
         pass
@@ -2071,10 +2218,18 @@ class Databricks(BaseApiKeyConnection):
 def merge_mcp_http_headers(base: dict[str, Any] | None, extra: dict[str, Any] | None) -> dict[str, Any] | None:
     """Merge connection-level and per-call MCP HTTP headers without mutating either dict.
 
-    Per-call values win on duplicate keys. An empty merge returns ``None`` so the MCP client
-    keeps its default (no extra headers) rather than sending ``{}``.
+    Per-call values win on duplicate keys, compared case-insensitively as HTTP header names are: a
+    per-call ``authorization`` replaces the connection's ``Authorization`` instead of being sent next
+    to it. An empty merge returns ``None`` so the MCP client keeps its default (no extra headers)
+    rather than sending ``{}``.
     """
-    merged = {**(base or {}), **(extra or {})}
+    merged: dict[str, Any] = {}
+    names: dict[str, str] = {}  # lowercased name -> the spelling kept in ``merged``
+    for headers in (base or {}, extra or {}):
+        for key, value in headers.items():
+            merged.pop(names.get(str(key).lower(), key), None)
+            names[str(key).lower()] = key
+            merged[key] = value
     return merged or None
 
 
@@ -2245,8 +2400,15 @@ class TypeSafe(HttpApiKey):
 
 
 class Lakera(BaseApiKeyConnection):
-    url: Literal["https://api.lakera.ai/v2/"] = "https://api.lakera.ai/v2/"
+    url: str = Field(
+        default="https://api.lakera.ai/v2/",
+        description="Lakera Guard API root: the hosted API or a self-hosted deployment.",
+    )
     api_key: str = Field(default_factory=partial(get_env_var, "LAKERA_API_KEY"))
+    project_id: str | None = Field(
+        default=None,
+        description="Lakera project whose policy screens the requests. Left empty, Lakera applies its default policy.",
+    )
 
     def connect(self):
         """Connects to the Lakera API.
@@ -2266,6 +2428,10 @@ class Lakera(BaseApiKeyConnection):
             dict: A dictionary containing the headers for authorization.
         """
         return {"Authorization": f"Bearer {self.api_key}"}
+
+    @property
+    def guard_url(self) -> str:
+        return f"{self.url.rstrip('/')}/guard"
 
 
 class MistralOCR(Mistral):
@@ -2451,6 +2617,48 @@ class SteelBrowser(BaseConnection):
             if self.api_key:
                 raise ValueError("api_key should not be provided when environment='SELF_HOSTED'")
         return self
+
+    def connect(self):
+        pass
+
+
+class BrowserUse(BaseConnection):
+    """
+    Browser Use Cloud connection configuration for Stagehand.
+
+    The browser is created through the Browser Use Cloud API (``POST /browsers``) and driven over
+    CDP by Stagehand's bundled local server, which inherits the process environment. With
+    ``anthropic/*`` models, leave ``ANTHROPIC_BASE_URL`` unset or include the ``/v1`` suffix.
+    """
+
+    api_key: str = Field(default_factory=partial(get_env_var, "BROWSER_USE_API_KEY"))
+    url: str = Field(default="https://api.browser-use.com/api/v4", description="Browser Use Cloud API base URL.")
+    model_api_key: str = Field(..., description="API key for the LLM model.")
+    session_config: dict[str, Any] = Field(
+        default_factory=lambda: {"timeout": 60},
+        description=(
+            "Request body for browser creation (e.g. proxyCountryCode, profileId, enableRecording). "
+            "timeout is in minutes (max 240) so the browser outlasts a full agent run."
+        ),
+    )
+    extra_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Additional Stagehand session start options (e.g. self_heal, system_prompt, "
+            "dom_settle_timeout_ms, verbose)."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_api_key(self):
+        """Fail at construction rather than with an opaque header error on the first tool call."""
+        if not self.api_key:
+            raise ValueError("api_key is required: pass it or set BROWSER_USE_API_KEY")
+        return self
+
+    @property
+    def conn_params(self) -> dict:
+        return {"X-Browser-Use-API-Key": self.api_key, "Content-Type": "application/json"}
 
     def connect(self):
         pass

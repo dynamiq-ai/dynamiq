@@ -82,7 +82,7 @@ def run_agent(request: str, send_handler: AsyncStreamingIteratorCallbackHandler)
     connection_tavily = TavilyConnection()
     tool_search = TavilyTool(connection=connection_tavily)
 
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-6-luna", temperature=0)
     research_agent = Agent(
         name="Agent",
         id="Agent",

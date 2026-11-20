@@ -13,6 +13,7 @@ from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.mocking import MockConfig
 from dynamiq.utils import is_called_from_async_context
 from dynamiq.utils.logger import logger
@@ -548,6 +549,7 @@ class MCPTool(ConnectionNode):
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
+        check_cancellation(config)
 
         input_dict, http_headers = split_mcp_http_headers(input_data)
 
@@ -602,6 +604,8 @@ class MCPServer(ConnectionNode):
       exclude_tools (list[str]): Names of tools to exclude.
       discover_per_run (bool): List tools at the start of each agent run, with that run's
         ``mcp_http_headers``, instead of once when the agent is built.
+      discovery_required (bool): Whether a failure to list the server's tools, for any reason, fails the
+        agent. When False, the agent goes on without this server's tools.
       _mcp_tools (dict[str, MCPTool]): Internal dict of initialized MCP tools.
     """
 
@@ -634,6 +638,13 @@ Usage Strategy:
             "tools to different callers."
         ),
     )
+    discovery_required: bool = Field(
+        default=True,
+        description=(
+            "When False, a failure to list the server's tools is logged as a warning and the agent goes on "
+            "without them, instead of failing. A listing that neither fails nor answers is still waited for."
+        ),
+    )
     _mcp_tools: dict[str, MCPTool] = PrivateAttr(default_factory=dict)
 
     async def initialize_tools(self, headers: dict[str, Any] | None = None):
@@ -663,7 +674,13 @@ Usage Strategy:
                     await session.initialize()
                     page = await session.list_tools()
                     tools = list(page.tools)
+                    seen_cursors: set[str] = set()
                     while page.nextCursor:
+                        if page.nextCursor in seen_cursors:
+                            # A server that hands back a cursor it already gave would be paged forever.
+                            logger.warning(f"Tool {self.name}: MCP server repeated a tools/list cursor; stopping.")
+                            break
+                        seen_cursors.add(page.nextCursor)
                         page = await session.list_tools(params=PaginatedRequestParams(cursor=page.nextCursor))
                         tools.extend(page.tools)
                     for tool in tools:
@@ -695,6 +712,13 @@ Usage Strategy:
                     f"its tools. The agent will not see this server's tools this run. Error: {error}"
                 )
                 return discovered
+            if not self.discovery_required:
+                # A listing that failed part-way is left out whole rather than offered as an arbitrary subset.
+                logger.warning(
+                    f"Tool {self.name} - {self.id}: failed to initialize session; continuing without its tools "
+                    f"because discovery_required is off. Error: {error}"
+                )
+                return {}
             logger.error(f"Tool {self.name} - {self.id}: failed to initialize session. Error: {error}")
             raise ToolExecutionException(f"Tool {self.name} - {self.id}: failed to initialize session. Error: {error}")
         return discovered

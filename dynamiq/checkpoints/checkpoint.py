@@ -240,18 +240,24 @@ class FlowCheckpoint(BaseModel):
         """Convert to a fully JSON-serializable dict, handling complex types in Any fields.
 
         Fields typed as Any (original_input, node input_data/output_data) can contain
-        BytesIO, bytes, datetime etc. These are pre-encoded to avoid serialization issues.
+        BytesIO, bytes, datetime etc. These are pre-encoded to avoid serialization issues,
+        and so are the free-form dicts (original_config, metadata, a node's error and
+        internal_state), whose text can carry a NUL or a lone surrogate that Postgres jsonb
+        refuses: an error message quoting a UTF-16 response body does.
         Dict keys that are non-primitive (e.g. UUID) are coerced to strings.
         """
         any_fields = {"original_input"}
         data = self.model_dump(exclude=any_fields)
         data["original_input"] = encode_checkpoint_data(self.original_input)
+        data["original_config"] = encode_checkpoint_data(self.original_config)
+        data["metadata"] = encode_checkpoint_data(self.metadata)
 
         for node_id, node_state in data.get("node_states", {}).items():
             raw_state = self.node_states.get(node_id)
             if raw_state:
                 node_state["input_data"] = encode_checkpoint_data(raw_state.input_data)
                 node_state["output_data"] = encode_checkpoint_data(raw_state.output_data)
+                node_state["error"] = encode_checkpoint_data(raw_state.error)
                 node_state["internal_state"] = encode_checkpoint_data(raw_state.internal_state)
 
         return data

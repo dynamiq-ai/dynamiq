@@ -72,6 +72,11 @@ class Message(BaseModel):
         name (str | None): Function name a tool message is responding to.
             Optional in OpenAI's chat-completions API but conventionally
             included in tool messages for clarity.
+        reasoning_details (list[dict] | None): The reasoning an assistant turn
+            came with, as the Dynamiq router returns it: signed thinking text,
+            summaries and encrypted reasoning. Sent back with the turn, so the
+            model keeps its reasoning across the calls of a tool loop. Only LLM
+            nodes that replay it send it; the others drop it.
     """
 
     content: str
@@ -81,17 +86,19 @@ class Message(BaseModel):
     tool_calls: list[dict] | None = None
     tool_call_id: str | None = None
     name: str | None = None
+    reasoning_details: list[dict] | None = None
 
     message_type: ClassVar[MessageType] = MessageType.MESSAGE
 
     def format_message(self, **kwargs) -> "Message":
-        "Returns formated copy of message"
+        "Returns a formatted copy of the message."
         return Message(
             role=self.role,
             content=compile_template(self.content).render(**kwargs),
             tool_calls=self.tool_calls,
             tool_call_id=self.tool_call_id,
             name=self.name,
+            reasoning_details=self.reasoning_details,
         )
 
     @model_serializer(mode="wrap")
@@ -99,7 +106,7 @@ class Message(BaseModel):
         # FC-only fields stay out of the dump shape unless explicitly set,
         # so non-FC consumers see the same dict shape as before these fields existed.
         data = handler(self)
-        for key in ("tool_calls", "tool_call_id", "name"):
+        for key in ("tool_calls", "tool_call_id", "name", "reasoning_details"):
             if data.get(key) is None:
                 data.pop(key, None)
         return data
@@ -117,6 +124,8 @@ class Message(BaseModel):
             data["tool_call_id"] = self.tool_call_id
         if self.name is not None:
             data["name"] = self.name
+        if self.reasoning_details is not None:
+            data["reasoning_details"] = self.reasoning_details
         # Kept out of the provider payload by format_messages()'s exclude, so carrying it
         # here only affects round-trips (checkpoint restore, memory snapshots).
         if self.metadata is not None:
@@ -132,6 +141,7 @@ class Message(BaseModel):
             tool_calls=data.get("tool_calls"),
             tool_call_id=data.get("tool_call_id"),
             name=data.get("name"),
+            reasoning_details=data.get("reasoning_details"),
             metadata=data.get("metadata"),
         )
 

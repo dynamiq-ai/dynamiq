@@ -48,7 +48,7 @@ def setup_react_agent() -> Agent:
     Returns:
         Agent: Configured ReAct agent.
     """
-    llm = setup_llm(model_provider="gpt", model_name="gpt-5-pro")
+    llm = setup_llm(model_provider="gpt", model_name="gpt-6-astra")
 
     # Create tools
     tool_search = ScaleSerpTool(connection=ScaleSerp())

@@ -1,7 +1,9 @@
 import asyncio
 import base64
 import inspect
-from datetime import date, datetime
+import ipaddress
+import math
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from enum import Enum
 from io import BytesIO
@@ -108,6 +110,23 @@ def generate_uuid() -> str:
         str: A string representation of a UUID4.
     """
     return str(uuid4())
+
+
+def align_decimal_with_float(a: Any, b: Any) -> tuple[Any, Any]:
+    """The two sides of a comparison, an arithmetic operation or a sum, with a finite float beside a Decimal read as
+    the decimal it writes.
+
+    A SQL NUMERIC column arrives as a Decimal, which Python compares with a float exactly and refuses to add to one,
+    while a float holds the binary value nearest the number written: `Decimal('0.36') <= 0.36` is false. Read through
+    its shortest repr, the float is the number its author wrote, `Decimal('0.36')`, and the Decimal keeps every digit
+    it has. A NaN or an infinity is left as it is, so arithmetic between a Decimal and one still raises a TypeError,
+    and ordering a NaN against a Decimal still raises.
+    """
+    if isinstance(a, Decimal) and isinstance(b, float) and math.isfinite(b):
+        return a, Decimal(float.__repr__(b))
+    if isinstance(b, Decimal) and isinstance(a, float) and math.isfinite(a):
+        return Decimal(float.__repr__(a)), b
+    return a, b
 
 
 def serialize(obj: Any) -> dict[str, Any]:
@@ -271,8 +290,19 @@ def encode_reversible(value: Any) -> Any:
         return {"__datetime__": value.isoformat()}
     if isinstance(value, date):
         return {"__date__": value.isoformat()}
+    if isinstance(value, time):
+        return {"__time__": value.isoformat()}
+    if isinstance(value, timedelta):
+        return {"__timedelta__": [value.days, value.seconds, value.microseconds]}
     if isinstance(value, UUID):
         return {"__uuid__": str(value)}
+    if isinstance(value, (ipaddress.IPv4Network, ipaddress.IPv6Network)):
+        return {"__ip_network__": str(value)}
+    # An interface is a subclass of its address class, so it is matched before the address.
+    if isinstance(value, (ipaddress.IPv4Interface, ipaddress.IPv6Interface)):
+        return {"__ip_interface__": str(value)}
+    if isinstance(value, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+        return {"__ip_address__": str(value)}
     if isinstance(value, Enum):
         return value.value
     if hasattr(value, "model_dump"):
@@ -301,13 +331,19 @@ REVERSIBLE_MARKERS = frozenset(
         "__bytes__",
         "__datetime__",
         "__date__",
+        "__time__",
+        "__timedelta__",
         "__uuid__",
+        "__ip_network__",
+        "__ip_interface__",
+        "__ip_address__",
         "__set__",
         "__decimal__",
         "__tuple__",
         "__dict_items__",
         "__int__",
         "__float__",
+        "__str__",
     }
 )
 
@@ -337,8 +373,18 @@ def decode_reversible(dct: dict) -> Any:
         return datetime.fromisoformat(dct["__datetime__"])
     if "__date__" in dct:
         return date.fromisoformat(dct["__date__"])
+    if "__time__" in dct:
+        return time.fromisoformat(dct["__time__"])
+    if "__timedelta__" in dct:
+        return timedelta(*dct["__timedelta__"])
     if "__uuid__" in dct:
         return UUID(dct["__uuid__"])
+    if "__ip_network__" in dct:
+        return ipaddress.ip_network(dct["__ip_network__"])
+    if "__ip_interface__" in dct:
+        return ipaddress.ip_interface(dct["__ip_interface__"])
+    if "__ip_address__" in dct:
+        return ipaddress.ip_address(dct["__ip_address__"])
     if "__set__" in dct:
         return set(dct["__set__"])
     if "__decimal__" in dct:
@@ -351,6 +397,8 @@ def decode_reversible(dct: dict) -> Any:
         return int(dct["__int__"])
     if "__float__" in dct:
         return float(dct["__float__"])
+    if "__str__" in dct:
+        return dct["__str__"].encode().decode("unicode_escape")
     return dct
 
 

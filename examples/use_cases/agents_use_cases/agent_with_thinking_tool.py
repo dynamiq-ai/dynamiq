@@ -6,7 +6,7 @@ from dynamiq.nodes.types import InferenceMode
 from examples.llm_setup import setup_llm
 
 if __name__ == "__main__":
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0.7)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-6-luna", temperature=0.7)
 
     thinking_tool = ThinkingTool(llm=llm)
     connection_exa = Exa()

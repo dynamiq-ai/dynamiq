@@ -4,7 +4,7 @@ from dynamiq.prompts import Prompt
 
 def run_ollama_node(prompt: Prompt):
     ollama_node = Ollama(
-        model="ollama/qwq",
+        model="ollama/qwen3.8",
     )
     response = ollama_node.run(input_data={}, prompt=prompt)
     return response

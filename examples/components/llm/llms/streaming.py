@@ -11,7 +11,7 @@ def run_openai_node_with_streaming(prompt: Prompt):
     """
     # Set up the OpenAI node with streaming enabled
     openai_node = OpenAI(
-        model="gpt-4o-mini",
+        model="gpt-6-luna",
         streaming=StreamingConfig(
             enabled=True,
             event="data",

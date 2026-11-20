@@ -8,6 +8,22 @@ from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTe
 from dynamiq.utils.litellm import token_counter
 from dynamiq.utils.logger import logger
 
+# Encrypted reasoning is opaque, so its tokens are estimated from the length of its data, at the characters per
+# token of plain text.
+_ENCRYPTED_REASONING_CHARS_PER_TOKEN = 4
+
+
+def _reasoning_details_tokens(model: str, details: list[dict]) -> int:
+    """Input tokens that replaying `details` adds to a request, which the message token count leaves out."""
+    tokens = 0
+    for detail in details:
+        for key in ("text", "summary"):
+            if isinstance(value := detail.get(key), str) and value:
+                tokens += token_counter(model=model, text=value)
+        if isinstance(data := detail.get("data"), str):
+            tokens += len(data) // _ENCRYPTED_REASONING_CHARS_PER_TOKEN
+    return tokens
+
 
 class HistoryManagerMixin:
     """Mixin that provides conversation history and token limit management.
@@ -46,7 +62,7 @@ class HistoryManagerMixin:
         Split rather than summed because they are different levers: compaction shrinks the
         conversation and can do nothing about the schemas.
         """
-        messages = self._prompt.count_tokens(self.llm.model)
+        messages = self._prompt.count_tokens(self.llm.model) + self._replayed_reasoning_tokens(self._prompt.messages)
 
         # same accessor the request uses, so a run-time tool overlay is counted too
         if effective := getattr(self, "_effective_inference_schemas", None):
@@ -74,6 +90,25 @@ class HistoryManagerMixin:
             "total": messages + tools + response_format,
         }
 
+    def _exceeds_compaction_limit(self, tokens: int) -> bool:
+        """Whether a request of ``tokens`` tokens is over the limit that triggers summarization."""
+        return bool(
+            (
+                self.summarization_config.max_token_context_length
+                and tokens > self.summarization_config.max_token_context_length
+            )
+            or (tokens / self.llm.get_token_limit() > self.summarization_config.context_usage_ratio)
+        )
+
+    def _replayed_reasoning_tokens(self, messages: list[Message | VisionMessage]) -> int:
+        """Tokens of the reasoning the LLM sends back with `messages`, none for an LLM that sends none back."""
+        if (replayed := getattr(self.llm, "replayed_reasoning_details", None)) is None:
+            return 0
+        return sum(
+            _reasoning_details_tokens(self.llm.model, replayed(getattr(message, "reasoning_details", None)))
+            for message in messages
+        )
+
     def is_token_limit_exceeded(self) -> bool:
         """
         Check whether token limit for summarization is exceeded.
@@ -84,13 +119,7 @@ class HistoryManagerMixin:
         tokens = self.count_context_tokens()
         prompt_tokens = tokens["total"]
 
-        exceeded = bool(
-            (
-                self.summarization_config.max_token_context_length
-                and prompt_tokens > self.summarization_config.max_token_context_length
-            )
-            or (prompt_tokens / self.llm.get_token_limit() > self.summarization_config.context_usage_ratio)
-        )
+        exceeded = self._exceeds_compaction_limit(prompt_tokens)
         if exceeded:
             logger.info(
                 f"Agent {self.name} - {self.id}: context at {prompt_tokens}/{self.llm.get_token_limit()} tokens "
@@ -98,6 +127,23 @@ class HistoryManagerMixin:
                 f"response_format={tokens['response_format']})."
             )
         return exceeded
+
+    def _fixed_context_tokens(self) -> int:
+        """Tokens of the system prompt and the tool and response schemas, which compaction cannot shorten."""
+        tokens = self.count_context_tokens()
+        system_tokens = token_counter(
+            model=self.llm.model,
+            messages=[m.model_dump(exclude={"metadata"}) for m in self._prompt.messages[: self._history_offset]],
+        )
+        return system_tokens + tokens["tools"] + tokens["response_format"]
+
+    def is_fixed_context_over_limit(self) -> bool:
+        """Whether the system prompt and the tool and response schemas alone exceed the summarization limit.
+
+        Compaction only shortens the conversation, so it cannot get such a request under the limit, and it
+        would summarize again on every loop.
+        """
+        return self._exceeds_compaction_limit(self._fixed_context_tokens())
 
     def _split_history(
         self,
@@ -117,11 +163,25 @@ class HistoryManagerMixin:
             msg_tokens = token_counter(
                 model=self.llm.model,
                 messages=[msg.model_dump(exclude={"metadata"})],
-            )
+            ) + self._replayed_reasoning_tokens([msg])
             if n_tokens + msg_tokens > self.summarization_config.max_preserved_tokens:
                 break
             n_tokens += msg_tokens
             preserve_count += 1
+
+        # What came after the model's last reply (tool results, a new question) it has not read yet, so that is kept
+        # whole with the reply, past max_preserved_tokens if need be: a summary must not stand in for it. Only when
+        # the model's context window cannot hold it, as with several large results at once, is it summarized too.
+        last_reply = max(
+            (index for index, msg in enumerate(conversation_history) if msg.role == MessageRole.ASSISTANT), default=None
+        )
+        if last_reply is not None and last_reply < len(conversation_history) - 1:
+            unread = conversation_history[last_reply:]
+            unread_tokens = token_counter(
+                model=self.llm.model, messages=[msg.model_dump(exclude={"metadata"}) for msg in unread]
+            ) + self._replayed_reasoning_tokens(unread)
+            if self._fixed_context_tokens() + unread_tokens <= self.llm.get_token_limit():
+                preserve_count = max(preserve_count, len(unread))
 
         if preserve_count > 0:
             to_summarize = conversation_history[:-preserve_count]
@@ -135,9 +195,19 @@ class HistoryManagerMixin:
         while to_preserve and to_preserve[0].role == MessageRole.TOOL:
             to_summarize = list(to_summarize) + [to_preserve.pop(0)]
 
-        if to_summarize == [] and self.is_token_limit_exceeded():
-            to_summarize = conversation_history
-            to_preserve = []
+        # Summarizing everything only helps when the conversation is what fills the context. When the system
+        # prompt and tool schemas alone exceed the limit, it would summarize the whole history on every loop, unless
+        # the request no longer fits the model's context window, which the provider would reject.
+        if (
+            to_summarize == []
+            and self.is_token_limit_exceeded()
+            and (
+                not self.is_fixed_context_over_limit()
+                or self.count_context_tokens()["total"] > self.llm.get_token_limit()
+            )
+        ):
+            to_summarize = conversation_history[:last_reply] if last_reply is not None else conversation_history
+            to_preserve = [m.copy() for m in conversation_history[len(to_summarize) :]]
 
         return to_summarize, to_preserve
 

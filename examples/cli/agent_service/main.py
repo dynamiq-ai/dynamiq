@@ -23,7 +23,7 @@ connection_exa = Exa()
 tool_search = ExaTool(connection=connection_exa)
 llm = TogetherAI(
     connection=TogetherAIConnection(),
-    model="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+    model="meta-llama/Llama-4-Scout-17B-16E-Instruct",
     temperature=0,
     max_tokens=4000,
 )

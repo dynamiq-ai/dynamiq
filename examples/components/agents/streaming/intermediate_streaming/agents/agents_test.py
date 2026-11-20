@@ -17,7 +17,7 @@ from examples.llm_setup import setup_llm
 AGENT_ROLE = "A helpful Assistant with access to web tools."
 
 LLM_CONFIGS = [
-    {"provider": "claude", "model": "claude-3-5-sonnet-20241022", "name": "GPT-4o mini"},
+    {"provider": "claude", "model": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5"},
 ]
 
 INFERENCE_MODES = [

@@ -21,7 +21,6 @@ from types import FunctionType, ModuleType
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Union
 from uuid import uuid4
 
-from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, create_model, model_validator
 
 from dynamiq.cache.utils import cache_wf_entity, cache_wf_entity_async
@@ -34,7 +33,7 @@ from dynamiq.connections import BaseConnection
 if TYPE_CHECKING:
     from dynamiq.checkpoints.checkpoint import BaseCheckpointState
 
-from dynamiq.connections.managers import ConnectionManager, ConnectionManagerException
+from dynamiq.connections.managers import ConnectionClientInitType, ConnectionManager, ConnectionManagerException
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.nodes.exceptions import (
@@ -48,6 +47,7 @@ from dynamiq.nodes.schema_utils import apply_param_modes, strip_inaccessible_fie
 from dynamiq.nodes.types import ActionType, Behavior, ChoiceCondition, DependencyTrigger, InputParamMode, NodeGroup
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.storages.vector.base import BaseVectorStoreParams
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.dry_run import DryRunConfig
@@ -68,6 +68,7 @@ from dynamiq.types.streaming import (
 )
 from dynamiq.utils import format_value, generate_uuid, merge
 from dynamiq.utils.duration import format_duration
+from dynamiq.utils.jinja import compile_template
 from dynamiq.utils.jsonpath import filter as jsonpath_filter
 from dynamiq.utils.jsonpath import mapper as jsonpath_mapper
 from dynamiq.utils.logger import logger
@@ -163,25 +164,25 @@ def is_retryable_error(exc: BaseException) -> bool:
     """
     if getattr(exc, "retryable", True) is False:
         return False
-    if "litellm" not in sys.modules:  # the error cannot come from litellm, and importing it takes seconds
-        return True
-    try:
-        from litellm.exceptions import (
-            AuthenticationError,
-            BadRequestError,
-            BudgetExceededError,
-            NotFoundError,
-            PermissionDeniedError,
-        )
-    except ImportError:  # provider library unavailable: keep retrying as before
-        return True
-
+    # Only a litellm that finished importing raises its own errors, so its exceptions are read where its import left
+    # them. Importing them here would take seconds where litellm is not imported, and could deadlock on the import
+    # lock of a litellm that another thread is still importing.
+    exceptions = sys.modules.get("litellm.exceptions")
     # BadRequestError also covers ContextWindowExceededError and UnsupportedParamsError.
     # RateLimitError is deliberately absent — retryable, and does not subclass these.
-    return not isinstance(
-        exc,
-        (AuthenticationError, PermissionDeniedError, BadRequestError, NotFoundError, BudgetExceededError),
+    permanent = tuple(
+        getattr(exceptions, name, None)
+        for name in (
+            "AuthenticationError",
+            "PermissionDeniedError",
+            "BadRequestError",
+            "NotFoundError",
+            "BudgetExceededError",
+        )
     )
+    if None in permanent:
+        return True
+    return not isinstance(exc, permanent)
 
 
 # The time.monotonic() by which the innermost node with a timeout that is running this code must finish.
@@ -246,6 +247,26 @@ def share_input_queues(nodes: Iterable["Node"], config: RunnableConfig) -> Itera
                 shared.maps -= 1
                 if not shared.maps:
                     del _shared_input_queues[key]
+
+
+# The copies made on this thread while isolated_in_memory_file_stores runs, by the id of the store copied.
+_in_memory_file_store_copies = threading.local()
+
+
+@contextmanager
+def isolated_in_memory_file_stores() -> Iterator[None]:
+    """Make the nodes cloned on this thread while the block runs copy the in-memory file stores they hold.
+
+    Node.clone() shares a file store, so that the copy of a tool run in parallel writes where its agent reads. In the
+    block each store is copied once, with the files it holds, and every node cloned there holds that copy in its place,
+    so an agent and its file tools still share one store. A store that keeps its files elsewhere stays shared.
+    """
+    previous = getattr(_in_memory_file_store_copies, "copies", None)
+    _in_memory_file_store_copies.copies = {}
+    try:
+        yield
+    finally:
+        _in_memory_file_store_copies.copies = previous
 
 
 class ErrorHandling(BaseModel):
@@ -483,6 +504,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
     _output_references: NodeOutputReferences = PrivateAttr()
     _pending_approval_response: ApprovalInputData | None = PrivateAttr(default=None)
+    _authored_id: str | None = PrivateAttr(default=None)
 
     # Set to True in subclasses that manage their own background event loop
     # (e.g. CuaDesktopTool, E2BDesktopTool) to force run_async to offload
@@ -493,6 +515,11 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
     # tool): "mock all the tools" never means those, and mocking them corrupts the agent
     # rather than protecting the outside world. An explicit node-level mock still applies.
     is_mockable: ClassVar[bool] = True
+
+    @property
+    def authored_id(self) -> str:
+        """The id the node was written with, which copies made for a Map item or a call keep."""
+        return self._authored_id or self.id
 
     @property
     def has_native_async(self) -> bool:
@@ -681,8 +708,16 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             NodeConditionFailedException: If the dependency option is not met.
             NodeConditionSkippedException: If the dependency option is skipped.
         """
+        dep_output_data = depends_result.get(depend.node.id)
+        # A Choice that failed or was skipped took no option. Under behavior "return" its dependents still get here,
+        # and what it returned holds no option to check, so each of its branches would run.
+        if dep_output_data and dep_output_data.status != RunnableStatus.SUCCESS:
+            raise NodeConditionSkippedException(
+                failed_depend=depend,
+                message=f"Dependency {depend.node.id} option {depend.option}: not taken, the node did not succeed",
+            )
         if (
-            (dep_output_data := depends_result.get(depend.node.id))
+            dep_output_data
             and (isinstance(dep_output_data.output, dict))
             and (dep_condition_result := dep_output_data.output.get(depend.option))
         ):
@@ -884,10 +919,15 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
     def clone(self) -> "Node":
         """Create a safe clone of the node."""
         cloned_node = self.model_copy(deep=False)
+        file_store_copies = getattr(_in_memory_file_store_copies, "copies", None)
 
         def _clone_nested(value: Any) -> Any:
             if isinstance(value, (ModuleType, FunctionType)) or isinstance(value, type) or callable(value):
                 return value
+            if file_store_copies is not None and isinstance(value, InMemoryFileStore):
+                if id(value) not in file_store_copies:
+                    file_store_copies[id(value)] = value.model_copy(deep=True)
+                return file_store_copies[id(value)]
             if getattr(value, "_clone_shared", False):
                 return value
             if isinstance(value, Node):
@@ -1125,7 +1165,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             approval_result = self._pending_approval_response
         else:
             # The tracing form masks connection credentials, which a user-written template could otherwise render.
-            message = Template(approval_config.msg_template).render(
+            message = compile_template(approval_config.msg_template).render(
                 self.to_dict(for_tracing=True), input_data=input_data
             )
 
@@ -1448,6 +1488,9 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         self.run_on_node_error(callbacks=config.callbacks, error=e, input_data=transformed_input, **merged_kwargs)
         if isinstance(e, RunPausedException):
             logger.info(self._node_run_log(f"{log_prefix}execution paused the run. {e}"))
+        elif isinstance(e, InputStreamingTimeoutError):
+            # No reply from a human in time: with checkpoints this is how a run pauses, and it is never a fault.
+            logger.warning(self._node_run_log(f"{log_prefix}execution stopped waiting for input. {e}"))
         else:
             logger.error(
                 self._node_run_log(
@@ -1771,7 +1814,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 try:
                     self.ensure_client()
                 except Exception as conn_error:
-                    logger.error(self._node_run_log(f"Failed to ensure client connection: {conn_error}"))
+                    logger.warning(self._node_run_log(f"Failed to ensure client connection: {conn_error}"))
                     error = conn_error
                     if attempt < n_attempt - 1:
                         time_to_sleep = self._retry_backoff_seconds(attempt)
@@ -1809,7 +1852,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 except Exception as e:
                     error = e
                     self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
-                    logger.error(self._node_run_log(f"execution error: {e}"))
+                    logger.warning(self._node_run_log(f"execution error: {e}"))
 
                 # a permanent failure fails the same way on every attempt
                 if not is_retryable_error(error):
@@ -1822,7 +1865,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                     logger.info(self._node_run_log(f"retrying in {time_to_sleep:.2f} seconds."))
                     time.sleep(time_to_sleep)
 
-            logger.error(self._node_run_log(f"execution failed after {attempt + 1} attempts."))
+            # The run logs the failure at error level, once.
+            logger.warning(self._node_run_log(f"execution failed after {attempt + 1} attempts."))
             raise error
         finally:
             if executor is not None:
@@ -1894,7 +1938,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 # Offload blocking client initialization to a thread to avoid blocking the event loop
                 await self._offload_to_executor(executor, self.ensure_client)
             except Exception as conn_error:
-                logger.error(self._node_run_log(f"Failed to ensure client connection: {conn_error}"))
+                logger.warning(self._node_run_log(f"Failed to ensure client connection: {conn_error}"))
                 error = conn_error
                 if attempt < n_attempt - 1:
                     time_to_sleep = self._retry_backoff_seconds(attempt)
@@ -1929,7 +1973,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             except Exception as e:
                 error = e
                 self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
-                logger.error(self._node_run_log(f"execution error: {e}"))
+                logger.warning(self._node_run_log(f"execution error: {e}"))
 
             # a permanent failure fails the same way on every attempt
             if not is_retryable_error(error):
@@ -1941,7 +1985,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 logger.info(self._node_run_log(f"retrying in {time_to_sleep:.2f} seconds."))
                 await asyncio.sleep(time_to_sleep)
 
-        logger.error(self._node_run_log(f"execution failed after {attempt + 1} attempts."))
+        # The run logs the failure at error level, once.
+        logger.warning(self._node_run_log(f"execution failed after {attempt + 1} attempts."))
         raise error
 
     def get_context_for_input_schema(self) -> dict:
@@ -2508,11 +2553,15 @@ class ConnectionNode(Node, ABC):
     Attributes:
         connection (BaseConnection | None): The connection to use.
         client (Any | None): The client instance.
+        CLIENT_INIT_TYPE (ClassVar[ConnectionClientInitType]): Which of the connection's clients the node gets from
+            the connection manager.
     """
 
     connection: BaseConnection | None = None
     client: Any | None = None
     _connection_manager: ConnectionManager | None = PrivateAttr(default=None)
+
+    CLIENT_INIT_TYPE: ClassVar[ConnectionClientInitType] = ConnectionClientInitType.DEFAULT
 
     @model_validator(mode="after")
     def validate_connection_client(self):
@@ -2533,7 +2582,7 @@ class ConnectionNode(Node, ABC):
         super().init_components(connection_manager)
         if self.client is None:
             self.client = connection_manager.get_connection_client(
-                connection=self.connection
+                connection=self.connection, init_type=self.CLIENT_INIT_TYPE
             )
 
     def is_client_closed(self) -> bool:
@@ -2588,7 +2637,9 @@ class ConnectionNode(Node, ABC):
             connection_manager = self._connection_manager or ConnectionManager()
 
             try:
-                self.client = connection_manager.get_connection_client(connection=self.connection)
+                self.client = connection_manager.get_connection_client(
+                    connection=self.connection, init_type=self.CLIENT_INIT_TYPE
+                )
                 logger.info(self._node_run_log("Client reinitialized successfully."))
             except Exception as e:
                 logger.error(self._node_run_log(f"Failed to reinitialize client: {e}"))

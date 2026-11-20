@@ -19,15 +19,14 @@ nodes:
       - id: image-generator-tool
         type: dynamiq.nodes.images.ImageGeneration
         name: Image Generator
-        model: dall-e-3
+        model: gpt-image-2.6-sunburst
         connection: openai-conn
         n: 1
         size: "1024x1024"
-        quality: standard
       - id: image-editor-tool
         type: dynamiq.nodes.images.ImageEdit
         name: Image Editor
-        model: dall-e-2
+        model: gpt-image-2.6-sunburst
         connection: openai-conn
         n: 1
         size: "1024x1024"

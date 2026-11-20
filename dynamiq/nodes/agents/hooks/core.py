@@ -7,7 +7,10 @@ and ``Skip`` end the evaluation, and an ``Ask`` (``before_tool``) is answered on
 ==============  ==========================================  ===============================================
 Point           When                                        Value (what ``Modify`` replaces)
 ==============  ==========================================  ===============================================
-on_input        once per run                                ``str``, the user's message text
+on_input        once per run; hooks that set                ``str``, the message text, or one text of
+                ``screens_context`` also run on each        ``context``
+                text of the run input's ``context``,
+                dict keys included
 before_model    every LLM call                              ``list[Message]``, what is sent
 after_model     every LLM call that succeeded               ``dict``, ``{"content", "tool_calls"}``
 before_tool     every tool call (sub-agents included)       the tool input, after ``tool_params`` merging
@@ -188,6 +191,7 @@ class HookContext:
     pending_calls: dict[str, tuple["HookContext", ToolCall]] = field(default_factory=dict)
     approver: Any = None  # the agent whose input stream carries this run's approval requests
     trusted: dict[str, Any] = field(default_factory=dict)
+    parent: "HookContext | None" = None  # the run of the agent that called this one as a tool
 
     def for_call(self, **changes) -> "HookContext":
         """A view for one call that shares ``state`` and ``lock`` with the run context."""
@@ -262,11 +266,15 @@ class Hook(BaseModel):
             per agent; unnamed hooks of one type are told apart by their order). Defaults to the hook's short type
             name (``pii``).
         tools: Tool points only: the tools the hook applies to (``*`` or empty = all). An entry is a tool name, an MCP
-            server name (all its tools) or a ``*`` pattern of either, e.g. ``github`` or ``delete_*``.
+            server name (all its tools) or a ``*`` pattern of either, e.g. ``github`` or ``delete_*``. It may also be
+            a tool's ``id``, written as it is: a hook that names the id keeps applying when the tool is renamed.
         inherit: Also apply in the sub-agents this agent calls (and theirs), sharing the run state, so that for
             example a PII mapping stays consistent across agents.
         on_error: What to do if the hook itself raises or times out.
         timeout_seconds: Per-call budget; a hook that overruns counts as failed. The worker thread cannot be killed.
+        screens_context: Class attribute. ``on_input`` also runs on each text of the run input's ``context``, dict
+            keys included, which the system prompt shows the model, so the hook cannot tell it from the message.
+            Off unless a hook class opts in, as the built-in text guards do.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -278,6 +286,7 @@ class Hook(BaseModel):
     timeout_seconds: float | None = Field(default=None, gt=0)
 
     hook_type: ClassVar[str | None] = None
+    screens_context: ClassVar[bool] = False
 
     @model_serializer(mode="wrap")
     def _serialize_with_type(self, handler):
@@ -343,6 +352,13 @@ class Hook(BaseModel):
         names = [sanitize_tool_name(tool_name), *([sanitize_tool_name(group)] if group else [])]
         patterns = [sanitize_tool_name_pattern(pattern) for pattern in self.tools]
         return any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns for name in names)
+
+    def lists_tool_id(self, tool_id: str | None) -> bool:
+        """Whether ``tools`` names the tool by its ``id``, matched whole and as written, never by a pattern."""
+        return tool_id is not None and tool_id in self.tools
+
+    def applies_to(self, call: ToolCall) -> bool:
+        return self.matches_tool(call.name, call.group) or self.lists_tool_id(call.tool_id)
 
     def hides_tool(self, tool_name: str, group: str | None = None) -> bool:
         """Whether the model should not be offered the tool at all (it could only be refused)."""
@@ -532,7 +548,7 @@ class HookRunner:
         for index, hook in indexed:
             if point not in hook.points():
                 continue
-            if point in TOOL_POINTS and call is not None and not hook.matches_tool(call.name, call.group):
+            if point in TOOL_POINTS and call is not None and not hook.applies_to(call):
                 continue
             hook_ctx = ctx.for_call(hook_key=self.keys[index])
             try:
@@ -584,7 +600,7 @@ class HookRunner:
         """Tell the hooks that let ``call`` through (all matching ones by default) that it did not run."""
         hooks = passed if passed is not None else list(enumerate(self.hooks))
         for index, hook in hooks:
-            if hook.matches_tool(call.name, call.group):
+            if hook.applies_to(call):
                 hook.refund(ctx.for_call(hook_key=self.keys[index]), call)
 
     @staticmethod

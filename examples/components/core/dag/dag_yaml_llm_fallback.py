@@ -51,7 +51,7 @@ def run_llm_fallback_programmatic():
     )
     primary_llm = OpenAI(
         name="OpenAI-Primary",
-        model="gpt-4o",
+        model="gpt-6.1-sol",
         connection=connections.OpenAI(),
         prompt=prompt,
         fallback=FallbackConfig(

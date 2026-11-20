@@ -14,6 +14,7 @@ there, so it is not missing, but a rule that uses it or asks about it is not eva
 
 import ast
 import json
+import sys
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -1494,3 +1495,71 @@ def test_the_readers_return_plain_values_a_workflow_can_serialise():
         "amount": 586764.0,
         "issued": "2026-10-01",
     }
+
+
+@pytest.mark.parametrize(
+    ("check", "app", "status"),
+    [
+        ("app.dti <= 0.36", {"dti": Decimal("0.3600")}, "pass"),
+        ("0.3 < app.dti <= 0.36", {"dti": Decimal("0.3600")}, "pass"),
+        ("app.dti is le(0.36)", {"dti": Decimal("0.3600")}, "pass"),
+        (
+            "app.items | selectattr('rate', 'le', 0.0725) | list | length == 1",
+            {"items": [{"rate": Decimal("0.0725")}]},
+            "pass",
+        ),
+        ("app.wei > 1e18", {"wei": Decimal("1000000000000000001")}, "pass"),
+        (
+            "app.fee_a + app.fee_b == app.fee_total",
+            {"fee_a": Decimal("0.10"), "fee_b": Decimal("0.20"), "fee_total": Decimal("0.30")},
+            "pass",
+        ),
+        ("not (app.amount > app.limit)", {"amount": Decimal("100"), "limit": float("nan")}, "not_evaluated"),
+        ("app.amount * 0.0025 == 62.5", {"amount": Decimal("25000.00")}, "pass"),
+        (
+            "app.dti in [0.36, 0.5] and app.dti is in [0.36] and app.dti not in [0.5]",
+            {"dti": Decimal("0.3600")},
+            "pass",
+        ),
+        ("sum([app.fee, 0.1]) == ([app.fee, 0.1] | sum) == 0.35", {"fee": Decimal("0.25")}, "pass"),
+        ("sum([0.1, 0.2, app.fee]) == 0.55", {"fee": Decimal("0.25")}, "pass"),
+        ("app.amount + app.fee != 0", {"amount": Decimal("1"), "fee": float("nan")}, "not_evaluated"),
+    ],
+)
+def test_a_sql_decimal_meets_a_threshold_written_as_a_float(check, app, status):
+    """A SQL NUMERIC column arrives as a Decimal, which Python compares with a float exactly: Decimal('0.36') is above
+    the float 0.36."""
+    assert statuses(run(rules(Rule(id="R", check=check)), record(**app))) == {"R": status}
+
+
+COMPENSATED_FLOAT_SUM = pytest.mark.skipif(
+    sys.version_info < (3, 12), reason="Python's sum adds floats with compensation from Python 3.12"
+)
+
+
+@pytest.mark.parametrize(
+    ("check", "app", "status"),
+    [
+        pytest.param(
+            "sum(app.allocations) == 1", {"allocations": [0.7, 0.2, 0.1]}, "pass", marks=COMPENSATED_FLOAT_SUM
+        ),
+        pytest.param(
+            "app.allocations | sum == 1", {"allocations": [0.7, 0.2, 0.1]}, "pass", marks=COMPENSATED_FLOAT_SUM
+        ),
+        pytest.param(
+            "app.funds | sum(attribute='share') == 1",
+            {"funds": [{"share": 0.7}, {"share": 0.2}, {"share": 0.1}]},
+            "pass",
+            marks=COMPENSATED_FLOAT_SUM,
+        ),
+        ("sum(app.names, '') == 'ab'", {"names": ["a", "b"]}, "not_evaluated"),
+    ],
+)
+def test_a_sum_with_no_decimal_in_it_is_pythons(check, app, status):
+    """Python's sum refuses text and, from Python 3.12, adds floats with compensation: 0.7, 0.2 and 0.1 add up to 1."""
+    assert statuses(run(rules(Rule(id="R", check=check)), record(**app))) == {"R": status}
+
+
+def test_an_expression_decides_on_a_sql_decimal_as_a_rule_does():
+    assert evaluate("'A' if rate <= 0.0725 else 'B'", rate=Decimal("0.0725")) == "A"
+    assert evaluate("(premium * 0.9) | round(2)", premium=Decimal("2875.50")) == Decimal("2587.95")

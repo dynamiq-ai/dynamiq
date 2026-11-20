@@ -136,7 +136,10 @@ class Qdrant(MemoryBackend):
         try:
             documents = self.vector_store.list_documents(include_embeddings=False)
             messages = [self._document_to_message(doc) for doc in documents]
-            return sorted(messages, key=lambda msg: msg.metadata.get("timestamp", 0))
+            messages = sorted(messages, key=lambda msg: msg.metadata.get("timestamp", 0))
+            if limit is not None and 0 < limit < len(messages):
+                return messages[-limit:]
+            return messages
         except Exception as e:
             raise QdrantError(f"Failed to retrieve messages from Qdrant: {e}") from e
 
@@ -169,8 +172,11 @@ class Qdrant(MemoryBackend):
                 )
             elif filters:
                 documents = self.vector_store.filter_documents(filters=qdrant_filters)
-                if limit:
-                    documents = documents[:limit]
+                # filter_documents has no ordering, so truncating it would keep an arbitrary
+                # subset. Keep the most recent messages, oldest first, like get_all and InMemory.search.
+                documents = sorted(documents, key=lambda doc: (doc.metadata or {}).get("timestamp", 0))
+                if limit and limit > 0:
+                    documents = documents[-limit:]
             else:
                 return []
 

@@ -13,7 +13,7 @@ AGENT_ROLE = "friendly helpful assistant"
 
 
 def setup_agent():
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0.5)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-6-luna", temperature=0.5)
     qdrant_connection = QdrantConnection()
     openai_connection = OpenAIConnection()
     embedder = OpenAIDocumentEmbedder(connection=openai_connection)

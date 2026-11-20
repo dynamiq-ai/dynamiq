@@ -24,7 +24,7 @@ def create_orchestrator() -> GraphOrchestrator:
     connection_e2b = E2B()
 
     tool_code = E2BInterpreterTool(connection=connection_e2b)
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-6-luna", temperature=0)
 
     def code_llm(messages, structured_output=True):
         code_sample = {

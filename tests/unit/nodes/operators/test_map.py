@@ -1,14 +1,17 @@
 import threading
 import time
+from io import BytesIO
 from queue import Queue
 from threading import Event
 
+import ply.yacc
 import pytest
 
 from dynamiq import Workflow
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
+from dynamiq.nodes.node import InputTransformer, NodeDependency
 from dynamiq.nodes.operators import Map, Pass, SubWorkflow
 from dynamiq.nodes.tools.human_feedback import (
     HFStreamingInputEventMessage,
@@ -16,8 +19,11 @@ from dynamiq.nodes.tools.human_feedback import (
     HFStreamingOutputEventMessage,
     HumanFeedbackTool,
 )
+from dynamiq.nodes.types import InferenceMode
+from dynamiq.nodes.utils import Input, Output
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.runnables.base import NodeRunnableConfig
+from dynamiq.storages.file import FileStoreConfig, InMemoryFileStore
 from dynamiq.types.feedback import (
     ApprovalConfig,
     ApprovalInputData,
@@ -26,6 +32,7 @@ from dynamiq.types.feedback import (
     FeedbackMethod,
 )
 from dynamiq.types.streaming import StreamingConfig
+from tests.helpers.agent_hooks import build_agent, final_step, observations_in, scripted_stateless, tool_step
 
 
 class ReplyByAskingId(BaseCallbackHandler):
@@ -244,3 +251,51 @@ def test_an_agent_whose_hook_asks_for_approvals_in_a_map_asks_under_its_register
     assert client.asked_ids == ["agent", "agent"]
     assert [output["content"] for output in result.output["map"]["output"]["output"]] == ["done", "done"]
     assert [name for name, _ in TOOL_CALLS] == ["search", "search"]
+
+
+def test_the_agent_of_each_map_item_sees_only_the_files_uploaded_for_its_item():
+    agent = build_agent(tools=[], file_store=FileStoreConfig(enabled=True, backend=InMemoryFileStore()))
+    steps = [tool_step("file-list"), tool_step("file-read", file_path="passport.txt"), final_step("done")]
+    items = []
+    for name in ["ALICE", "BORIS"]:
+        passport = BytesIO(f"passport of {name}".encode())
+        passport.name = "passport.txt"
+        items.append({"input": f"Review {name}.", "files": [passport]})
+
+    with scripted_stateless(InferenceMode.STRUCTURED_OUTPUT, steps, agents=[agent]) as prompts:
+        Workflow(flow=Flow(nodes=[Map(id="map", node=agent)])).run(input_data={"input": items})
+
+    # Through a file store shared by the copies of the agent, the second item's agent listed the first item's
+    # passport beside its own and read it as its own.
+    tool_results = [
+        [str(message.content) for message in messages if str(message.content).startswith("Observation")]
+        for messages in prompts
+        if observations_in(messages) == 2
+    ]
+    for name, (listing, read) in zip(["ALICE", "BORIS"], tool_results, strict=True):
+        assert listing.count("File: ") == 1
+        assert f"passport of {name}" in read
+
+
+@pytest.mark.parametrize("max_workers", [1, 4])
+def test_the_items_of_a_map_share_one_jsonpath_parser(mocker, max_workers):
+    start = Input(id="start")
+    echo = Pass(
+        id="echo",
+        depends=[NodeDependency(start)],
+        input_transformer=InputTransformer(selector={"value": "$.start.output.value"}),
+    )
+    end = Output(
+        id="end",
+        depends=[NodeDependency(echo)],
+        input_transformer=InputTransformer(selector={"value": "$.echo.output.value"}),
+    )
+    items = Map(id="map", node=SubWorkflow(flow=Flow(nodes=[start, echo, end])), max_workers=max_workers)
+    build_parser = mocker.spy(ply.yacc, "yacc")
+
+    result = Workflow(flow=Flow(nodes=[items])).run(input_data={"input": [{"value": i} for i in range(10)]})
+
+    assert result.output["map"]["output"]["output"] == [{"value": i} for i in range(10)]
+    # Each item's copy renames its nodes, so it parses selectors no item parsed before, with a parser built at most
+    # once in a process.
+    assert build_parser.call_count <= 1

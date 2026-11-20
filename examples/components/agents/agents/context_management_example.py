@@ -95,12 +95,8 @@ def demonstrate_direct_tool_return():
         print("Agent Response (Direct Tool Return):")
         print(output)
 
-        print("\nRegistry Status:")
-        print(f"   - Tools executed: {len(agent._tool_cache)}")
-        available_tools = [(entry.action, entry.action_input) for entry in agent._tool_cache.keys()]
-        print(f"   - Available tools: {available_tools}")
-        if agent._tool_cache:
-            print(f"   - Cached tool outputs: {len(agent._tool_cache)} entries")
+        tool_runs = [run for run in tracing.runs.values() if run.metadata.get("node", {}).get("group") == "tools"]
+        print(f"\nTool calls executed: {len(tool_runs)}")
 
     except Exception as e:
         print(f" Error: {e}")

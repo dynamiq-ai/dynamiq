@@ -22,7 +22,7 @@ from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.operators import Choice, ChoiceOption, Delay
 from dynamiq.nodes.operators import delay as delay_module
 from dynamiq.nodes.tools import Python
-from dynamiq.nodes.types import ChoiceCondition, ConditionOperator
+from dynamiq.nodes.types import Behavior, ChoiceCondition, ConditionOperator
 from dynamiq.nodes.utils import Input, Output
 from dynamiq.runnables import RunnableStatus
 from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader, WorkflowYAMLLoaderException
@@ -218,6 +218,45 @@ class TestErrorEdgesAndOtherBranching:
         assert run.status == RunnableStatus.SUCCESS
         assert statuses(run)["result"] == "success"
         assert calls.count == {"charge_card": 1, "refund": 1}
+
+    @pytest.mark.parametrize(
+        ("bureau_code", "ran"),
+        [
+            # The limit the amount is checked against is missing, so the Choice cannot decide and fails.
+            ("def run(input_data):\n    return {'amount': 25000}", {"bureau": 1, "manual_review": 1}),
+            # The bureau is down, so the Choice is skipped.
+            ("def run(input_data):\n    raise RuntimeError('bureau down')", {"bureau": 1}),
+        ],
+    )
+    def test_a_choice_set_to_return_that_takes_no_option_runs_none_of_its_branches(self, bureau_code, ran):
+        calls = Calls()
+        application = Input(id="application")
+        bureau = calls.step("bureau", bureau_code)
+        bureau.depends_on(application)
+        route = Choice(
+            id="route",
+            error_handling=ErrorHandling(behavior=Behavior.RETURN),
+            options=[
+                ChoiceOption(
+                    id="approve",
+                    condition=ChoiceCondition(
+                        variable="$.bureau.output.amount",
+                        operator=ConditionOperator.NUMERIC_LESS_THAN_OR_EQUALS_PATH,
+                        value="$.bureau.output.limit",
+                    ),
+                ),
+                ChoiceOption(id="decline"),
+            ],
+        )
+        route.depends_on(bureau)
+        disburse = calls.step("disburse", RECEIPT, depends=[NodeDependency(node=route, option="approve")])
+        decline = calls.step("send_decline", RECEIPT, depends=[NodeDependency(node=route, option="decline")])
+        review = calls.step("manual_review", RECEIPT)
+        review.depends_on(route, trigger=DependencyTrigger.FAILURE)
+
+        flows.Flow(nodes=[application, bureau, route, disburse, decline, review]).run_sync(input_data={})
+
+        assert calls.count == ran
 
     def test_a_rejected_approval_is_not_a_failure_and_does_not_fire_the_error_edge(self):
         calls = Calls()
