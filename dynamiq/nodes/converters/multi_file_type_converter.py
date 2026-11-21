@@ -27,6 +27,7 @@ from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types import Document, DocumentType
 from dynamiq.types.cancellation import CanceledException, check_cancellation
+from dynamiq.utils.local_files import ensure_local_file_paths_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -362,6 +363,7 @@ class MultiFileTypeConverter(Node):
         work_items: list[tuple[BytesIO, str, dict]] = []
 
         if file_paths is not None:
+            ensure_local_file_paths_allowed(file_paths)
             paths_obj = [Path(path) for path in file_paths]
             filepaths = [path for path in paths_obj if path.is_file()]
             filepaths_in_directories = [

@@ -23,6 +23,7 @@ from dynamiq.prompts import (
     VisionMessageTextContent,
 )
 from dynamiq.storages.file.base import FileInfo
+from dynamiq.utils.local_files import ensure_local_file_paths_allowed
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import CHARS_PER_TOKEN
 
@@ -942,6 +943,7 @@ def create_message_from_input(input_data: dict) -> Message | VisionMessage:
                 if image.startswith(("http://", "https://", "data:")):
                     image_url = image
                 else:
+                    ensure_local_file_paths_allowed([image])
                     with open(image, "rb") as file:
                         image_bytes = file.read()
                         image_url = bytes_to_data_url(image_bytes)
@@ -962,6 +964,7 @@ def create_message_from_input(input_data: dict) -> Message | VisionMessage:
                 if video.startswith(("http://", "https://", "data:", "gs://")):
                     video_url = video
                 else:
+                    ensure_local_file_paths_allowed([video])
                     with open(video, "rb") as file:
                         video_url = bytes_to_data_url(file.read())
             else:

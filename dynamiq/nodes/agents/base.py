@@ -127,6 +127,7 @@ from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.feedback import ApprovalConfig, FeedbackMethod
 from dynamiq.types.streaming import InputStreamingTimeoutError, StreamingMode
 from dynamiq.utils.jinja import compile_template
+from dynamiq.utils.local_files import ensure_local_file_paths_allowed
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import TRACING_REDACTED_KEYS, TRACING_REDACTED_PLACEHOLDER, deep_merge
 
@@ -2707,6 +2708,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     @staticmethod
     def _local_media_path_to_file(path: str, *, media_type: str) -> io.BytesIO | None:
         """Read an existing local media path into a file object for generic file upload."""
+        ensure_local_file_paths_allowed([path])
         local_path = Path(path).expanduser()
         if not local_path.is_file():
             return None
@@ -3098,6 +3100,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     if image.startswith(("http://", "https://", "data:")):
                         image_url = image
                     else:
+                        ensure_local_file_paths_allowed([image])
                         with open(image, "rb") as file:
                             image_url = bytes_to_data_url(file.read())
                 else:
@@ -3113,6 +3116,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     if video.startswith(("http://", "https://", "data:", "gs://")):
                         video_url = video
                     else:
+                        ensure_local_file_paths_allowed([video])
                         with open(video, "rb") as file:
                             video_url = bytes_to_data_url(file.read())
                 else:

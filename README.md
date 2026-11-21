@@ -64,6 +64,8 @@ pip install "dynamiq[vectorstores,files]"
 
 dynamiq imports an integration, and litellm, the first time it is used, so `import dynamiq` takes a fraction of a second. A multi-threaded server that would rather pay that cost before it serves can set `DYNAMIQ_EAGER_IMPORTS=1`, which imports every installed integration with its package, as earlier versions did. litellm also downloads its model price list when it is imported; `LITELLM_LOCAL_MODEL_COST_MAP=True` makes it use the copy it ships with.
 
+File converters, the Mistral OCR parser and agents read a file from the local disk when their input names its path, as in `file_paths` or an `images` entry that is not a URL. A server that runs workflows for other people can set `DYNAMIQ_LOCAL_FILE_PATHS_ALLOWED=false` to refuse such a path before it is touched: a converter or the parser fails with `LocalFilePathsNotAllowedError`, and an agent leaves the attachment out. Files passed as file objects or bytes are read as before.
+
 Or work on the source code, which needs [uv](https://docs.astral.sh/uv/):
 ```sh
 git clone https://github.com/dynamiq-ai/dynamiq.git

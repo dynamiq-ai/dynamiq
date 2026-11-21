@@ -26,6 +26,7 @@ from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types import Document
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.lazy_imports import optional_dependency_error
+from dynamiq.utils.local_files import ensure_local_file_paths_allowed
 from dynamiq.utils.logger import logger
 
 DEFAULT_EXTRACTION_INSTRUCTION = """
@@ -232,6 +233,7 @@ class LLMImageConverter(Node):
         documents = []
 
         if file_paths is not None:
+            ensure_local_file_paths_allowed(file_paths)
             paths_obj = [Path(path) for path in file_paths]
             filepaths = [path for path in paths_obj if path.is_file()]
             filepaths_in_directories = [
@@ -604,6 +606,7 @@ class LLMPDFConverter(LLMImageConverter):
         documents = []
 
         if file_paths is not None:
+            ensure_local_file_paths_allowed(file_paths)
             paths_obj = [Path(path) for path in file_paths]
             filepaths = [path for path in paths_obj if path.is_file()]
             filepaths_in_directories = [

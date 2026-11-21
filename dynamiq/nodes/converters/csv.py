@@ -9,6 +9,7 @@ from dynamiq.components.converters.utils import build_source_metadata, normalize
 from dynamiq.nodes.node import Node, NodeGroup, RunnableConfig, ensure_config
 from dynamiq.types import DocumentType
 from dynamiq.types.cancellation import check_cancellation
+from dynamiq.utils.local_files import ensure_local_file_paths_allowed
 from dynamiq.utils.logger import logger
 
 
@@ -142,6 +143,9 @@ class CSVConverter(Node):
         source_index = 0
 
         if input_data.file_paths:
+            # Checked before the per-file handling below, which logs a file it cannot read and goes on, so that a
+            # refused path fails the node instead of being skipped.
+            ensure_local_file_paths_allowed(input_data.file_paths)
             for path in input_data.file_paths:
                 check_cancellation(config)
                 try:

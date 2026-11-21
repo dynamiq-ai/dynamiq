@@ -13,6 +13,7 @@ from dynamiq.nodes.node import ConnectionNode, ErrorHandling, ensure_config
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
+from dynamiq.utils.local_files import ensure_local_file_paths_allowed
 
 SUPPORTED_MIME_TYPES = [
     "application/pdf",
@@ -170,6 +171,10 @@ class MistralOCR(ConnectionNode):
 
         if isinstance(file, bytes):
             file = BytesIO(file)
+
+        # A string that is not a URL is read as a local path.
+        if isinstance(file, str) and not file.startswith("http"):
+            ensure_local_file_paths_allowed([file])
 
         try:
             if not self._is_supported_file_type(file):

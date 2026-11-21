@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from dynamiq.types import Document, DocumentCreationMode
+from dynamiq.utils.local_files import ensure_local_file_paths_allowed
 
 
 class BaseConverter(BaseModel):
@@ -39,6 +40,8 @@ class BaseConverter(BaseModel):
             ValueError: If neither paths nor files provided, or if metadata is a list with
                 directory paths, or if files cannot be processed properly.
             FileNotFoundError: If any file path does not exist.
+            LocalFilePathsNotAllowedError: If file paths are given while the environment turns reading
+                local files by path off.
             IOError: If any file cannot be read.
             Exception: Any other exception that may occur during processing.
         """
@@ -48,6 +51,7 @@ class BaseConverter(BaseModel):
         documents = []
 
         if file_paths is not None:
+            ensure_local_file_paths_allowed(file_paths)
             paths_obj = [Path(path) for path in file_paths]
             filepaths = [path for path in paths_obj if path.is_file()]
             filepaths_in_directories = [
