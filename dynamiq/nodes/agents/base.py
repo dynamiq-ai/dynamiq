@@ -257,6 +257,34 @@ _MISSING_FILE_ERROR_NAMES = frozenset({"FileNotFoundException", "NotFoundExcepti
 _DAYTONA_MISSING_FILE_CODE = "FILE_NOT_FOUND"
 
 
+# ``{{ name }}`` or ``{{ name.key.0 }}``: all that is filled in the text of a run, which is otherwise sent as typed.
+_FIELD_PLACEHOLDER = re.compile(r"\{\{\s*([^\W\d]\w*(?:\.\w+)*)\s*\}\}")
+
+
+def _fill_field_names(text: str, fields: dict[str, Any]) -> str:
+    """Replace ``{{ name }}`` with the field of that exact name, as text; a dotted path looks inside it.
+
+    The text of a run may be code or a template for another system, so it is never compiled.
+    """
+
+    def fill(match: re.Match) -> str:
+        name, *path = match[1].split(".")
+        if name not in fields:
+            return match[0]
+        value = fields[name]
+        # Only keys of dicts and items of lists: data a run carries, never the attributes of an object.
+        for key in path:
+            if isinstance(value, dict) and key in value:
+                value = value[key]
+            elif isinstance(value, list) and key.isdecimal() and int(key) < len(value):
+                value = value[int(key)]
+            else:
+                return match[0]
+        return str(value)
+
+    return _FIELD_PLACEHOLDER.sub(fill, text)
+
+
 def _is_missing_file_error(error: BaseException) -> bool:
     """Whether reading a sandbox file failed because the file does not exist.
 
@@ -941,15 +969,22 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             "metadata": custom_metadata,
         }
 
-        input_message = input_message or self.input_message or Message(role=MessageRole.USER, content=input_data.input)
-        # Convert to dict for format_message, excluding fields that are unsafe for templates
-        # (binary data like files/images, complex objects like tool_params, and input which is already handled)
         standard_fields = set(AgentInputSchema.model_fields.keys())
         extra_fields = input_data.model_dump(exclude=standard_fields)
-        if extra_fields:
-            input_message = input_message.format_message(**extra_fields)
+        run_text = input_message
+        if run_text is None and self.input_message is None:
+            run_text = Message(role=MessageRole.USER, content=input_data.input)
+        message = run_text or self.input_message
+        if isinstance(message, Message) and message.static:
+            input_message = message.model_copy()
+        elif isinstance(run_text, Message):
+            input_message = run_text.model_copy(update={"content": _fill_field_names(run_text.content, extra_fields)})
+        elif run_text is not None:
+            # A vision message passed with a run keeps the template renderer: an address may take bytes from a field.
+            input_message = run_text.format_message(**extra_fields) if extra_fields else run_text.model_copy()
         else:
-            input_message = input_message.model_copy()
+            # Also for a static vision message: static freezes its text only, and its addresses are still filled.
+            input_message = self.input_message.format_message(input=input_data.input, **extra_fields)
         input_message.static = True
 
         use_memory = self.memory and (input_data.user_id or input_data.session_id)
