@@ -2756,15 +2756,15 @@ wheels = [
 
 [[package]]
 name = "inscriptis"
-version = "2.7.5"
+version = "2.7.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lxml" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/28/e1/6a22a16abbe9111c119f95265f148c3eaee8a0065858e14084f1660ec53b/inscriptis-2.7.5.tar.gz", hash = "sha256:3ce15f75ed7ae3ecf45c0c39458774011483c382686a61d04e49949104d44092", size = 1098396, upload-time = "2026-09-29T17:40:33.647Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c0/ba/0c1c15d3975fb4fdc9ccb2a857086bd29c84bb2f3a63a4f37ca0941920e4/inscriptis-2.7.6.tar.gz", hash = "sha256:b8fe23c5ae4db33c9d1c5e1b7d000dbfa1decbea7b605ac87e0f5d8f8abc3ce6", size = 997650, upload-time = "2026-10-23T19:33:13.59Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b4/be/7c0ce8f475269cef0e43e48ea1e103a3afe948277cf2fd3bc4a00470a424/inscriptis-2.7.5-py3-none-any.whl", hash = "sha256:5d6fcf405f6d9efe29b55c44b062573d88af3dfddde48c124b778ab4c7133f40", size = 47734, upload-time = "2026-09-29T17:40:31.583Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/57/66719bc368a5893d5144d2843b1bac7f16b1373bf5bdd15ddeaf0a9808ea/inscriptis-2.7.6-py3-none-any.whl", hash = "sha256:bd0e86bc48c1e42b9e6e0000c47a9232214b6d89b124168ac3ec2abca23bbf5c", size = 48006, upload-time = "2026-10-23T19:33:11.433Z" },
 ]
 
 [[package]]
