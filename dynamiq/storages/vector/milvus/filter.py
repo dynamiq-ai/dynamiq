@@ -1,10 +1,12 @@
 import json
 import math
+import numbers
 import re
 from typing import Any
 
-# A field name, or `$meta`, optionally followed by JSON path segments such as `["key"]` or `[0]`.
-FIELD_PATTERN = re.compile(r'(?:\$meta|[A-Za-z_][A-Za-z0-9_]*)(?:\[(?:\d+|"[A-Za-z0-9_\-. ]*")\])*')
+# A field name, or `$meta`, optionally followed by JSON path segments such as `["key"]` or `[0]`. A key may hold any
+# character; only a backslash-escaped quote or backslash can appear inside it, so it cannot end the string early.
+FIELD_PATTERN = re.compile(r'(?:\$meta|[A-Za-z_][A-Za-z0-9_]*)(?:\[(?:\d+|"(?:[^"\\]|\\.)*")\])*')
 
 
 class Filter:
@@ -125,8 +127,11 @@ class Filter:
             return json.dumps(value, ensure_ascii=False)
         if isinstance(value, bool):
             return str(value)
-        if isinstance(value, (int, float)) and math.isfinite(value):
-            return repr(value)
+        # Converted first, since subclasses such as IntEnum and numpy scalars have reprs Milvus cannot parse.
+        if isinstance(value, numbers.Integral):
+            return repr(int(value))
+        if isinstance(value, numbers.Real) and math.isfinite(value):
+            return repr(float(value))
         raise ValueError(f"Unsupported filter value: {value!r}")
 
     @staticmethod
