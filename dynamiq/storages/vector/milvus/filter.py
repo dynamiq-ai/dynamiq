@@ -1,4 +1,10 @@
+import json
+import math
+import re
 from typing import Any
+
+# A field name, or `$meta`, optionally followed by JSON path segments such as `["key"]` or `[0]`.
+FIELD_PATTERN = re.compile(r'(?:\$meta|[A-Za-z_][A-Za-z0-9_]*)(?:\[(?:\d+|"[A-Za-z0-9_\-. ]*")\])*')
 
 
 class Filter:
@@ -76,21 +82,52 @@ class Filter:
         if operator not in self.COMPARISON_OPERATORS:
             raise ValueError(f"Unsupported comparison operator: {operator}")
 
+        # Field and value are written into the expression text, so both must not be able to change its structure.
+        if not isinstance(field, str) or not FIELD_PATTERN.fullmatch(field):
+            raise ValueError(f"Invalid filter field: {field!r}")
+
         if operator == "contains_any":
             if not isinstance(value, list):
                 raise ValueError(f"{field}'s value must be a list when using 'contains_any' comparator")
             # dynamiq's MilvusVectorStore stores metadata as dynamic JSON fields, so the JSON
             # variant is used rather than ARRAY_CONTAINS_ANY (which targets typed Array fields).
             # https://milvus.io/docs/json-operators.md
-            return f"json_contains_any({field}, {value})"
+            return f"json_contains_any({field}, {self._format_value(value)})"
         elif operator == "in" and isinstance(value, list):
-            return f"{field} in {value}"
+            return f"{field} in {self._format_value(value)}"
         elif operator == "not in" and isinstance(value, list):
-            return f"{field} not in {value}"
-        elif isinstance(value, str):
-            return f'{field} {self.COMPARISON_OPERATORS[operator]} "{value}"'
+            return f"{field} not in {self._format_value(value)}"
         else:
-            return f"{field} {self.COMPARISON_OPERATORS[operator]} {value}"
+            return f"{field} {self.COMPARISON_OPERATORS[operator]} {self._format_value(value)}"
+
+    @classmethod
+    def _format_value(cls, value: Any) -> str:
+        """
+        Renders a filter value as a Milvus expression literal.
+
+        Args:
+            value (Any): A string, number, boolean, or a list of those.
+
+        Returns:
+            str: The literal to place in the expression.
+
+        Raises:
+            ValueError: If the value has an unsupported type.
+        """
+        if isinstance(value, list):
+            return f"[{', '.join(cls._format_scalar(v) for v in value)}]"
+        return cls._format_scalar(value)
+
+    @staticmethod
+    def _format_scalar(value: Any) -> str:
+        if isinstance(value, str):
+            # A JSON string is a valid Milvus string literal: quotes and backslashes are escaped.
+            return json.dumps(value, ensure_ascii=False)
+        if isinstance(value, bool):
+            return str(value)
+        if isinstance(value, (int, float)) and math.isfinite(value):
+            return repr(value)
+        raise ValueError(f"Unsupported filter value: {value!r}")
 
     @staticmethod
     def from_dict(filter_dict: dict[str, Any]) -> "Filter":
