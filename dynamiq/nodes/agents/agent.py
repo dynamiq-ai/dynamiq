@@ -778,6 +778,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 name=resolved.name if resolved else tp["name"],
                 type=resolved.type if resolved else "unknown",
                 action_type=resolved.action_type.value if resolved and resolved.action_type else None,
+                id=resolved.id if resolved else None,
             )
             per_tool_reasoning.append(
                 AgentReasoningEventMessageData(
@@ -848,6 +849,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 name=resolved.name if resolved else tool_name,
                 type=resolved.type if resolved else "unknown",
                 action_type=resolved.action_type.value if resolved and resolved.action_type else None,
+                id=resolved.id if resolved else None,
             )
             per_tool_summary.append(
                 AgentToolResultEventMessageData(
@@ -1417,6 +1419,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             name=tool.name,
             type=tool.type,
             action_type=tool.action_type.value if tool.action_type else None,
+            id=tool.id,
         )
 
         self._stream_agent_event(
