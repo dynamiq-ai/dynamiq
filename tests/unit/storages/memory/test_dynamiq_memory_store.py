@@ -114,6 +114,28 @@ def test_read_note_parses_links_and_backlinks(store, client):
     assert note.backlinks == ["projects/q3-pricing.md"]
 
 
+def test_search_posts_the_query_in_the_body(store, client):
+    client.request.return_value = _mock_response(
+        {"data": [{"path": "team/oncall.md", "score": 2, "snippet": "Billing pages go to Marco at weekends."}]}
+    )
+
+    hits = store.search("weekend billing", prefix="team/", limit=5)
+
+    verb, url = client.request.call_args.args
+    assert verb == "POST"
+    assert url == "https://api.example.ai/v1/memory-stores/ms-123/files/search"
+    assert client.request.call_args.kwargs["json"] == {
+        "query": "weekend billing",
+        "path": "team/",
+        "limit": 5,
+        "user_id": "u-42",
+    }
+    assert client.request.call_args.kwargs["params"] is None
+    assert [(hit.path, hit.score, hit.snippet) for hit in hits] == [
+        ("team/oncall.md", 2.0, "Billing pages go to Marco at weekends.")
+    ]
+
+
 def test_list_parses_entries(store, client):
     client.request.return_value = _mock_response(
         {"data": [{"path": "prefs.md", "size": 24, "updated_at": "2026-01-15T10:30:00Z"}, {"path": "team/x.md"}]}

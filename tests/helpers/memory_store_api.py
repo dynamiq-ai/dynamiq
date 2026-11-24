@@ -1,7 +1,7 @@
 """A stand-in for the platform's memory store API, for tests.
 
 ``MemoryStoreAPISimulator`` stands in for the server, so everything above the socket is real: the same
-client, URLs, query strings and status codes.
+client, methods, URLs, query strings, bodies and status codes.
 """
 
 import hashlib
@@ -59,7 +59,7 @@ class MemoryStoreAPISimulator:
             return _error(401, "unauthorized", "Missing bearer token.")
 
         params, body = params or {}, json or {}
-        source = body if verb == "PUT" else params
+        source = body if verb in ("PUT", "POST") else params
 
         # Required on every call: the client must never omit it.
         if not source.get("user_id"):
@@ -75,7 +75,9 @@ class MemoryStoreAPISimulator:
         if url.endswith("/files/search"):
             if not self.search_enabled:
                 return _error(404, "not_found", "Not found.")
-            return self._search(scope, params.get("q") or "", params.get("path") or "", int(params.get("limit") or 10))
+            if verb != "POST":
+                return _error(405, "method_not_allowed", "Method not allowed.")
+            return self._search(scope, body.get("query") or "", body.get("path") or "", int(body.get("limit") or 10))
         if verb == "PUT":
             if headers.get("If-None-Match") == "*" and (*scope, body.get("path")) in self.memories:
                 return _error(412, "precondition_failed", "A memory already exists at this path.")

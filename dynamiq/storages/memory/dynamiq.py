@@ -207,9 +207,14 @@ class DynamiqMemoryStore(MemoryStore):
         """
         try:
             data = self._request(
-                HTTPMethod.GET,
+                HTTPMethod.POST,
                 "/search",
-                params={"q": query, "path": prefix, "limit": limit, "user_id": self._scope(user_id, "search", prefix)},
+                json={
+                    "query": query,
+                    "path": prefix,
+                    "limit": limit,
+                    "user_id": self._scope(user_id, "search", prefix),
+                },
                 operation="search",
                 memory_path=prefix,
             )
