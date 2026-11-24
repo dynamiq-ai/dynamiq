@@ -50,7 +50,9 @@ class SpecStreamExtractTool(ConnectionNode):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[SpecStreamExtractInputSchema]] = SpecStreamExtractInputSchema
 
-    def _resolve_extract_request(self, input_data: SpecStreamExtractInputSchema) -> tuple[list[str], dict[str, Any], str]:
+    def _resolve_extract_request(
+        self, input_data: SpecStreamExtractInputSchema
+    ) -> tuple[list[str], dict[str, Any], str]:
         urls: list[str] = []
         if input_data.urls:
             urls.extend(u.strip() for u in input_data.urls if u and u.strip())
