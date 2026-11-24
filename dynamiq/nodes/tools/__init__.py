@@ -39,6 +39,8 @@ if TYPE_CHECKING:
     from .skills_tool import SkillsTool
     from .sql_executor import SQLExecutor
     from .stagehand import Stagehand
+    from .specstream_extract import SpecStreamExtractTool
+    from .specstream_search import SpecStreamSearchTool
     from .tavily import TavilyTool
     from .thinking_tool import ThinkingTool
     from .todo_tools import TodoItem, TodoStatus, TodoWriteTool
@@ -94,6 +96,8 @@ _LAZY_EXPORTS = {
     "SkillsTool": ".skills_tool",
     "SQLExecutor": ".sql_executor",
     "Stagehand": ".stagehand",
+    "SpecStreamExtractTool": ".specstream_extract",
+    "SpecStreamSearchTool": ".specstream_search",
     "TavilyTool": ".tavily",
     "ThinkingTool": ".thinking_tool",
     "TodoItem": ".todo_tools",
@@ -154,6 +158,8 @@ __all__ = [
     "SkillsTool",
     "SQLExecutor",
     "Stagehand",
+    "SpecStreamExtractTool",
+    "SpecStreamSearchTool",
     "TavilyTool",
     "ThinkingTool",
     "TodoItem",

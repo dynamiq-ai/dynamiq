@@ -1799,6 +1799,28 @@ class Exa(Http):
         return self
 
 
+class SpecStream(Http):
+    """
+    Represents a connection to the SpecStream Web Search and Extract API.
+
+    Attributes:
+        url (str): The base URL of the SpecStream API.
+        method (Literal[HTTPMethod.POST]): HTTP method used for requests, defaults to POST.
+        api_key (str): The API key for authentication, fetched from SPECSTREAM_API_KEY.
+    """
+
+    url: str = Field(default="https://api.specstream.ai/v1/")
+    method: Literal[HTTPMethod.POST] = HTTPMethod.POST
+    api_key: str = Field(default_factory=partial(get_env_var, "SPECSTREAM_API_KEY"))
+
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Setup authorization and content headers after model validation."""
+        if self.api_key:
+            self.headers.update({"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"})
+        return self
+
+
 class Linkup(Http):
     """
     Represents a connection to the Linkup Search API.
