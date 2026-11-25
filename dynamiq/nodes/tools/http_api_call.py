@@ -16,6 +16,8 @@ from dynamiq.nodes.tools.utils import sanitize_filename
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file.base import FileInfo
 from dynamiq.types.cancellation import check_cancellation
+from dynamiq.types.egress import EgressPolicy, get_default_egress_policy
+from dynamiq.utils import egress
 from dynamiq.utils.logger import logger
 
 DESCRIPTION_HTTP = """Makes HTTP API requests with support for all methods and configurable parameters.
@@ -48,6 +50,10 @@ Examples:
 # often the request is sent, so a declined card or a rejected payment is sent once, even when it says when to try
 # again, and so is a payment the server took under a success code the node does not expect.
 RETRYABLE_STATUS_CODES = frozenset({404, 408, 409, 425, 429})
+
+# How much of a response body an error message quotes when an egress policy applies, which keeps a large error page out
+# of the run's output and traces.
+EGRESS_ERROR_BODY_CHARS = 2000
 
 
 class ResponseType(str, enum.Enum):
@@ -259,12 +265,13 @@ class HttpApiCall(ConnectionNode):
             kwargs["json"] = data
         return kwargs
 
-    def _parse_response(self, response: Any) -> dict[str, Any]:
+    def _parse_response(self, response: Any, policy: EgressPolicy | None = None) -> dict[str, Any]:
         """Validate status and shape the response per response_type."""
         if response.status_code not in self.success_codes:
             logger.error(f"Tool {self.name} - {self.id}: failed to get results.")
             error = ToolExecutionException(
-                f"Request failed with unexpected status code: {response.status_code} and response: {response.text}. "
+                f"Request failed with unexpected status code: {response.status_code} and response: "
+                f"{self._error_body(response, policy)}. "
                 f"Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
@@ -295,7 +302,8 @@ class HttpApiCall(ConnectionNode):
                 logger.error(f"Tool {self.name} - {self.id}: failed to read the response as JSON. Error: {str(e)}")
                 error = ToolExecutionException(
                     f"Request succeeded with status code {response.status_code}, but the response is not valid JSON: "
-                    f"{str(e)}. Response: {response.text}. Please analyze the error and take appropriate action.",
+                    f"{str(e)}. Response: {self._error_body(response, policy)}. Please analyze the error and take "
+                    "appropriate action.",
                     recoverable=True,
                 )
                 # The server took the request, so sending it again could repeat what it did, such as a payment.
@@ -307,6 +315,20 @@ class HttpApiCall(ConnectionNode):
                 f"Response type must be one of the following: {', '.join(allowed_types)}"
             )
         return {"content": content, "status_code": response.status_code}
+
+    @staticmethod
+    def _error_body(response: Any, policy: EgressPolicy | None) -> str:
+        if policy is None:
+            return response.text
+        return response.text[:EGRESS_ERROR_BODY_CHARS]
+
+    def _refused(self, error: egress.EgressError) -> ToolExecutionException:
+        logger.error(f"Tool {self.name} - {self.id}: request stopped by the egress policy. Error: {error}")
+        refused = ToolExecutionException(
+            f"Request refused: {error} Please analyze the error and take appropriate action.", recoverable=True
+        )
+        refused.retryable = False
+        return refused
 
     def execute(self, input_data: HttpApiCallInputSchema, config: RunnableConfig = None, **kwargs):
         """Execute the API call.
@@ -329,9 +351,15 @@ class HttpApiCall(ConnectionNode):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         request_kwargs = self._build_request_kwargs(input_data)
+        policy = config.egress or get_default_egress_policy()
 
         try:
-            response = self.client.request(**request_kwargs)
+            if policy is None:
+                response = self.client.request(**request_kwargs)
+            else:
+                response = egress.send(policy, **request_kwargs)
+        except egress.EgressError as e:
+            raise self._refused(e) from e
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
             raise ToolExecutionException(
@@ -339,7 +367,7 @@ class HttpApiCall(ConnectionNode):
                 recoverable=True,
             )
 
-        return self._parse_response(response)
+        return self._parse_response(response, policy)
 
     async def execute_async(self, input_data: HttpApiCallInputSchema, config: RunnableConfig = None, **kwargs):
         """Native async execution path mirroring ``execute``."""
@@ -347,10 +375,16 @@ class HttpApiCall(ConnectionNode):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         request_kwargs = self._build_request_kwargs(input_data)
-        client = await self.get_async_client()
+        policy = config.egress or get_default_egress_policy()
+        client = await self.get_async_client() if policy is None else None
 
         try:
-            response = await client.request(**request_kwargs)
+            if client is not None:
+                response = await client.request(**request_kwargs)
+            else:
+                response = await egress.send_async(policy, **request_kwargs)
+        except egress.EgressError as e:
+            raise self._refused(e) from e
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
             raise ToolExecutionException(
@@ -358,4 +392,4 @@ class HttpApiCall(ConnectionNode):
                 recoverable=True,
             )
 
-        return self._parse_response(response)
+        return self._parse_response(response, policy)
