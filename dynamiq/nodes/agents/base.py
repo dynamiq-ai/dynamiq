@@ -14,7 +14,6 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
 from enum import Enum
-from functools import partial
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Union
 from urllib.parse import unquote_to_bytes
@@ -2568,10 +2567,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                         run_ctx.pending_calls[reservation_id] = (run_ctx, hook_call(merged_input))
                 # The agent's own shell serves its tools to the code it runs; any other tool, a sub-agent included,
                 # must not reach this agent's.
-                is_own_sandbox_tool = tool.id in self._own_sandbox_tool_ids
-                bridge_token = current_tool_bridge_factory.set(
-                    partial(AgentToolBridge, self, config, kwargs) if is_own_sandbox_tool else None
-                )
+                bridge = AgentToolBridge(self, config, kwargs) if tool.id in self._own_sandbox_tool_ids else None
+                bridge_token = current_tool_bridge_factory.set(bridge.for_command if bridge else None)
                 try:
                     tool_result = tool_to_run.run(
                         input_data=merged_input,
@@ -2586,6 +2583,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                             run_ctx.pending_calls.pop(reservation_id, None)
                     if hold_token is not None:
                         _hold_answer_stream.reset(hold_token)
+                if bridge is not None and bridge.run_ending is not None:
+                    # As on a direct call: the run ends, here once the command has returned.
+                    raise bridge.run_ending
             dependency_node = tool_to_run if tool_to_run is not tool else tool
             dependency_dict = NodeDependency(node=dependency_node).to_dict(for_tracing=True)
             if update_run_depends:

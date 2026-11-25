@@ -28,7 +28,8 @@ class E2BToolBridgeSession:
     Use it as a context manager around the command, and run the command as ``wrap(command)`` with ``envs``. Each
     session has its own socket, nonce and token. Requests run on at most ``max_concurrent_calls`` threads, each in a
     copy of the context the session was entered in, so a bridged call sees the run's context variables as a direct
-    call does. A command makes at most ``max_calls_per_command`` requests; those past it are refused unrun.
+    call does. A command makes at most ``max_calls_per_command`` requests: the broker refuses those past it, and a
+    broker that relays more anyway is ended.
     """
 
     BRIDGE_DIR: ClassVar[str] = "/tmp/dynamiq-bridge"  # nosec B108 - a path inside the sandbox
@@ -55,7 +56,9 @@ class E2BToolBridgeSession:
         self._marker = f"\x1eDQB:{self._nonce}:"
         self._max_frame_chars = settings.max_request_bytes * 4 // 3 + 256
         self._handle = None
+        self._install_key: tuple[str, str] | None = None
         self._ready = threading.Event()
+        self._settled = threading.Event()  # the broker reported itself ready, or its output ended
         self._stopping = threading.Event()
         self._send_lock = threading.Lock()
         self._requests = 0
@@ -86,8 +89,9 @@ class E2BToolBridgeSession:
         version = hashlib.sha256("".join(files.values()).encode()).hexdigest()[:12]
         with self._install_locks_guard:
             lock = self._install_locks.setdefault(self._sandbox_id, threading.Lock())
+        self._install_key = (self._sandbox_id, version)
         with lock:
-            if (self._sandbox_id, version) in self._installed:
+            if self._install_key in self._installed:
                 return
             root = self.BRIDGE_DIR
             self._sdk.files.write(f"{root}/broker.py", files["broker.py"])
@@ -95,7 +99,7 @@ class E2BToolBridgeSession:
             launcher = f'#!/bin/sh\nexec python3 {root}/lib/dynamiq_tools.py "$@"\n'
             self._sdk.files.write(f"{root}/bin/dynamiq-tools", launcher)
             self._sdk.commands.run(f"chmod 700 {root} && chmod 755 {root}/bin/dynamiq-tools", timeout=30)
-            self._installed.add((self._sandbox_id, version))
+            self._installed.add(self._install_key)
 
     def start(self) -> None:
         """Start the broker and wait until it serves.
@@ -104,8 +108,8 @@ class E2BToolBridgeSession:
             TimeoutError: If the broker did not report itself ready within ``ready_timeout_seconds``.
         """
         self._install()
-        limit = self._settings.max_request_bytes
-        command = f"python3 -u {self.BRIDGE_DIR}/broker.py {self._socket} {self._nonce} {limit}"
+        limits = f"{self._settings.max_request_bytes} {self._settings.max_calls_per_command}"
+        command = f"python3 -u {self.BRIDGE_DIR}/broker.py {self._socket} {self._nonce} {limits}"
         started: list[Any] = []
 
         def run_broker() -> None:
@@ -127,18 +131,19 @@ class E2BToolBridgeSession:
         starter = threading.Thread(target=run_broker, name="tool-bridge-start", daemon=True)
         starter.start()
         starter.join(self._settings.ready_timeout_seconds)
-        if not started:
+        if not started or isinstance(started[0], Exception):
             self._stopping.set()
-            raise TimeoutError("The tool bridge did not start.")
-        if isinstance(started[0], Exception):
-            self._stopping.set()
-            raise started[0]
+            self._installed.discard(self._install_key)
+            raise started[0] if started else TimeoutError("The tool bridge did not start.")
         self._handle = started[0]
         self._reader = threading.Thread(
             target=contextvars.copy_context().run, args=(self._read,), name="tool-bridge-reader", daemon=True
         )
         self._reader.start()
-        if not self._ready.wait(self._settings.ready_timeout_seconds):
+        self._settled.wait(self._settings.ready_timeout_seconds)
+        if not self._ready.is_set():
+            # Code in the sandbox can delete the installed files: the next command installs them again.
+            self._installed.discard(self._install_key)
             self.close(grace_seconds=0)
             raise TimeoutError("The tool bridge did not report itself ready.")
 
@@ -150,43 +155,49 @@ class E2BToolBridgeSession:
                     logger.debug(f"Tool bridge broker stderr: {stderr.strip()[-500:]!r}")
                 if not stdout:
                     continue
-                buffer += stdout
-                while "\n" in buffer:
-                    line, buffer = buffer.split("\n", 1)
-                    if line.startswith(self._marker):
-                        self._on_frame(line[len(self._marker) :])
-                if len(buffer) > self._max_frame_chars:
+                *lines, buffer = (buffer + stdout).split("\n")
+                for line in lines:
+                    if line.startswith(self._marker) and not self._on_frame(line[len(self._marker) :]):
+                        return
+                if len(buffer) > len(self._marker) + self._max_frame_chars:
                     logger.warning("Tool bridge: the broker sent an oversized frame; closing the bridge.")
                     return
         except Exception as e:
             if not self._stopping.is_set():
                 logger.warning(f"Tool bridge: lost the broker's output stream ({type(e).__name__}).")
         finally:
+            self._settled.set()
             if not self._stopping.is_set():
                 # Nothing answers without a reader: end the broker so callers fail now rather than at their timeout.
                 self._kill_broker()
 
-    def _on_frame(self, frame: str) -> None:
-        if self._stopping.is_set() or len(frame) > self._max_frame_chars:
-            return
+    def _on_frame(self, frame: str) -> bool:
+        """Takes one frame of the broker's. Returns False when the broker broke the protocol and must be ended."""
+        if self._stopping.is_set():
+            return True
+        if len(frame) > self._max_frame_chars:
+            logger.warning("Tool bridge: the broker sent an oversized frame; closing the bridge.")
+            return False
         try:
             message = json.loads(base64.b64decode(frame))
         except ValueError:
             logger.warning("Tool bridge: dropped a malformed frame.")
-            return
+            return True
         if not isinstance(message, dict):
-            return
+            return True
         if message.get("kind") == "ready":
             self._ready.set()
+            self._settled.set()
         elif message.get("kind") == "req" and isinstance(message.get("id"), str) and self._ready.is_set():
             self._requests += 1
             if self._requests > self._settings.max_calls_per_command:
-                limit = self._settings.max_calls_per_command
-                self._reply(message["id"], refusal("BudgetExceeded", f"at most {limit} requests per command"))
-                return
+                # The broker refuses these itself, so one that relays them was replaced from the sandbox.
+                logger.warning("Tool bridge: the broker relayed more requests than allowed; closing the bridge.")
+                return False
             # Copied in the reader, whose context is a copy of the shell call's: each request gets its own.
             context = contextvars.copy_context()
             self._futures.append(self._executor.submit(context.run, self._serve, message))
+        return True
 
     def _serve(self, request: dict[str, Any]) -> None:
         request_id = request.pop("id")

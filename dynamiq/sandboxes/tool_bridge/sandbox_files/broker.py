@@ -8,6 +8,8 @@ the token from ``DYNAMIQ_TOOLS_TOKEN``. The broker exits when its stdin closes.
 Standard library only: it runs on whatever Python the sandbox template has.
 """
 
+from __future__ import annotations
+
 import base64
 import json
 import os
@@ -23,10 +25,14 @@ _pending: dict[str, list] = {}  # request id -> [Event, reply chunks, reply]
 _out_lock = threading.Lock()
 
 
-def emit(nonce: str, kind: str, body: dict) -> None:
-    frame = base64.b64encode(json.dumps({"kind": kind, **body}).encode()).decode()
+def emit(nonce: str, payload: bytes) -> None:
+    frame = base64.b64encode(payload).decode()
     with _out_lock:
         os.write(1, f"\x1eDQB:{nonce}:{frame}\n".encode())
+
+
+def encode(body: dict) -> bytes:
+    return json.dumps(body, separators=(",", ":")).encode()
 
 
 def read_replies() -> None:
@@ -45,11 +51,17 @@ def read_replies() -> None:
     os._exit(0)
 
 
-def relay(nonce: str, request: dict, timeout: float) -> dict:
+def relay(nonce: str, request: dict, timeout: float, max_bytes: int, budget: threading.Semaphore) -> dict:
     rid = uuid.uuid4().hex
+    # Measured as relayed, where escaping can make a character six bytes: the agent drops a longer frame.
+    payload = encode({"kind": "req", "id": rid, **request})
+    if len(payload) > max_bytes:
+        return {"ok": False, "error": "RequestTooLarge"}
+    if not budget.acquire(blocking=False):
+        return {"ok": False, "error": "BudgetExceeded"}
     slot = _pending[rid] = [threading.Event(), [], None]
     try:
-        emit(nonce, "req", {"id": rid, **request})
+        emit(nonce, payload)
         if not slot[0].wait(timeout):
             return {"ok": False, "error": "BridgeTimeout", "reason": f"no reply within {timeout:g} seconds"}
         return slot[2]
@@ -68,7 +80,7 @@ def answer(f, reply: dict) -> None:
     f.write((json.dumps(reply) + "\n").encode())
 
 
-def serve_socket(conn: socket.socket, nonce: str, token: str, max_bytes: int) -> None:
+def serve_socket(conn: socket.socket, nonce: str, token: str, max_bytes: int, budget: threading.Semaphore) -> None:
     with conn, conn.makefile("rwb") as f:
         line = f.readline(max_bytes + 1)
         if len(line) > max_bytes:
@@ -83,11 +95,12 @@ def serve_socket(conn: socket.socket, nonce: str, token: str, max_bytes: int) ->
             return answer(f, {"ok": False, "error": "UnknownOperation"})
         timeout = clamp_timeout(request.pop("timeout", DEFAULT_TIMEOUT))
         relayed = {"op": request["op"], "tool": request.get("tool"), "input": request.get("input")}
-        answer(f, relay(nonce, relayed, timeout))
+        answer(f, relay(nonce, relayed, timeout, max_bytes, budget))
 
 
 def main() -> None:
     sock_path, nonce, max_bytes = sys.argv[1], sys.argv[2], int(sys.argv[3])
+    budget = threading.Semaphore(int(sys.argv[4]))  # requests the command may make, never given back
     token = os.environ["DYNAMIQ_TOOLS_TOKEN"]
     if os.path.exists(sock_path):
         os.unlink(sock_path)
@@ -96,10 +109,10 @@ def main() -> None:
     os.chmod(sock_path, 0o600)
     server.listen(64)
     threading.Thread(target=read_replies, daemon=True).start()
-    emit(nonce, "ready", {})
+    emit(nonce, encode({"kind": "ready"}))
     while True:
         conn, _ = server.accept()
-        threading.Thread(target=serve_socket, args=(conn, nonce, token, max_bytes), daemon=True).start()
+        threading.Thread(target=serve_socket, args=(conn, nonce, token, max_bytes, budget), daemon=True).start()
 
 
 if __name__ == "__main__":
