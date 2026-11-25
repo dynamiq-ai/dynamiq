@@ -1747,7 +1747,7 @@ requires-dist = [
     { name = "turbopuffer", marker = "extra == 'vectorstores'", specifier = ">=2.10.2,<2.11.0" },
     { name = "typing-extensions", specifier = ">=4.12.2" },
     { name = "unstructured-client", marker = "extra == 'files'", specifier = ">=0.42.3,<0.43.0" },
-    { name = "urllib3", specifier = ">=2.0.0,<3.0.0" },
+    { name = "urllib3", specifier = ">=2.8.0,<3.0.0" },
     { name = "weaviate-client", marker = "extra == 'vectorstores'", specifier = ">=4.22.0,<4.23.0" },
 ]
 provides-extras = ["files", "data", "vectorstores", "sql", "browser", "sandboxes", "gcp", "evals", "cua", "monty", "all"]

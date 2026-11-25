@@ -7,6 +7,7 @@ import ssl
 import threading
 import time
 import zlib
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import AsyncMock, Mock
 from urllib.parse import parse_qs, urlsplit
@@ -34,6 +35,7 @@ GZIP_BOMB = gzip.compress(b"\0" * (64 * 1024 * 1024))
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    hits = 0
 
     def log_message(self, *args):
         pass
@@ -75,6 +77,25 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, b"\x0b\x02\x80hello\x03", {"Content-Encoding": "br"})
         elif path == "/zstd":
             self._send(200, b"\x28\xb5\x2f\xfd", {"Content-Encoding": "zstd"})
+        elif path == "/gzip-members":
+            self._send(200, gzip.compress(b"hello ") + gzip.compress(b"world"), {"Content-Encoding": "gzip"})
+        elif path == "/empty-brotli":
+            self._send(204, b"", {"Content-Encoding": "br"})
+        elif path == "/chunked":
+            self.send_response(200)
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            for _ in range(1000):
+                self.wfile.write(b"2\r\nab\r\n")
+            self.wfile.write(b"0\r\n\r\n")
+        elif path == "/silent-body":
+            Handler.hits += 1
+            self.send_response(200)
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            self.wfile.write(b"x" * 10)
+            self.wfile.flush()
+            time.sleep(2)
         elif path == "/slow-redirect":
             time.sleep(0.8)
             self._send(302, b"", {"Location": query["to"]})
@@ -772,3 +793,72 @@ def test_send_refuses_other_schemes():
 async def test_send_async_refuses_other_schemes():
     with pytest.raises(httpx.UnsupportedProtocol):
         await egress.send_async(POLICY, method="GET", url="ftp://example.test/resource")
+
+
+def test_send_reports_a_body_that_stops_at_the_deadline_as_the_deadline(resolver, loopback_allowed, port):
+    policy = POLICY.model_copy(update={"timeout_seconds": 0.3})
+
+    for _ in range(10):
+        with pytest.raises(egress.EgressLimitError, match="took longer"):
+            _send_sync(policy, f"http://public.test:{port}/silent-body")
+
+
+def test_http_api_call_sends_a_request_that_ran_out_of_time_once(resolver, loopback_allowed, port):
+    Handler.hits = 0
+    node = HttpApiCall(
+        connection=connections.Http(method=connections.HTTPMethod.GET, url=f"http://public.test:{port}/silent-body"),
+        error_handling=ErrorHandling(max_retries=2, retry_interval_seconds=0),
+    )
+
+    result = node.run({}, config=RunnableConfig(egress=POLICY.model_copy(update={"timeout_seconds": 0.3})))
+
+    assert result.status == RunnableStatus.FAILURE
+    assert Handler.hits == 1
+
+
+def test_send_reads_chunked_bodies(resolver, loopback_allowed, port):
+    assert _send_sync(POLICY, f"http://public.test:{port}/chunked").content == b"ab" * 1000
+
+
+@pytest.mark.asyncio
+async def test_send_async_reads_chunked_bodies(resolver, loopback_allowed, port):
+    assert (await _send_async(POLICY, f"http://public.test:{port}/chunked")).content == b"ab" * 1000
+
+
+def test_send_decodes_every_gzip_member(resolver, loopback_allowed, port):
+    assert _send_sync(POLICY, f"http://public.test:{port}/gzip-members").content == b"hello world"
+
+
+@pytest.mark.asyncio
+async def test_send_async_decodes_every_gzip_member(resolver, loopback_allowed, port):
+    assert (await _send_async(POLICY, f"http://public.test:{port}/gzip-members")).content == b"hello world"
+
+
+def test_send_accepts_an_empty_body_in_any_encoding(resolver, loopback_allowed, port):
+    assert _send_sync(POLICY, f"http://public.test:{port}/empty-brotli").status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_send_async_accepts_an_empty_body_in_any_encoding(resolver, loopback_allowed, port):
+    assert (await _send_async(POLICY, f"http://public.test:{port}/empty-brotli")).status_code == 204
+
+
+@pytest.fixture
+def busy_resolver(monkeypatch):
+    """A resolver pool whose only thread is taken by a lookup that does not end until the test does."""
+    pool = ThreadPoolExecutor(max_workers=1)
+    release = threading.Event()
+    pool.submit(release.wait)
+    monkeypatch.setattr(egress, "_resolver", pool)
+    yield
+    release.set()
+    pool.shutdown()
+
+
+def test_send_needs_no_lookup_for_an_address(loopback_allowed, port, busy_resolver):
+    assert _send_sync(POLICY, f"http://127.0.0.1:{port}/ok").text == "hello"
+
+
+@pytest.mark.asyncio
+async def test_send_async_needs_no_lookup_for_an_address(loopback_allowed, port, busy_resolver):
+    assert (await _send_async(POLICY, f"http://127.0.0.1:{port}/ok")).text == "hello"
