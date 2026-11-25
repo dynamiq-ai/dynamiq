@@ -106,7 +106,7 @@ class WhisperSTT(ConnectionNode):
         Returns:
             dict: transcription result.
         """
-        connection_url = urljoin(self.connection.url, "audio/transcriptions")
+        connection_url = urljoin(self.connection.url.rstrip("/") + "/", "audio/transcriptions")
         response = self.client.request(
             method=self.connection.method,
             url=connection_url,

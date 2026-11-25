@@ -50,3 +50,17 @@ def test_workflow_with_whisper_transcriber(
         call_mock.last_request.headers.get("Authorization")
         == f"Bearer {connection.api_key}"
     )
+
+
+@pytest.mark.parametrize("base_url", ["https://your-url/v1", "https://your-url/v1/"])
+def test_whisper_keeps_base_url_path(mock_whisper_response_text, requests_mock, base_url):
+    connection = connections.Whisper(url=base_url, api_key="api-key")
+    call_mock = requests_mock.post(
+        url="https://your-url/v1/audio/transcriptions", text=json.dumps({"text": mock_whisper_response_text})
+    )
+    node = WhisperSTT(name="whisper", model="whisper-1", connection=connection)
+
+    response = node.run(input_data={"audio": b"bytes_data"})
+
+    assert response.status == RunnableStatus.SUCCESS
+    assert call_mock.called_once
