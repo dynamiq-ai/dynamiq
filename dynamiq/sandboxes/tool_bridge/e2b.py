@@ -65,6 +65,7 @@ class E2BToolBridgeSession:
         self._futures: list[Future] = []
         self._executor = ThreadPoolExecutor(settings.max_concurrent_calls, thread_name_prefix="tool-bridge")
         self._reader: threading.Thread | None = None
+        self._http_port: int | None = None
 
     def __enter__(self) -> "E2BToolBridgeSession":
         self.start()
@@ -75,7 +76,14 @@ class E2BToolBridgeSession:
 
     @property
     def envs(self) -> dict[str, str]:
-        return {"DYNAMIQ_TOOLS_SOCKET": self._socket, "DYNAMIQ_TOOLS_TOKEN": self._token}
+        # The template's CLIs (tools-cli, sql-cli) call the platform at DYNAMIQ_API_BASE_URL with DYNAMIQ_API_TOKEN:
+        # here they reach the broker, which answers from the agent's own tools.
+        return {
+            "DYNAMIQ_TOOLS_SOCKET": self._socket,
+            "DYNAMIQ_TOOLS_TOKEN": self._token,
+            "DYNAMIQ_API_BASE_URL": f"http://127.0.0.1:{self._http_port}",
+            "DYNAMIQ_API_TOKEN": self._token,
+        }
 
     def wrap(self, command: str) -> str:
         """The command with the client on PATH and PYTHONPATH, set in the shell since E2B ``envs`` replace them."""
@@ -185,7 +193,12 @@ class E2BToolBridgeSession:
             return True
         if not isinstance(message, dict):
             return True
-        if message.get("kind") == "ready":
+        if message.get("kind") == "ready" and not self._ready.is_set():
+            port = message.get("http_port")
+            if type(port) is not int or not 0 < port < 65536:
+                logger.warning("Tool bridge: the broker reported no usable port.")
+                return False
+            self._http_port = port
             self._ready.set()
             self._settled.set()
         elif message.get("kind") == "req" and isinstance(message.get("id"), str) and self._ready.is_set():

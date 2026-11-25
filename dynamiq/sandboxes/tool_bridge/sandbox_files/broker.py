@@ -1,9 +1,10 @@
 """Tool bridge broker, run inside the sandbox by the agent process for one shell command.
 
 Its standard streams are its only channel to the agent process. Code in the sandbox reaches it on a Unix socket
-(``dynamiq_tools``). Each request goes out as one line on stdout, framed with the command's nonce; the reply comes
-back on stdin as JSON lines ``{"id", "chunk", "last"}``, whose chunks joined make the reply. Every request carries
-the token from ``DYNAMIQ_TOOLS_TOKEN``. The broker exits when its stdin closes.
+(``dynamiq_tools``), and the template's CLIs (``tools-cli``, ``sql-cli``) on a local HTTP port that answers the
+platform routes they call. Each request goes out as one line on stdout, framed with the command's nonce; the reply
+comes back on stdin as JSON lines ``{"id", "chunk", "last"}``, whose chunks joined make the reply. Every request
+carries the token from ``DYNAMIQ_TOOLS_TOKEN``. The broker exits when its stdin closes.
 
 Standard library only: it runs on whatever Python the sandbox template has.
 """
@@ -17,6 +18,8 @@ import socket
 import sys
 import threading
 import uuid
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 DEFAULT_TIMEOUT = 300
 MAX_TIMEOUT = 3600
@@ -98,6 +101,47 @@ def serve_socket(conn: socket.socket, nonce: str, token: str, max_bytes: int, bu
         answer(f, relay(nonce, relayed, timeout, max_bytes, budget))
 
 
+def make_http_handler(nonce: str, token: str, max_bytes: int, budget: threading.Semaphore):
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *args):  # stdout carries frames only
+            pass
+
+        def _answer(self, status: int, body) -> None:
+            data = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _relay(self) -> None:
+            # A browser page that rebinds its own name to 127.0.0.1 sends a Host header of that name.
+            host = (self.headers.get("Host") or "").rsplit(":", 1)[0]
+            if host not in ("127.0.0.1", "localhost"):
+                return self._answer(403, {"error": {"code": "forbidden", "message": "Bad Host header."}})
+            if self.headers.get("Authorization", "") != f"Bearer {token}":
+                return self._answer(401, {"error": {"code": "unauthorized", "message": "Bad token."}})
+            length = int(self.headers.get("Content-Length") or 0)
+            if length > max_bytes:
+                return self._answer(413, {"error": {"code": "too_large", "message": "Request too large."}})
+            try:
+                body = json.loads(self.rfile.read(length)) if length else None
+            except ValueError:
+                return self._answer(400, {"error": {"code": "bad_request", "message": "The body is not JSON."}})
+            request = {"op": "http", "method": self.command, "path": urlsplit(self.path).path, "body": body}
+            reply = relay(nonce, request, DEFAULT_TIMEOUT, max_bytes, budget)
+            if reply.get("ok") and "status" in reply:
+                return self._answer(int(reply["status"]), reply.get("body"))
+            error = reply.get("error", "BridgeError")
+            return self._answer(502, {"error": {"code": error, "message": reply.get("reason") or error}})
+
+        do_GET = do_POST = _relay
+
+    return Handler
+
+
 def main() -> None:
     sock_path, nonce, max_bytes = sys.argv[1], sys.argv[2], int(sys.argv[3])
     budget = threading.Semaphore(int(sys.argv[4]))  # requests the command may make, never given back
@@ -108,8 +152,11 @@ def main() -> None:
     server.bind(sock_path)
     os.chmod(sock_path, 0o600)
     server.listen(64)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_http_handler(nonce, token, max_bytes, budget))
+    httpd.daemon_threads = True
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
     threading.Thread(target=read_replies, daemon=True).start()
-    emit(nonce, encode({"kind": "ready"}))
+    emit(nonce, encode({"kind": "ready", "http_port": httpd.server_address[1]}))
     while True:
         conn, _ = server.accept()
         threading.Thread(target=serve_socket, args=(conn, nonce, token, max_bytes, budget), daemon=True).start()

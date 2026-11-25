@@ -4,25 +4,29 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, ClassVar, Literal
+from unittest.mock import patch
 
 import pytest
 from pydantic import BaseModel, Field
 
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
-from dynamiq.connections import E2B
+from dynamiq.connections import E2B, BigQuery, MySQL, PostgreSQL
 from dynamiq.flows import Flow
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.hooks.builtin import CallLimitHook, ToolPolicyHook
 from dynamiq.nodes.agents.hooks.core import BlockAs
 from dynamiq.nodes.node import Node
+from dynamiq.nodes.tools.sql_executor import SQLExecutor
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox, ShellCommandResult
 from dynamiq.sandboxes.e2b import E2BSandbox
 from dynamiq.sandboxes.tool_bridge.e2b import E2BToolBridgeSession
+from dynamiq.sandboxes.tool_bridge.sql_cli import sql_cli_connection
 from dynamiq.sandboxes.tools.shell import SandboxShellTool
 from tests.helpers.agent_hooks import ALL_MODES, build_agent, final_step, scripted, tool_step
 
@@ -382,3 +386,128 @@ def test_tool_bridge_survives_a_yaml_round_trip(tmp_path):
         settings = loaded.flow.nodes[0].sandbox.backend.tool_bridge
         assert settings.enabled is True and settings.max_calls_per_command == 7
         loaded.to_yaml_file(path)
+
+
+PLATFORM = """
+import json, os, urllib.error, urllib.request
+def api(path, method="GET", body=None, token=None, host=None):
+    headers = {"Authorization": "Bearer " + (token or os.environ["DYNAMIQ_API_TOKEN"])}
+    if host:
+        headers["Host"] = host
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(os.environ["DYNAMIQ_API_BASE_URL"] + path, data, headers, method=method)
+    try:
+        return json.loads(urllib.request.urlopen(request).read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read()).get("error", {}).get("message")
+"""
+
+
+def warehouse(password="pw-1") -> SQLExecutor:
+    connection = PostgreSQL(host="db.example", port=5432, database="dw", user="ro", password=password)
+    with patch.object(SQLExecutor, "init_components"):
+        return SQLExecutor(name="warehouse", connection=connection, is_postponed_component_init=True)
+
+
+def sql_agent(tmp_path, hooks=None, **bridge):
+    sandbox = local_sandbox(tmp_path, **bridge)
+    with patch.object(SQLExecutor, "init_components"):
+        return build_agent(
+            hooks=hooks, tools=[LookupTool(), warehouse()], sandbox={"enabled": True, "backend": sandbox}
+        )
+
+
+def test_tools_cli_routes(tmp_path):
+    agent = make_agent(tmp_path)
+    code = PLATFORM + (
+        "print('apps', api('/v1/internal/connectors'))\n"
+        "print('tools', api('/v1/internal/connectors/agent/tools'))\n"
+        "print('get', api('/v1/internal/connectors/agent/tools/lookup')['data']['name'])\n"
+        "print('call', api('/v1/internal/connectors/agent/tools/lookup/call', 'POST', {'input': {'key': 'h'}}))\n"
+        "print('missing', api('/v1/internal/connectors/agent/tools/nope'))\n"
+        "print('bad token', api('/v1/internal/connectors', token='forged'))\n"
+        "print('rebound host', api('/v1/internal/connectors', host='attacker.example'))"
+    )
+    observation = run_shell(agent, py(code))
+    assert "apps {'data': [{'slug': 'agent', 'name': 'agent', 'description': None}]}" in observation
+    assert "tools {'data': [{'name': 'lookup', 'description': 'Looks a key up.'}]}" in observation
+    assert "get lookup" in observation and "call {'data': 'value of h'}" in observation
+    assert "missing (404," in observation and "bad token (401," in observation and "rebound host (403," in observation
+
+
+def test_sql_cli_lists_databases_but_gets_no_credentials_by_default(tmp_path):
+    code = PLATFORM + (
+        "print('list', api('/v1/internal/sql-cli/databases'))\n"
+        "print('creds', api('/v1/internal/sql-cli/databases/warehouse/credentials'))"
+    )
+    observation = run_shell(sql_agent(tmp_path), py(code))
+    assert "'slug': 'warehouse'" in observation and "'engine': 'postgres'" in observation
+    assert "creds (403, \"This agent's sandbox gets no database credentials" in observation
+    assert "pw-1" not in observation
+
+
+def test_sql_cli_gets_credentials_where_allowed_and_each_grant_is_traced(tmp_path):
+    code = PLATFORM + "print('creds', api('/v1/internal/sql-cli/databases/warehouse/credentials'))"
+    tracing = TracingCallbackHandler()
+    observation = run_shell(sql_agent(tmp_path, cli_credentials_allowed=True), py(code), callbacks=[tracing])
+
+    assert "'engine': 'postgres', 'connection': {'host': 'db.example'" in observation
+    assert "'password': 'pw-1'" in observation
+    runs = list(tracing.runs.values())
+    shell = next(r for r in runs if r.name == "sandbox-shell")
+    grant = next(r for r in runs if r.name == "warehouse")
+    assert grant.parent_run_id == shell.id and grant.input == {"credentials_for": "sql-cli"}
+
+
+@pytest.mark.parametrize(
+    "hook",
+    [
+        ToolPolicyHook(tools=["warehouse"], allow_if={"user_id": "admin"}),
+        ToolPolicyHook(tools=["warehouse"], approval=True),
+        CallLimitHook(max_per_run=5),
+    ],
+)
+def test_no_credentials_past_a_hook_that_governs_the_tool(tmp_path, hook):
+    code = PLATFORM + "print('creds', api('/v1/internal/sql-cli/databases/warehouse/credentials'))"
+    observation = run_shell(sql_agent(tmp_path, hooks=[hook], cli_credentials_allowed=True), py(code))
+    assert "creds (403, \"Hooks check every call of 'warehouse'" in observation and "pw-1" not in observation
+
+
+@pytest.mark.parametrize("writes_allowed, served", [(False, False), (True, True)])
+def test_bigquery_credentials_only_for_a_tool_that_allows_writes(tmp_path, writes_allowed, served):
+    key = {"private_key": "k", "client_email": "sa@p.iam.gserviceaccount.com", "token_uri": "https://t"}
+    with patch.object(SQLExecutor, "init_components"):
+        bigquery = SQLExecutor(
+            name="events",
+            connection=BigQuery(project="billing", service_account=key),
+            writes_allowed=writes_allowed,
+            is_postponed_component_init=True,
+        )
+        agent = build_agent(
+            tools=[bigquery],
+            sandbox={"enabled": True, "backend": local_sandbox(tmp_path, cli_credentials_allowed=True)},
+        )
+    credentials = SimpleNamespace(token="ya29.short", expiry=datetime(2026, 1, 1, 12), refresh=lambda request: None)
+    code = PLATFORM + "print('creds', api('/v1/internal/sql-cli/databases/events/credentials'))"
+    with patch.object(BigQuery, "get_credentials", return_value=credentials):
+        observation = run_shell(agent, py(code))
+    assert ("'access_token': 'ya29.short'" in observation) is served
+    assert ("creds (403, \"'events' runs only SELECT statements" in observation) is not served
+
+
+def test_sql_cli_connection_payloads():
+    mysql = MySQL(host="m.example", port=3306, database="d", user="u", password="p")
+    assert sql_cli_connection(mysql)["ssl"] == {"verify_identity": False}
+
+    key = {"private_key": "k", "client_email": "sa@p.iam.gserviceaccount.com", "token_uri": "https://t"}
+    bigquery = BigQuery(project="billing", location="EU", service_account=key)
+    credentials = SimpleNamespace(token="ya29.short", expiry=datetime(2026, 1, 1, 12), refresh=lambda request: None)
+    with patch.object(BigQuery, "get_credentials", return_value=credentials):
+        payload = sql_cli_connection(bigquery)
+    assert payload == {
+        "project": "billing",
+        "location": "EU",
+        "maximum_bytes_billed": 10 * 1024**3,
+        "access_token": "ya29.short",
+        "expires_at": "2026-01-01T12:00:00Z",
+    }

@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from chromadb import ClientAPI as ChromaClient
     from google.cloud.bigquery import Client as BigQueryClient
     from google.cloud.documentai import DocumentProcessorServiceClient as DocumentAIClient
+    from google.oauth2.service_account import Credentials as ServiceAccountCredentials
     from neo4j import Driver as Neo4jDriver
     from openai import AsyncOpenAI as AsyncOpenAIClient
     from openai import OpenAI as OpenAIClient
@@ -873,6 +874,19 @@ class BigQuery(BaseConnection):
             )
         return {field: value for field in GoogleCloud.SERVICE_ACCOUNT_FIELDS if (value := getattr(key, field))}
 
+    def get_credentials(self, scopes: list[str] | None = None) -> "ServiceAccountCredentials":
+        """The service account's credentials, with ``scopes`` or the client's defaults.
+
+        Raises:
+            ConnectionError: If the service account key is incomplete or not valid.
+        """
+        from google.oauth2 import service_account
+
+        try:
+            return service_account.Credentials.from_service_account_info(self._service_account_info(), scopes=scopes)
+        except ValueError as error:
+            raise ConnectionError(f"The BigQuery connection's service account key is not valid: {error}") from error
+
     def connect(self) -> "BigQueryClient":
         """
         Connects to BigQuery as the connection's service account.
@@ -893,14 +907,7 @@ class BigQuery(BaseConnection):
             raise ModuleNotFoundError(
                 "No module named 'google.cloud.bigquery'", name="google.cloud.bigquery"
             ) from error
-        from google.oauth2 import service_account
-
-        try:
-            credentials = service_account.Credentials.from_service_account_info(self._service_account_info())
-        except ValueError as error:
-            raise ConnectionError(f"The BigQuery connection's service account key is not valid: {error}") from error
-
-        client = Client(project=self.project, credentials=credentials, location=self.location)
+        client = Client(project=self.project, credentials=self.get_credentials(), location=self.location)
         logger.debug(f"Connected to BigQuery with project={self.project}, location={self.location}.")
         return client
 
