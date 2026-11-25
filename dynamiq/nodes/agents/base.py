@@ -283,6 +283,10 @@ class ToolParams(BaseModel):
     by_name_params: dict[str, Union[dict[str, Any], "ToolParams"]] = Field(default_factory=dict, alias="by_name")
     by_id_params: dict[str, Union[dict[str, Any], "ToolParams"]] = Field(default_factory=dict, alias="by_id")
 
+    def __bool__(self) -> bool:
+        """False when no parameter is set, so an omitted ``tool_params`` does not replace inherited ones."""
+        return bool(self.global_params or self.by_name_params or self.by_id_params)
+
 
 class AgentInputSchema(BaseModel):
     input: str = Field(default="", description="Text input for the agent.")
