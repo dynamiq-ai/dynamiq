@@ -224,7 +224,7 @@ class TimeWeightedDocumentRanker(Node):
             # adjusted_candidates will be sorted by adjusted scores
         """
         for candidate in candidates:
-            if date := candidate.metadata.get(date_field):
+            if candidate.metadata and (date := candidate.metadata.get(date_field)):
                 days = TimeWeightedDocumentRanker.date_to_days(
                     date,
                     date_format=date_format,
