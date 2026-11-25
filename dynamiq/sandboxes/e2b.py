@@ -14,6 +14,8 @@ from dynamiq.nodes import Node
 from dynamiq.nodes.tools.code_interpreter import SandboxCreationErrorHandling
 from dynamiq.sandboxes.base import Sandbox, SandboxInfo, ShellCommandResult
 from dynamiq.sandboxes.exceptions import SandboxConnectionError
+from dynamiq.sandboxes.tool_bridge.e2b import E2BToolBridgeSession
+from dynamiq.sandboxes.tool_bridge.types import ToolBridgeHandler
 from dynamiq.utils.logger import logger
 
 
@@ -361,6 +363,7 @@ class E2BSandbox(Sandbox):
         command: str,
         timeout: int = 60,
         run_in_background_enabled: bool = False,
+        envs: dict[str, str] | None = None,
     ) -> ShellCommandResult:
         """Execute a shell command in the E2B sandbox.
 
@@ -368,6 +371,7 @@ class E2BSandbox(Sandbox):
             command: Shell command or script to execute.
             timeout: Timeout in seconds (default 60).
             background: If True, run command in background (no output).
+            envs: Environment variables for this command only.
 
         Returns:
             ShellCommandResult with stdout, stderr, and exit_code.
@@ -383,7 +387,7 @@ class E2BSandbox(Sandbox):
                 self._start_in_background(sandbox, command)
                 return ShellCommandResult(background=True)
 
-            result = sandbox.commands.run(command, timeout=timeout, cwd=self.base_path)
+            result = sandbox.commands.run(command, timeout=timeout, cwd=self.base_path, envs=envs)
             return ShellCommandResult(
                 stdout=result.stdout,
                 stderr=result.stderr,
@@ -401,6 +405,11 @@ class E2BSandbox(Sandbox):
             return ShellCommandResult(error=str(e))
         finally:
             self._extend_timeout(sandbox)
+
+    def open_tool_bridge(self, handler: ToolBridgeHandler, command_timeout: float) -> E2BToolBridgeSession:
+        """The tool bridge of one shell command: a broker in the sandbox, relayed over its command stream."""
+        sandbox = self._ensure_sandbox()
+        return E2BToolBridgeSession(sandbox, self.current_sandbox_id, handler, self.tool_bridge, command_timeout)
 
     def upload_file(
         self,

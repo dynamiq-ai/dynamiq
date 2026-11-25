@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
 from enum import Enum
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Union
 from urllib.parse import unquote_to_bytes
@@ -39,6 +40,7 @@ from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, USER_UPLOAD_SOURCE, AgentIterativeCheckpointMixin
 from dynamiq.nodes.agents.exceptions import (
     AgentUnknownToolException,
+    BridgedApprovalRequired,
     HookAnswerException,
     HookBlockedException,
     HookStopException,
@@ -116,6 +118,7 @@ from dynamiq.prompts import (
 )
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox, SandboxConfig
+from dynamiq.sandboxes.tool_bridge.types import current_tool_bridge_factory, in_bridged_call
 from dynamiq.skills.config import SkillsConfig
 from dynamiq.skills.registries.dynamiq import Dynamiq
 from dynamiq.skills.types import SkillMetadata
@@ -602,6 +605,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         tools_sandbox = self._resolve_tools_sandbox()
         if self.file_store_backend and tools_sandbox:
             raise ValueError("file_store and sandbox cannot both be enabled for an Agent at the same time")
+        if tools_sandbox and tools_sandbox.tool_bridge.enabled and self.share_sandbox_with_subagents:
+            raise ValueError(
+                "sandbox tool_bridge and share_sandbox_with_subagents cannot both be enabled: code of a subagent in "
+                "the shared sandbox could call this agent's tools"
+            )
 
         if tools_sandbox:
             # Not serialized; recreated from sandbox config on load.
@@ -2303,9 +2311,15 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         delegate_final: bool = False,
         is_parallel: bool = False,
         tool_run_id: str | None = None,
+        raw_output: bool = False,
         **kwargs,
     ) -> Any:
-        """Runs a specific tool with the given input."""
+        """Runs a specific tool with the given input.
+
+        ``raw_output`` returns the content as the tool and the after-tool hooks left it, neither shortened nor moved
+        to a file for the model: for calls of code in the sandbox, which reads the result itself.
+        """
+        from dynamiq.nodes.agents.tool_bridge import AgentToolBridge  # imports this module
         from dynamiq.nodes.tools.agent_tool import SubAgentTool
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
 
@@ -2500,6 +2514,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     **kwargs,
                 )
                 merged_input, skipped = hooked.value, hooked.skip
+                if hooked.ask is not None and skipped is None and in_bridged_call.get():
+                    self._hook_runner().refund(current_hook_ctx.get() or HookContext(), hook_call(merged_input))
+                    raise BridgedApprovalRequired(
+                        "The call needs a person's approval, which code in the sandbox cannot ask for.",
+                        hook=hooked.asked_by.display_name,
+                        point=HookPoint.BEFORE_TOOL.value,
+                    )
                 if hooked.ask is not None and skipped is None:
                     approval_ctx = current_hook_ctx.get() or HookContext()
                     reservation_id = uuid4().hex
@@ -2545,6 +2566,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 if run_ctx is not None:
                     with run_ctx.lock:
                         run_ctx.pending_calls[reservation_id] = (run_ctx, hook_call(merged_input))
+                # The agent's own shell serves its tools to the code it runs; any other tool, a sub-agent included,
+                # must not reach this agent's.
+                is_own_sandbox_tool = tool.id in self._own_sandbox_tool_ids
+                bridge_token = current_tool_bridge_factory.set(
+                    partial(AgentToolBridge, self, config, kwargs) if is_own_sandbox_tool else None
+                )
                 try:
                     tool_result = tool_to_run.run(
                         input_data=merged_input,
@@ -2553,6 +2580,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                         **child_kwargs,
                     )
                 finally:
+                    current_tool_bridge_factory.reset(bridge_token)
                     if run_ctx is not None:
                         with run_ctx.lock:
                             run_ctx.pending_calls.pop(reservation_id, None)
@@ -2609,6 +2637,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 tool_result_output_content, tool_output_meta = hooked_result.content, hooked_result.output
 
             saved_files = self._handle_tool_generated_files(tool, tool_result)
+
+            if raw_output:
+                self._record_artifact(tool_output_meta)
+                return tool_result_output_content, tool_result.output.get("files", []), tool_output_meta
 
             tool_result_content_processed = process_tool_output_with_sandbox_persistence(
                 content=tool_result_output_content,

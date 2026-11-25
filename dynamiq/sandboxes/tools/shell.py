@@ -1,6 +1,7 @@
 """Sandbox shell tools for command execution and file operations."""
 
 import logging
+from contextlib import ExitStack
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -9,9 +10,19 @@ from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
 from dynamiq.runnables import RunnableConfig
-from dynamiq.sandboxes.base import Sandbox
+from dynamiq.sandboxes.base import Sandbox, ShellCommandResult
+from dynamiq.sandboxes.tool_bridge.types import current_tool_bridge_factory
 
 logger = logging.getLogger(__name__)
+
+TOOLS_IN_CODE_DESCRIPTION = (
+    "\n\nCode this command runs can call your other tools, which run outside the sandbox with credentials it "
+    "never sees. Do so to call a tool many times, or to work on its results in code instead of reading them:\n"
+    "- Python: from dynamiq_tools import call; result = call('<tool>', {<arguments>})\n"
+    "- Shell: dynamiq-tools list | dynamiq-tools get <tool> | dynamiq-tools call <tool> --input '<json>'\n"
+    "A failed call raises dynamiq_tools.ToolError, whose .type names the failure. Background commands cannot "
+    "call tools."
+)
 
 
 class SandboxShellInputSchema(BaseModel):
@@ -82,6 +93,9 @@ class SandboxShellTool(Node):
         super().__init__(**kwargs)
         if self.sandbox and hasattr(self.sandbox, "base_path"):
             self.description = self.description.replace("{base_path}", self.sandbox.base_path)
+        bridged = self.sandbox and self.sandbox.tool_bridge.enabled and self.sandbox.supports_tool_bridge
+        if bridged and TOOLS_IN_CODE_DESCRIPTION not in self.description:
+            self.description += TOOLS_IN_CODE_DESCRIPTION
 
     @property
     def to_dict_exclude_params(self):
@@ -108,6 +122,29 @@ class SandboxShellTool(Node):
                         recoverable=True,
                     )
 
+    def _run_command(self, input_data: SandboxShellInputSchema, run_id: Any) -> ShellCommandResult:
+        """Runs the command, serving the calling agent's tools to it when the sandbox's tool bridge is on."""
+        settings = self.sandbox.tool_bridge
+        factory = current_tool_bridge_factory.get()
+        if settings.enabled and factory is not None and not input_data.run_in_background_enabled:
+            handler = factory(shell_run_id=run_id)
+            bridge = self.sandbox.open_tool_bridge(handler, command_timeout=input_data.timeout)
+            if bridge is not None:
+                with ExitStack() as stack:
+                    try:
+                        session = stack.enter_context(bridge)
+                    except Exception as e:
+                        logger.warning(f"Tool {self.name} - {self.id}: tool bridge did not start ({type(e).__name__})")
+                    else:
+                        return self.sandbox.run_command_shell(
+                            command=session.wrap(input_data.command), timeout=input_data.timeout, envs=session.envs
+                        )
+        return self.sandbox.run_command_shell(
+            command=input_data.command,
+            timeout=input_data.timeout,
+            run_in_background_enabled=input_data.run_in_background_enabled,
+        )
+
     def execute(
         self,
         input_data: SandboxShellInputSchema,
@@ -133,11 +170,7 @@ class SandboxShellTool(Node):
         try:
             self._validate_command(input_data.command)
 
-            result = self.sandbox.run_command_shell(
-                command=input_data.command,
-                timeout=input_data.timeout,
-                run_in_background_enabled=input_data.run_in_background_enabled,
-            )
+            result = self._run_command(input_data, run_id=kwargs.get("run_id"))
 
             # stderr is shown on success too: warnings and logs (Python logging, pip) are written there.
             content = result.stdout.rstrip("\n") if result.stdout else ""

@@ -3,6 +3,7 @@ import io
 import logging
 import mimetypes
 import shlex
+from contextlib import AbstractContextManager
 from enum import Enum
 from functools import cached_property
 from pathlib import Path
@@ -12,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from dynamiq.connections.connections import BaseConnection
 from dynamiq.nodes.node import Node
+from dynamiq.sandboxes.tool_bridge.types import ToolBridgeConfig, ToolBridgeHandler
 from dynamiq.storages.file.base import FileInfo
 
 
@@ -61,6 +63,13 @@ class Sandbox(abc.ABC, BaseModel):
     base_path: str = Field(default="/home/user", description="Base path in the sandbox filesystem.")
     max_output_files: int = Field(
         default=50, description="Maximum number of files to collect from the output directory."
+    )
+    tool_bridge: ToolBridgeConfig = Field(
+        default_factory=ToolBridgeConfig,
+        description=(
+            "Lets code that sandbox-shell commands run call the agent's own tools, on backends that support it. "
+            "Views of a shared sandbox never offer it."
+        ),
     )
     _clone_shared: ClassVar[bool] = True
 
@@ -377,6 +386,19 @@ class Sandbox(abc.ABC, BaseModel):
     def close(self) -> None:
         """Close the sandbox."""
         raise NotImplementedError(f"Implementation of close() is not implemented for {self.__class__.__name__}")
+
+    @property
+    def supports_tool_bridge(self) -> bool:
+        """Whether ``open_tool_bridge`` is implemented, so that ``tool_bridge`` takes effect."""
+        return type(self).open_tool_bridge is not Sandbox.open_tool_bridge
+
+    def open_tool_bridge(self, handler: ToolBridgeHandler, command_timeout: float) -> AbstractContextManager | None:
+        """The tool bridge of one shell command, serving ``handler``, or None where the backend has none.
+
+        The returned context manager yields an object with ``wrap(command)`` and ``envs``: inside it, run the command
+        as ``run_command_shell(wrap(command), envs=envs)``.
+        """
+        return None
 
     @property
     def supports_views(self) -> bool:
