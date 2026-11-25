@@ -13,6 +13,13 @@ class ToolBridgeConfig(BaseModel):
     """
 
     enabled: bool = Field(default=False, description="Offer the agent's tools to code in sandbox-shell commands.")
+    cli_credentials_allowed: bool = Field(
+        default=False,
+        description=(
+            "Serve sql-cli the credentials of the agent's SQL tools, so it can query their databases directly. Any "
+            "code in the command can read them."
+        ),
+    )
     max_calls_per_command: int = Field(default=50, ge=1, description="Requests of any kind one command may make.")
     max_concurrent_calls: int = Field(default=8, ge=1, description="Requests run at the same time.")
     max_request_bytes: int = Field(default=1024 * 1024, ge=1024, description="Largest request accepted.")
