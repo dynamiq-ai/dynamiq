@@ -191,7 +191,7 @@ class Pinecone(MemoryBackend):
                 )
                 # A zero vector scores every match alike, so the order is arbitrary. Return the
                 # matches oldest first, like get_all and InMemory.search.
-                documents = sorted(documents, key=lambda doc: (doc.metadata or {}).get("timestamp", 0))
+                documents = sorted(documents, key=lambda doc: (doc.metadata or {}).get("timestamp") or 0)
                 if limit and limit > 0:
                     documents = documents[-limit:]
             else:

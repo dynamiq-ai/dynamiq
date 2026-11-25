@@ -287,3 +287,21 @@ def test_pinecone_filter_only_search_returns_matches_oldest_first(mocker):
     result = backend.search(query=None, filters={"user_id": "u"}, limit=TOTAL)
 
     assert [m.content for m in result] == [f"msg-{i}" for i in range(TOTAL)]
+
+
+def test_pinecone_filter_only_search_orders_a_match_without_timestamp_first(mocker):
+    from dynamiq.memory.backends.pinecone import Pinecone
+
+    store = mocker.Mock()
+    store.dimension = 4
+    store._embedding_retrieval.return_value = [
+        Document(id="b", content="msg-b", metadata={"role": "user", "timestamp": 2.0}),
+        Document(id="a", content="msg-a", metadata={"role": "user", "timestamp": None}),
+    ]
+    backend = Pinecone.model_construct(
+        vector_store=store, embedder=mocker.Mock(), connection=mocker.Mock(), namespace="ns"
+    )
+
+    result = backend.search(query=None, filters={"user_id": "u"}, limit=TOTAL)
+
+    assert [m.content for m in result] == ["msg-a", "msg-b"]
