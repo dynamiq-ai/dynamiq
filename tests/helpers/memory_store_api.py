@@ -105,7 +105,8 @@ class MemoryStoreAPISimulator:
             if (store, user) != scope or not path.startswith(prefix):
                 continue
             text = f"{path} {self.memories[(store, user, path)]}".lower()
-            score = sum(w in text for w in words)
+            # The share of the query's words the memory holds, as the platform scores it.
+            score = sum(w in text for w in words) / len(words) if words else 0.0
             if score:
                 hit = self._as_json(scope, path, include_content=False)
                 hits.append({**hit, "score": float(score), "snippet": self.memories[(store, user, path)][:80]})

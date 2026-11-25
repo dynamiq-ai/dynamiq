@@ -390,6 +390,35 @@ def test_read_names_the_memories_around_it():
     )
 
 
+def test_write_drops_the_links_a_read_appended():
+    class LinkedMemoryStore(FakeMemoryStore):
+        def read_note(self, path: str, user_id: str | None = None) -> MemoryNote:
+            return MemoryNote(
+                path=path,
+                content=self.read(path, user_id),
+                links=[MemoryLink(target="dana-okafor", path="people/dana-okafor.md")],
+            )
+
+    backend = LinkedMemoryStore()
+    tool = MemoryStoreTool(backend=backend)
+    content(tool, action="write", path="customers/larkspur.md", content="12% discount.")
+    read_back = content(tool, action="read", path="customers/larkspur.md")
+
+    content(tool, action="write", path="customers/larkspur.md", content=read_back + "\nRenews in March.")
+
+    assert backend.read("customers/larkspur.md") == "12% discount.\nRenews in March."
+
+
+def test_write_names_no_memory_that_shares_only_its_folder():
+    backend = FakeMemoryStore()
+    backend.write("team/rota.md", "Holiday rota for December.")
+    tool = MemoryStoreTool(backend=backend)
+
+    assert content(tool, action="write", path="team/oncall.md", content="Pager rotation.") == (
+        "Remembered in 'team/oncall.md'."
+    )
+
+
 @pytest.mark.parametrize("change", ["rewritten", "deleted"])
 def test_write_refuses_to_replace_a_change_made_since_the_read(tool, backend, change):
     content(tool, action="write", path="team/oncall.md", content="Marco covers weekends.")

@@ -116,7 +116,7 @@ def test_read_note_parses_links_and_backlinks(store, client):
 
 def test_search_posts_the_query_in_the_body(store, client):
     client.request.return_value = _mock_response(
-        {"data": [{"path": "team/oncall.md", "score": 2, "snippet": "Billing pages go to Marco at weekends."}]}
+        {"data": [{"path": "team/oncall.md", "score": 0.5, "snippet": "Billing pages go to Marco at weekends."}]}
     )
 
     hits = store.search("weekend billing", prefix="team/", limit=5)
@@ -132,7 +132,7 @@ def test_search_posts_the_query_in_the_body(store, client):
     }
     assert client.request.call_args.kwargs["params"] is None
     assert [(hit.path, hit.score, hit.snippet) for hit in hits] == [
-        ("team/oncall.md", 2.0, "Billing pages go to Marco at weekends.")
+        ("team/oncall.md", 0.5, "Billing pages go to Marco at weekends.")
     ]
 
 

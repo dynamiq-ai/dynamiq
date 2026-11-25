@@ -74,6 +74,12 @@ RELATED_MIN_SCORE = 0.5
 # A listing describes the most recently changed memories until their lines reach this many characters,
 # about 4,000 tokens, and lists the rest by path, so its size grows with the store without a jump.
 LIST_DESCRIBED_CHARS = 16_000
+# Heads the links a read appends after a memory, one line per kind. A write drops them, so a model that
+# writes back what it read does not save the links into the memory.
+LINKS_MARKER = "\n\n[Links, not part of the memory]\n"
+LINKS_TO = "Links to: "
+UNRESOLVED_LINKS = "Unresolved links, no memory has these names: "
+LINKED_FROM = "Linked from: "
 
 MUTATING_ACTIONS = {MemoryStoreAction.WRITE, MemoryStoreAction.EDIT, MemoryStoreAction.DELETE}
 
@@ -260,15 +266,15 @@ class MemoryStoreTool(Node):
         unresolved = [link.target for link in note.links if not link.path]
         around = []
         if linked:
-            around.append("Links to: " + ", ".join(linked))
+            around.append(LINKS_TO + ", ".join(linked))
         if unresolved:
-            around.append("Unresolved links, no memory has these names: " + ", ".join(unresolved))
+            around.append(UNRESOLVED_LINKS + ", ".join(unresolved))
         if note.backlinks:
-            around.append("Linked from: " + ", ".join(note.backlinks))
+            around.append(LINKED_FROM + ", ".join(note.backlinks))
         if not around:
             return {"content": note.content}
         # Marked apart, so a model rewriting the memory from this output does not copy them into it.
-        return {"content": note.content + "\n\n[Links, not part of the memory]\n" + "\n".join(around)}
+        return {"content": note.content + LINKS_MARKER + "\n".join(around)}
 
     def _search(self, query: str, prefix: str, user_id: str | None = None) -> dict[str, Any]:
         """Hits with what each memory holds and the passage that matched: enough to pick what to read."""
@@ -288,12 +294,13 @@ class MemoryStoreTool(Node):
 
         Best effort: a failed search must not turn a saved memory into a failed call.
         """
-        entry = self._store(path, content, user_id)
+        entry = self._store(path, _without_links(content), user_id)
         message = f"Remembered in '{entry.path}'."
         # Within the memory that holds it: links resolve inside one memory, and a route's name is not a topic.
         scope = self.backend.scope_of(entry.path)
         try:
-            topic = " ".join(filter(None, [entry.description, _path_words(entry.path.removeprefix(scope))]))
+            # The file name, not its folders: every memory in a folder holds the folder's name in its path.
+            topic = " ".join(filter(None, [entry.description, _path_words(entry.path.rsplit("/", 1)[-1])]))
             hits = self.backend.search(topic, scope, RELATED_LIMIT + 1, user_id)
         except MemoryStoreError as e:
             logger.warning(f"Tool {self.name} - {self.id}: related-memory search failed. Error: {e}")
@@ -387,6 +394,16 @@ def _describe(entry: MemoryEntry) -> str:
     when = f", {entry.updated_at:%Y-%m-%d}" if entry.updated_at else ""
     about = f" — {entry.description}" if entry.description else ""
     return f"{entry.path}{about} ({entry.size} chars{when})"
+
+
+def _without_links(content: str) -> str:
+    """The memory without the links a read appended, keeping anything the model wrote after them."""
+    if LINKS_MARKER not in content:
+        return content
+    memory, appended = content.split(LINKS_MARKER, 1)
+    kept = [line for line in appended.split("\n") if not line.startswith((LINKS_TO, UNRESOLVED_LINKS, LINKED_FROM))]
+    rest = "\n".join(kept).strip("\n")
+    return f"{memory}\n{rest}" if rest else memory
 
 
 def _path_words(path: str) -> str:
