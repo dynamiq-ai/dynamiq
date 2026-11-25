@@ -146,3 +146,39 @@ def test_zero_width_regex_separator_merges_without_extra_text():
     chunks = splitter.execute(splitter.input_schema(documents=[Document(content="a1b2c3")]))["documents"]
 
     assert [chunk.content for chunk in chunks] == ["a1b2c3"]
+
+
+def test_markdown_language_preset_keeps_each_heading_level():
+    splitter = RecursiveCharacterSplitter(chunk_size=200, chunk_overlap=0, language=Language.MARKDOWN)
+    splitter.init_components()
+    text = "# Title\n\nIntro.\n\n## Section\n\nBody.\n\n### Sub\n\nMore."
+
+    chunks = splitter.execute(splitter.input_schema(documents=[Document(content=text)]))["documents"]
+
+    assert [chunk.content for chunk in chunks] == [text]
+
+
+def test_regex_separator_rejoins_each_piece_with_its_own_match():
+    splitter = RecursiveCharacterSplitter(
+        chunk_size=8,
+        chunk_overlap=0,
+        separators=[r"\n+"],
+        is_separator_regex=True,
+        add_start_index=False,
+    )
+    splitter.init_components()
+
+    chunks = splitter.execute(splitter.input_schema(documents=[Document(content="aa\nbb\n\ncc\ndd\n\n\nee")]))[
+        "documents"
+    ]
+
+    assert [chunk.content for chunk in chunks] == ["aa\nbb", "cc\ndd", "ee"]
+
+
+def test_literal_separator_still_rejoins_with_the_separator():
+    splitter = RecursiveCharacterSplitter(chunk_size=8, chunk_overlap=0, separators=["\n"], add_start_index=False)
+    splitter.init_components()
+
+    chunks = splitter.execute(splitter.input_schema(documents=[Document(content="aa\nbb\n\ncc\ndd")]))["documents"]
+
+    assert [chunk.content for chunk in chunks] == ["aa\nbb\ncc", "dd"]
