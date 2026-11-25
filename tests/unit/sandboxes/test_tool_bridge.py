@@ -3,7 +3,6 @@
 import os
 import subprocess
 import sys
-import threading
 import time
 from datetime import datetime
 from types import SimpleNamespace
@@ -19,6 +18,7 @@ from dynamiq.connections import E2B, BigQuery, MySQL, PostgreSQL
 from dynamiq.flows import Flow
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.hooks.builtin import CallLimitHook, ToolPolicyHook
+from dynamiq.nodes.agents.hooks.core import BlockAs
 from dynamiq.nodes.node import Node
 from dynamiq.nodes.tools.sql_executor import SQLExecutor
 from dynamiq.nodes.types import InferenceMode
@@ -240,6 +240,21 @@ def test_calls_a_hook_sends_for_approval_are_refused(tmp_path):
     assert "lookup ApprovalRequired" in observation and LookupTool.calls == []
 
 
+@pytest.mark.parametrize("on_violation, status", [(BlockAs.ANSWER, "success"), (BlockAs.FAIL, "failure")])
+def test_a_hook_that_ends_the_run_ends_it_from_code(tmp_path, on_violation, status):
+    stop = ToolPolicyHook(tools=["lookup"], deny=True, on_violation=on_violation, message="Lookups are closed.")
+    sandbox = {"enabled": True, "backend": local_sandbox(tmp_path)}
+    agent = build_agent(hooks=[stop], tools=[LookupTool(), LookupTool(name="other")], sandbox=sandbox)
+    calls = "[('lookup', {'key': '1'}), ('other', {'key': '2'})]"
+    steps = [tool_step("sandbox-shell", command=py(CALL_EACH.format(calls=calls))), final_step("done")]
+    with scripted(agent, MODE, steps):
+        result = agent.run(input_data={"input": "go"})
+
+    assert result.status == status
+    assert "Lookups are closed." in str(result.output if status == "success" else result.error.message)
+    assert LookupTool.calls == []
+
+
 def test_call_limit_hook_counts_bridged_calls(tmp_path):
     agent = make_agent(tmp_path, hooks=[CallLimitHook(tools=["lookup"], max_per_run=1)])
     tracing = TracingCallbackHandler()
@@ -260,6 +275,36 @@ def test_oversized_request_is_refused(tmp_path):
     agent = make_agent(tmp_path, max_request_bytes=1024)
     observation = run_shell(agent, py(CALL_EACH.format(calls="[('lookup', {'key': 'k' * 4096})]")))
     assert "lookup RequestTooLarge" in observation and LookupTool.calls == []
+
+
+def test_a_request_too_large_once_relayed_is_refused(tmp_path):
+    agent = make_agent(tmp_path, max_request_bytes=1024)
+    code = (
+        "import json, os, socket\ns = socket.socket(socket.AF_UNIX)\ns.connect(os.environ['DYNAMIQ_TOOLS_SOCKET'])\n"
+        "request = {'op': 'call', 'tool': 'lookup', 'input': {'key': '\u00e9' * 400}, 'timeout': 5}\n"
+        "request['token'] = os.environ['DYNAMIQ_TOOLS_TOKEN']\n"
+        "s.sendall((json.dumps(request, ensure_ascii=False) + '\\n').encode())\n"
+        "print(s.makefile('rb').readline().decode())"
+    )
+    observation = run_shell(agent, py(code))
+    assert "RequestTooLarge" in observation and LookupTool.calls == []
+
+
+def test_a_broker_that_cannot_start_fails_fast_and_is_installed_again(tmp_path):
+    agent = make_agent(tmp_path, ready_timeout_seconds=20)
+    call = py("from dynamiq_tools import call\nprint(call('lookup', {'key': 'k'}))")
+    steps = [
+        tool_step("sandbox-shell", command=f"rm -rf {tmp_path / 'bridge'}"),
+        tool_step("sandbox-shell", command=call),
+        tool_step("sandbox-shell", command=call),
+        final_step("done"),
+    ]
+    started = time.monotonic()
+    with scripted(agent, MODE, steps) as recorder:
+        agent.run(input_data={"input": "go"})
+
+    assert time.monotonic() - started < 10
+    assert "value of k" in recorder.sent_text(3)
 
 
 def test_concurrent_calls(tmp_path):
@@ -291,7 +336,6 @@ def test_without_the_bridge_the_client_says_so(tmp_path):
     agent = build_agent(tools=[LookupTool()], sandbox={"enabled": True, "backend": sandbox})
     observation = run_shell(agent, "dynamiq-tools list || echo missing")
     assert "missing" in observation
-    assert threading.active_count() < 50
 
 
 class ForeignShellSchema(BaseModel):

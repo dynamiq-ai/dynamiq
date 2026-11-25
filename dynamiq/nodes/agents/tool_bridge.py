@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from dynamiq.checkpoints.types import RunPausedException
 from dynamiq.nodes.agents.components.schema_generator import generate_function_calling_schemas
-from dynamiq.nodes.agents.exceptions import BridgedApprovalRequired, ToolBlockedException
+from dynamiq.nodes.agents.exceptions import BridgedApprovalRequired, HookBlockedException, ToolBlockedException
 from dynamiq.nodes.agents.hooks.core import TOOL_POINTS, ToolCall
 from dynamiq.nodes.schema_utils import strip_inaccessible_fields
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
@@ -38,17 +38,26 @@ class AgentToolBridge:
     sub-agents, the agent's internal tools, the sandbox's own tools, tools that ask a person, nor calls a hook
     sends for approval. A failure crosses into the sandbox as its type only, since a tool's error text can carry
     what the sandbox must not see.
+
+    A hook that ends the run on a call from code leaves its exception in ``run_ending``, for the agent to raise once
+    the command returns, and every later request is refused.
     """
 
-    def __init__(
-        self, agent: "Agent", config: RunnableConfig | None, loop_kwargs: dict[str, Any], *, shell_run_id: Any
-    ):
+    def __init__(self, agent: "Agent", config: RunnableConfig | None, loop_kwargs: dict[str, Any]):
         self._agent = agent
         self._config = config
+        self._kwargs = dict(loop_kwargs)
+        self.run_ending: HookBlockedException | None = None
+
+    def for_command(self, *, shell_run_id: Any) -> "AgentToolBridge":
+        """The bridge for the command of the shell call ``shell_run_id``, under which its calls show in traces."""
         # run_id stays the agent's, so hook events of bridged calls land on its run as those of direct calls do.
-        self._kwargs = {**loop_kwargs, "parent_run_id": shell_run_id}
+        self._kwargs["parent_run_id"] = shell_run_id
+        return self
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any]:
+        if self.run_ending is not None:
+            return refusal("RunEnded", "a hook ended the run")
         op = request.get("op")
         if op == "list":
             return {"ok": True, "result": self.list_tools()}
@@ -132,6 +141,9 @@ class AgentToolBridge:
             return refusal("ApprovalRequired", "the call needs a person's approval, which code cannot ask for")
         except ToolBlockedException:
             return refusal("ToolBlocked")
+        except HookBlockedException as e:
+            self.run_ending = self.run_ending or e
+            return refusal("RunEnded", "a hook ended the run")
         except RunPausedException:
             logger.warning(f"Tool bridge: '{tool.name}' tried to pause the run from code; refused.")
             return refusal("PauseNotAllowed", "a call from code cannot pause the run")
