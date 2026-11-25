@@ -1624,6 +1624,7 @@ vectorstores = [
 [package.dev-dependencies]
 dev = [
     { name = "coverage" },
+    { name = "cryptography" },
     { name = "fakeredis" },
     { name = "griffe" },
     { name = "mkdocs" },
@@ -1755,6 +1756,7 @@ provides-extras = ["files", "data", "vectorstores", "sql", "browser", "sandboxes
 [package.metadata.requires-dev]
 dev = [
     { name = "coverage", specifier = ">=7.10.0,<8.0.0" },
+    { name = "cryptography", specifier = ">=50.0.0,<51.0.0" },
     { name = "fakeredis", specifier = ">=2.21.3,<2.22.0" },
     { name = "griffe", specifier = "<2.0.0" },
     { name = "mkdocs", specifier = ">=1.6.0,<1.7.0" },

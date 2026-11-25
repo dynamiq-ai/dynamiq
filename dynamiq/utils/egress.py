@@ -89,7 +89,8 @@ def _reset_resolver() -> None:
     _resolver = _new_resolver()
 
 
-os.register_at_fork(after_in_child=_reset_resolver)
+if hasattr(os, "register_at_fork"):  # not on Windows, which does not fork
+    os.register_at_fork(after_in_child=_reset_resolver)
 
 
 class EgressError(Exception):
@@ -408,6 +409,7 @@ class _BoundedDecoder:
         self._coding = codings[0] if codings and not self._unsupported else None
         self._decompressor = self._new_decompressor()
         self._started = False
+        self._first_bytes = b""
         self._done = False
         self._pending = b""
 
@@ -425,14 +427,26 @@ class _BoundedDecoder:
         return decoded
 
     def _decompress(self, data: bytes) -> bytes:
+        # Some servers send raw deflate data without the zlib header, which httpx and urllib3 accept too. Until the zlib
+        # format has produced output, the bytes so far are kept to decode again as raw deflate if it turns out wrong.
+        if self._coding == "deflate" and not self._started:
+            self._first_bytes += data
         try:
-            return self._decompressor.decompress(data, self._call.body_bytes_left + 1)
+            decoded = self._decompressor.decompress(data, self._call.body_bytes_left + 1)
         except zlib.error as e:
-            # Some servers send raw deflate data without the zlib header, which httpx and urllib3 accept too.
             if self._coding != "deflate" or self._started:
                 raise EgressLimitError(f"The response body could not be decoded: {e}") from e
             self._decompressor = zlib.decompressobj(-zlib.MAX_WBITS)
-            return self._decompressor.decompress(data, self._call.body_bytes_left + 1)
+            self._started = True
+            data, self._first_bytes = self._first_bytes, b""
+            try:
+                return self._decompressor.decompress(data, self._call.body_bytes_left + 1)
+            except zlib.error as e:
+                raise EgressLimitError(f"The response body could not be decoded: {e}") from e
+        if decoded or self._decompressor.eof:
+            self._started = True
+            self._first_bytes = b""
+        return decoded
 
     def decode(self, data: bytes) -> bytes:
         self._call.check()
@@ -449,23 +463,21 @@ class _BoundedDecoder:
         data = self._pending + data
         self._pending = b""
         while data and not self._done:
+            if self._decompressor.eof:
+                # data follows the end of a stream. A gzip body may hold several members one after another, which
+                # urllib3 decodes too. Anything else is dropped, as httpx drops it, instead of piling up in zlib.
+                if self._coding == "deflate":
+                    self._done = True
+                elif len(data) < len(GZIP_MAGIC) and GZIP_MAGIC.startswith(data):
+                    self._pending = data
+                elif data.startswith(GZIP_MAGIC):
+                    self._decompressor = self._new_decompressor()
+                    continue
+                else:
+                    self._done = True
+                break
             decoded += self._take(self._decompress(data))
-            self._started = True
-            if not self._decompressor.eof:
-                break
-            data = self._decompressor.unused_data
-            # A gzip body may hold several members one after another, which urllib3 decodes too. Anything else after the
-            # end of the stream is dropped, as httpx drops it, instead of piling up in the decompressor.
-            if self._coding == "deflate" or not data:
-                self._done = self._coding == "deflate"
-                break
-            if len(data) < len(GZIP_MAGIC) and GZIP_MAGIC.startswith(data):
-                self._pending = data
-                break
-            if not data.startswith(GZIP_MAGIC):
-                self._done = True
-                break
-            self._decompressor = self._new_decompressor()
+            data = self._decompressor.unused_data if self._decompressor.eof else b""
         return bytes(decoded)
 
     def flush(self) -> bytes:

@@ -540,30 +540,30 @@ def test_send_async_under_uvloop(loopback_allowed, port):
 @pytest.mark.parametrize(
     "url, exempt",
     [
-        ("http://catalyst.internal/v1/conversations/abc/agent-runs", True),
-        ("http://catalyst.internal:80/v1/conversations/abc", True),
-        ("http://CATALYST.internal./v1/conversations/abc/x", True),
-        ("http://catalyst.internal/v1/conversations/abcd", False),
-        ("http://catalyst.internal/v1/conversations/abc/../other", False),
-        ("http://catalyst.internal/v1/conversations/abc/%2e%2e/other", False),
-        ("http://catalyst.internal/v1/conversations/abc/a%2Fb", False),
-        ("http://catalyst.internal:8080/v1/conversations/abc/x", False),
-        ("https://catalyst.internal/v1/conversations/abc/x", False),
-        ("http://user@catalyst.internal/v1/conversations/abc/x", False),
-        ("http://catalyst.internal/v1/other", False),
-        ("http://catalyst.internal:bad/v1/conversations/abc/x", False),
-        ("http://catalyst.internal:0/v1/conversations/abc/x", False),
+        ("http://tools.internal/v1/conversations/abc/agent-runs", True),
+        ("http://tools.internal:80/v1/conversations/abc", True),
+        ("http://TOOLS.internal./v1/conversations/abc/x", True),
+        ("http://tools.internal/v1/conversations/abcd", False),
+        ("http://tools.internal/v1/conversations/abc/../other", False),
+        ("http://tools.internal/v1/conversations/abc/%2e%2e/other", False),
+        ("http://tools.internal/v1/conversations/abc/a%2Fb", False),
+        ("http://tools.internal:8080/v1/conversations/abc/x", False),
+        ("https://tools.internal/v1/conversations/abc/x", False),
+        ("http://user@tools.internal/v1/conversations/abc/x", False),
+        ("http://tools.internal/v1/other", False),
+        ("http://tools.internal:bad/v1/conversations/abc/x", False),
+        ("http://tools.internal:0/v1/conversations/abc/x", False),
     ],
 )
 def test_egress_policy_is_exempt(url, exempt):
-    policy = EgressPolicy(exempt_url_prefixes=("http://catalyst.internal/v1/conversations/abc/",))
+    policy = EgressPolicy(exempt_url_prefixes=("http://tools.internal/v1/conversations/abc/",))
 
     assert policy.is_exempt(url) is exempt
 
 
 @pytest.mark.parametrize(
     "prefix",
-    ["ftp://catalyst.internal/", "http:///v1/", "http://u:p@catalyst.internal/", "http://catalyst.internal/a/../b/"],
+    ["ftp://tools.internal/", "http:///v1/", "http://u:p@tools.internal/", "http://tools.internal/a/../b/"],
 )
 def test_egress_policy_refuses_bad_prefixes(prefix):
     with pytest.raises(ValueError):
@@ -862,3 +862,31 @@ def test_send_needs_no_lookup_for_an_address(loopback_allowed, port, busy_resolv
 @pytest.mark.asyncio
 async def test_send_async_needs_no_lookup_for_an_address(loopback_allowed, port, busy_resolver):
     assert (await _send_async(POLICY, f"http://127.0.0.1:{port}/ok")).text == "hello"
+
+
+def _raw_deflate(data: bytes) -> bytes:
+    compressor = zlib.compressobj(wbits=-zlib.MAX_WBITS)
+    return compressor.compress(data) + compressor.flush()
+
+
+def _decode(content_encoding: str, chunks: list[bytes]) -> bytes:
+    decoder = egress._BoundedDecoder(content_encoding, egress._Call(EgressPolicy()))
+    return b"".join(decoder.decode(chunk) for chunk in chunks) + decoder.flush()
+
+
+@pytest.mark.parametrize(
+    "content_encoding, body, decoded",
+    [
+        ("gzip", gzip.compress(b"hello ", mtime=0) + gzip.compress(b"world", mtime=0), b"hello world"),
+        ("gzip", gzip.compress(b"hello", mtime=0) + b"\x1ftrailing", b"hello"),
+        ("gzip", gzip.compress(b"hello", mtime=0) + b"trailing", b"hello"),
+        ("deflate", zlib.compress(b"hello"), b"hello"),
+        ("deflate", zlib.compress(b"hello") + b"trailing", b"hello"),
+        ("deflate", _raw_deflate(b"hello"), b"hello"),
+    ],
+    ids=["gzip members", "gzip, then a magic byte", "gzip, then data", "zlib", "zlib, then data", "raw deflate"],
+)
+def test_bounded_decoder_decodes_a_body_split_anywhere(content_encoding, body, decoded):
+    for split in range(len(body) + 1):
+        assert _decode(content_encoding, [body[:split], body[split:]]) == decoded, split
+    assert _decode(content_encoding, [bytes([byte]) for byte in body]) == decoded

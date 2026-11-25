@@ -37,7 +37,7 @@ class EgressPolicy(BaseModel):
 
     Attributes:
         exempt_url_prefixes: URLs on the host's private network that its own tools call, such as
-            "http://catalyst.internal/v1/conversations/<id>/". A request skips the address check when its scheme, host
+            "http://tools.internal/v1/conversations/<id>/". A request skips the address check when its scheme, host
             and port match a prefix and its path is the prefix's path or below it. Every redirect is checked again.
         timeout_seconds: The most one request may take, redirects and reading the body included. It also caps the
             node's own timeout.
