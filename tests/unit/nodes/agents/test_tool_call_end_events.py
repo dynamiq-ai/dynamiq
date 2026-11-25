@@ -239,6 +239,25 @@ def test_a_call_that_ended_is_not_ended_again_when_streaming_its_result_fails():
     assert ends(streamed) == {"search": ["success"]}
 
 
+def test_the_run_fails_with_the_tool_error_when_streaming_its_end_fails():
+    agent = build_agent(tools=[CrashingTool()], streaming=STREAM_ALL)
+    steps = [tool_step("crash", query="x"), final_step("unreached")]
+
+    with scripted_streaming(agent, InferenceMode.FUNCTION_CALLING, steps):
+        record = Agent.stream_content
+
+        def fail_on_the_end(self, content, source, step, config=None, **kwargs):
+            if step == "tool":
+                raise RuntimeError("stream closed")
+            record(self, content, source, step, config, **kwargs)
+
+        with patch.object(Agent, "stream_content", fail_on_the_end):
+            result = agent.run(input_data={"input": "go"})
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "disk full" in result.error.message
+
+
 def test_a_call_that_ended_is_not_ended_again_when_streaming_its_delegated_answer_fails():
     child = build_agent(tools=[], name="Researcher", id="child")
     parent = build_agent(

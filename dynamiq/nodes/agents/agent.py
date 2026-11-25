@@ -1632,22 +1632,26 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 raise
             # The call still gets its end event, without the error's text: no AFTER_TOOL hook has seen it, so it
             # could show what a hook would have masked.
-            self._stream_agent_event(
-                AgentToolResultEventMessageData(
-                    tool_run_id=tool_run_id,
-                    name=tool.name,
-                    tool=tool_data,
-                    input=action_input,
-                    result=RUN_FAILING_TOOL_RESULT,
-                    files=[],
-                    loop_num=loop_num,
-                    output={},
-                    status=RunnableStatus.FAILURE,
-                ),
-                "tool",
-                config,
-                **kwargs,
-            )
+            try:
+                self._stream_agent_event(
+                    AgentToolResultEventMessageData(
+                        tool_run_id=tool_run_id,
+                        name=tool.name,
+                        tool=tool_data,
+                        input=action_input,
+                        result=RUN_FAILING_TOOL_RESULT,
+                        files=[],
+                        loop_num=loop_num,
+                        output={},
+                        status=RunnableStatus.FAILURE,
+                    ),
+                    "tool",
+                    config,
+                    **kwargs,
+                )
+            except Exception as stream_error:
+                # The run fails with the tool's error, not with the stream's.
+                logger.error(f"Failed to stream the end of tool call {tool_run_id}: {stream_error}")
             raise
 
     @staticmethod
