@@ -27,6 +27,8 @@ dependencies = [
     "litellm==1.103.10",
     "requests>=2.32.5,<3.0.0",
     "httpx>=0.28.0,<1.0.0",
+    "httpcore>=1.0.0,<2.0.0",
+    "urllib3>=2.0.0,<3.0.0",
     "click>=8.1.0,<9.0.0",
     "google-auth>=2.40.0,<3.0.0",
     "RestrictedPython>=8.4,<8.5.0",

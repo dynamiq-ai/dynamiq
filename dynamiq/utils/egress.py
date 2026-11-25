@@ -9,11 +9,15 @@ redirect it. TLS still verifies the certificate against the host name.
 import asyncio
 import ipaddress
 import socket
+import ssl
 import sys
 import threading
+import time
 import zlib
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextvars import ContextVar
-from functools import partial
+from functools import cache, partial
 from typing import Any
 
 import httpcore
@@ -25,7 +29,6 @@ from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 from urllib3.exceptions import ConnectTimeoutError, NameResolutionError, NewConnectionError
 from urllib3.util import connection as urllib3_connection
 
-from dynamiq.connections.connections import _shared_ssl_context
 from dynamiq.types.egress import EgressPolicy
 
 # The private ranges and the rest of the IANA special-purpose IPv4 registry. ipaddress's is_global is not used: it
@@ -54,11 +57,22 @@ DENIED_NETWORKS = tuple(
     )
 )
 
-# httpx decodes a whole chunk at once, so a small compressed body could expand past any limit in one step. Responses are
-# read raw and decoded here with a bound, which only zlib's formats allow; clients ask for those alone.
+# Both clients read bodies raw and decode them here, so that no decoder can produce more than the policy allows in one
+# step; only zlib's formats can be decoded with such a bound, so they are the only ones asked for and accepted.
 ACCEPT_ENCODING = "gzip, deflate"
+SUPPORTED_ENCODINGS = frozenset({"gzip", "x-gzip", "deflate"})
 
 READ_CHUNK_BYTES = 64 * 1024
+
+# Each connect and read waits at most until the deadline, so its own timeout and the deadline fire together; a timeout
+# this close to the deadline is reported as the deadline.
+DEADLINE_SLACK_SECONDS = 0.1
+
+# getaddrinfo cannot be cancelled, so a lookup that hangs keeps its thread until the system resolver gives up. Lookups
+# run in a pool of their own, so that such lookups cannot hold up the other clients in the process, and a request waits
+# for one only until its deadline.
+RESOLVER_THREADS = 16
+_resolver = ThreadPoolExecutor(max_workers=RESOLVER_THREADS, thread_name_prefix="dynamiq-egress-resolver")
 
 
 class EgressError(Exception):
@@ -70,7 +84,8 @@ class EgressRefusedError(EgressError):
 
 
 class EgressLimitError(EgressError):
-    """A response that is too large, takes too long or uses an encoding the policy cannot bound."""
+    """A request that redirects too often, or a response that is too large, takes too long or uses an encoding the
+    policy cannot bound."""
 
 
 def is_public_address(address: str) -> bool:
@@ -82,6 +97,10 @@ def is_public_address(address: str) -> bool:
     return ip.version == 4 and not any(ip in network for network in DENIED_NETWORKS)
 
 
+def _timed_out(timeout_seconds: float) -> EgressLimitError:
+    return EgressLimitError(f"The request took longer than {timeout_seconds:g} seconds.")
+
+
 def _check_host(host: str) -> str:
     """The host to resolve, without brackets. Raises EgressRefusedError for an IPv6 address."""
     host = host.strip("[]")
@@ -90,7 +109,9 @@ def _check_host(host: str) -> str:
     return host
 
 
-def _public_addresses(host: str, addresses: list[str]) -> list[str]:
+def _lookup(host: str, port: int) -> list[str]:
+    infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+    addresses = list(dict.fromkeys(info[4][0] for info in infos))
     if not addresses:
         raise socket.gaierror(socket.EAI_NONAME, f"{host} has no IPv4 address")
     # One answer outside the public internet refuses the host, so it cannot pass by sometimes resolving to it.
@@ -99,84 +120,147 @@ def _public_addresses(host: str, addresses: list[str]) -> list[str]:
     return addresses
 
 
-def resolve_public(host: str, port: int) -> list[str]:
+def resolve_public(host: str, port: int, timeout: float | None = None) -> list[str]:
     """The IPv4 addresses host resolves to, when all of them are public.
 
     Raises:
         EgressRefusedError: host is an IPv6 address, or one of its addresses is not public.
+        TimeoutError: the lookup did not finish within timeout seconds.
         socket.gaierror: host has no IPv4 address.
     """
     host = _check_host(host)
-    infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
-    return _public_addresses(host, list(dict.fromkeys(info[4][0] for info in infos)))
+    future = _resolver.submit(_lookup, host, port)
+    try:
+        return future.result(timeout=timeout)
+    except FutureTimeoutError as e:
+        future.cancel()
+        raise TimeoutError(f"Looking up {host} took too long.") from e
 
 
 async def resolve_public_async(host: str, port: int) -> list[str]:
-    """`resolve_public()` for the running event loop."""
+    """`resolve_public()` for the running event loop, without a timeout of its own."""
     host = _check_host(host)
-    infos = await asyncio.get_running_loop().getaddrinfo(host, port, family=socket.AF_INET, type=socket.SOCK_STREAM)
-    return _public_addresses(host, list(dict.fromkeys(info[4][0] for info in infos)))
+    future = _resolver.submit(_lookup, host, port)
+    try:
+        return await asyncio.wrap_future(future)
+    except asyncio.CancelledError:
+        future.cancel()
+        raise
 
 
-class _SyncCall:
-    """The connections one synchronous request opens, closed when its time is up.
+@cache
+def _ssl_context() -> ssl.SSLContext:
+    """The TLS context of both clients, which trusts the certifi bundle whatever the environment sets.
 
-    requests applies its timeout to each read, so a server that sends a byte now and then would hold the request, and
-    the thread, as long as it likes.
+    Building one parses the whole CA bundle, so the process shares it. Only HTTP/1.1 clients may share it: httpcore sets
+    the ALPN protocols on the context for every connection it opens.
+    """
+    return httpx.create_ssl_context(trust_env=False)
+
+
+class _Call:
+    """The deadline and byte budget of one request, its redirects included.
+
+    For a synchronous request it also stops the request when the deadline passes. requests applies its timeout to each
+    read, so a server that sends a byte now and then would hold the request, and the thread, as long as it liked. A
+    duplicate of each socket the request opens is kept for this: TLS takes over the original socket object, but shutting
+    down the duplicate ends every read and write on the connection, the handshake included.
     """
 
-    def __init__(self, timeout_seconds: float):
+    def __init__(self, policy: EgressPolicy):
+        self.policy = policy
+        self.deadline = time.monotonic() + policy.timeout_seconds
+        self.wire_bytes_left = policy.max_response_bytes
+        self.body_bytes_left = policy.max_response_bytes
         self.expired = False
-        self._connections: list[HTTPConnection] = []
+        self._sockets: list[socket.socket] = []
         self._lock = threading.Lock()
-        self._timer = threading.Timer(timeout_seconds, self._expire)
-        self._timer.daemon = True
+        self._timer: threading.Timer | None = None
 
-    def start(self) -> None:
+    def remaining(self) -> float:
+        return self.deadline - time.monotonic()
+
+    def check(self) -> None:
+        """Raises EgressLimitError once the deadline has passed."""
+        if self.expired or self.remaining() <= 0:
+            raise _timed_out(self.policy.timeout_seconds)
+
+    def timeout(self, timeout: Any) -> Any:
+        """The timeout of the next connect or read: timeout, or the time left if that is shorter.
+
+        A (connect, read) pair is capped item by item. Raises EgressLimitError once the deadline has passed.
+        """
+        self.check()
+        if isinstance(timeout, tuple):
+            return tuple(self.timeout(item) for item in timeout)
+        remaining = self.remaining()
+        return min(timeout, remaining) if isinstance(timeout, (int, float)) else remaining
+
+    def start_timer(self) -> None:
+        self._timer = threading.Timer(self.policy.timeout_seconds, self._expire)
+        self._timer.daemon = True
         self._timer.start()
 
-    def cancel(self) -> None:
-        self._timer.cancel()
-
-    def track(self, connection: HTTPConnection) -> None:
+    def watch(self, sock: socket.socket) -> None:
+        """Keeps a duplicate of sock to shut down at the deadline. Closes sock and raises if the deadline has passed."""
+        duplicate = sock.dup()
         with self._lock:
-            self._connections.append(connection)
+            if not self.expired:
+                self._sockets.append(duplicate)
+                return
+        duplicate.close()
+        sock.close()
+        raise _timed_out(self.policy.timeout_seconds)
 
     def _expire(self) -> None:
         with self._lock:
             self.expired = True
-            connections = list(self._connections)
-        for connection in connections:
-            sock = connection.sock
-            if sock is None:
-                continue
+            sockets = list(self._sockets)
+        for sock in sockets:
             try:
                 sock.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
 
+    def close(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+        with self._lock:
+            sockets, self._sockets = self._sockets, []
+        for sock in sockets:
+            sock.close()
 
-_current_call: ContextVar[_SyncCall | None] = ContextVar("dynamiq_egress_call", default=None)
+
+_current_call: ContextVar[_Call | None] = ContextVar("dynamiq_egress_call", default=None)
 
 
-def _track(connection: HTTPConnection) -> None:
-    if (call := _current_call.get()) is not None:
-        call.track(connection)
+def _require_call() -> _Call:
+    call = _current_call.get()
+    if call is None:
+        raise EgressRefusedError("A guarded connection was opened outside a guarded request.")
+    return call
 
 
 class _TrackedConnectionMixin:
+    """Connects as urllib3 does, within the request's deadline."""
+
     def _new_conn(self) -> socket.socket:
-        _track(self)
-        return super()._new_conn()
+        call = _require_call()
+        self.timeout = call.timeout(self.timeout)
+        sock = super()._new_conn()
+        call.watch(sock)
+        return sock
 
 
 class _PublicConnectionMixin:
-    """Connects only to a public address the host resolved to."""
+    """Connects only to a public address the host resolved to, within the request's deadline."""
 
     def _new_conn(self) -> socket.socket:
-        _track(self)
+        call = _require_call()
         try:
-            addresses = resolve_public(self._dns_host, self.port)
+            addresses = resolve_public(self._dns_host, self.port, timeout=call.timeout(None))
+        except TimeoutError as e:
+            raise _timed_out(call.policy.timeout_seconds) from e
         except socket.gaierror as e:
             raise NameResolutionError(self.host, self, e) from e
         error: Exception | None = None
@@ -184,17 +268,16 @@ class _PublicConnectionMixin:
             try:
                 sock = urllib3_connection.create_connection(
                     (address, self.port),
-                    self.timeout,
+                    call.timeout(self.timeout),
                     source_address=self.source_address,
                     socket_options=self.socket_options,
                 )
             except TimeoutError:
-                error = ConnectTimeoutError(
-                    self, f"Connection to {self.host} timed out. (connect timeout={self.timeout})"
-                )
+                error = ConnectTimeoutError(self, f"Connection to {self.host} timed out.")
             except OSError as e:
                 error = NewConnectionError(self, f"Failed to establish a new connection: {e}")
             else:
+                call.watch(sock)
                 sys.audit("http.client.connect", self, self.host, self.port)
                 return sock
         raise error
@@ -257,9 +340,9 @@ class _PolicyAdapter(BaseAdapter):
         self._public = _PoolAdapter({"http": _PublicHTTPConnectionPool, "https": _PublicHTTPSConnectionPool})
         self._exempt = _PoolAdapter({"http": _TrackedHTTPConnectionPool, "https": _TrackedHTTPSConnectionPool})
 
-    def send(self, request: requests.PreparedRequest, **kwargs) -> requests.Response:
+    def send(self, request: requests.PreparedRequest, timeout: float | None = None, **kwargs) -> requests.Response:
         adapter = self._exempt if self._policy.is_exempt(request.url) else self._public
-        return adapter.send(request, **kwargs)
+        return adapter.send(request, timeout=_require_call().timeout(timeout), **kwargs)
 
     def close(self) -> None:
         self._public.close()
@@ -270,20 +353,79 @@ def _too_large(max_bytes: int) -> EgressLimitError:
     return EgressLimitError(f"The response is larger than {max_bytes} bytes, the most allowed.")
 
 
-def _read_body(max_bytes: int, response: requests.Response, **kwargs) -> requests.Response:
-    """Reads the body into the response, redirects included, which requests would otherwise read whole."""
-    chunks = []
-    size = 0
+class _BoundedDecoder:
+    """Decodes a gzip, deflate or plain body, counting its bytes on the wire and decoded against the request's budget.
+
+    No step produces more than the budget has left, so a small compressed body cannot expand past it.
+    """
+
+    def __init__(self, content_encoding: str | None, call: _Call):
+        codings = [
+            coding
+            for coding in (part.strip().lower() for part in (content_encoding or "").split(","))
+            if coding and coding != "identity"
+        ]
+        if len(codings) > 1 or (codings and codings[0] not in SUPPORTED_ENCODINGS):
+            raise EgressLimitError(f"Responses with the content encoding {content_encoding!r} are not supported.")
+        self._call = call
+        self._coding = codings[0] if codings else None
+        if self._coding in ("gzip", "x-gzip"):
+            self._decompressor = zlib.decompressobj(zlib.MAX_WBITS | 16)
+        elif self._coding == "deflate":
+            self._decompressor = zlib.decompressobj()
+        else:
+            self._decompressor = None
+        self._started = False
+
+    def _take(self, decoded: bytes) -> bytes:
+        if len(decoded) > self._call.body_bytes_left:
+            raise _too_large(self._call.policy.max_response_bytes)
+        self._call.body_bytes_left -= len(decoded)
+        return decoded
+
+    def decode(self, data: bytes) -> bytes:
+        self._call.check()
+        if len(data) > self._call.wire_bytes_left:
+            raise _too_large(self._call.policy.max_response_bytes)
+        self._call.wire_bytes_left -= len(data)
+        if self._decompressor is None:
+            return self._take(data)
+        # Data after the end of the stream is dropped, as httpx drops it, instead of piling up in the decompressor.
+        if self._decompressor.eof:
+            return b""
+        try:
+            decoded = self._decompressor.decompress(data, self._call.body_bytes_left + 1)
+        except zlib.error as e:
+            # Some servers send raw deflate data without the zlib header, which httpx and urllib3 accept too.
+            if self._coding != "deflate" or self._started:
+                raise EgressLimitError(f"The response body could not be decoded: {e}") from e
+            self._decompressor = zlib.decompressobj(-zlib.MAX_WBITS)
+            decoded = self._decompressor.decompress(data, self._call.body_bytes_left + 1)
+        self._started = True
+        return self._take(decoded)
+
+    def flush(self) -> bytes:
+        if self._decompressor is None or self._decompressor.eof:
+            return b""
+        try:
+            return self._take(self._decompressor.flush())
+        except zlib.error as e:
+            raise EgressLimitError(f"The response body could not be decoded: {e}") from e
+
+
+def _read_body(call: _Call, response: requests.Response, **kwargs) -> requests.Response:
+    """Reads the body into the response, every redirect included, which requests would otherwise read whole.
+
+    The body of a redirect counts against the budget and is then dropped.
+    """
     try:
-        for chunk in response.iter_content(chunk_size=READ_CHUNK_BYTES):
-            size += len(chunk)
-            if size > max_bytes:
-                raise _too_large(max_bytes)
-            chunks.append(chunk)
+        decoder = _BoundedDecoder(response.headers.get("content-encoding"), call)
+        chunks = [decoder.decode(raw) for raw in response.raw.stream(READ_CHUNK_BYTES, decode_content=False)]
+        chunks.append(decoder.flush())
     except BaseException:
         response.close()
         raise
-    response._content = b"".join(chunks)
+    response._content = b"" if response.is_redirect else b"".join(chunks)
     response._content_consumed = True
     return response
 
@@ -293,38 +435,44 @@ def send(policy: EgressPolicy, *, timeout: float | None = None, **request_kwargs
 
     Args:
         policy: The policy to apply.
-        timeout: The timeout of each connect and read, capped at the policy's timeout.
+        timeout: The timeout of each connect and read, which the time left before the policy's deadline caps.
         **request_kwargs: The arguments of `requests.request()` other than timeout, stream and hooks.
 
     Raises:
         EgressRefusedError: The request, or a redirect, would connect to an address the policy does not allow.
-        EgressLimitError: The response was too large, or the request took longer than the policy allows.
+        EgressLimitError: The request redirected too often, or the response was too large, used an encoding other than
+            gzip or deflate, or took longer than the policy allows.
         requests.RequestException: The request failed, as requests reports it.
     """
-    call = _SyncCall(policy.timeout_seconds)
+    call = _Call(policy)
     token = _current_call.set(call)
     session = requests.Session()
     session.trust_env = False
     session.max_redirects = policy.max_redirects
+    session.headers["Accept-Encoding"] = ACCEPT_ENCODING
     adapter = _PolicyAdapter(policy)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
-    call.start()
+    call.start_timer()
     try:
-        return session.request(
-            timeout=min(timeout or policy.timeout_seconds, policy.timeout_seconds),
+        response = session.request(
+            timeout=timeout,
             stream=True,
-            hooks={"response": partial(_read_body, policy.max_response_bytes)},
+            hooks={"response": partial(_read_body, call)},
             **request_kwargs,
         )
+        call.check()
+        return response
     except EgressError:
         raise
+    except requests.TooManyRedirects as e:
+        raise EgressLimitError(f"The request was redirected more than {policy.max_redirects} times.") from e
     except Exception as e:
-        if call.expired:
-            raise EgressLimitError(f"The request took longer than {policy.timeout_seconds:g} seconds.") from e
+        if call.expired or (isinstance(e, requests.Timeout) and call.remaining() < DEADLINE_SLACK_SECONDS):
+            raise _timed_out(policy.timeout_seconds) from e
         raise
     finally:
-        call.cancel()
+        call.close()
         _current_call.reset(token)
         session.close()
 
@@ -366,10 +514,9 @@ class _PublicNetworkBackend(httpcore.AsyncNetworkBackend):
 
 class _PublicTransport(httpx.AsyncHTTPTransport):
     def __init__(self):
-        ssl_context = _shared_ssl_context()
-        super().__init__(verify=ssl_context, trust_env=False)
+        super().__init__(verify=_ssl_context(), trust_env=False)
         # httpx takes no network backend, so the pool it built is replaced by one with the same settings that has it.
-        self._pool = httpcore.AsyncConnectionPool(ssl_context=ssl_context, network_backend=_PublicNetworkBackend())
+        self._pool = httpcore.AsyncConnectionPool(ssl_context=_ssl_context(), network_backend=_PublicNetworkBackend())
 
 
 class _PolicyTransport(httpx.AsyncBaseTransport):
@@ -378,7 +525,7 @@ class _PolicyTransport(httpx.AsyncBaseTransport):
     def __init__(self, policy: EgressPolicy):
         self._policy = policy
         self._public = _PublicTransport()
-        self._exempt = httpx.AsyncHTTPTransport(verify=_shared_ssl_context(), trust_env=False)
+        self._exempt = httpx.AsyncHTTPTransport(verify=_ssl_context(), trust_env=False)
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         transport = self._exempt if self._policy.is_exempt(str(request.url)) else self._public
@@ -389,67 +536,19 @@ class _PolicyTransport(httpx.AsyncBaseTransport):
         await self._exempt.aclose()
 
 
-class _BoundedDecoder:
-    """Decodes a gzip, deflate or plain body without producing more than max_bytes at any step."""
+async def _read_body_async(call: _Call, response: httpx.Response) -> None:
+    """Reads the body into the response, every redirect included, which httpx would otherwise read whole.
 
-    def __init__(self, content_encoding: str | None, max_bytes: int):
-        codings = [
-            coding
-            for coding in (part.strip().lower() for part in (content_encoding or "").split(","))
-            if coding and coding != "identity"
-        ]
-        if len(codings) > 1 or (codings and codings[0] not in ("gzip", "x-gzip", "deflate")):
-            raise EgressLimitError(f"Responses with the content encoding {content_encoding!r} are not supported.")
-        self._coding = codings[0] if codings else None
-        if self._coding in ("gzip", "x-gzip"):
-            self._decompressor = zlib.decompressobj(zlib.MAX_WBITS | 16)
-        elif self._coding == "deflate":
-            self._decompressor = zlib.decompressobj()
-        else:
-            self._decompressor = None
-        self._max_bytes = max_bytes
-        self._remaining = max_bytes
-        self._started = False
-
-    def _take(self, decoded: bytes) -> bytes:
-        if len(decoded) > self._remaining:
-            raise _too_large(self._max_bytes)
-        self._remaining -= len(decoded)
-        return decoded
-
-    def decode(self, data: bytes) -> bytes:
-        if self._decompressor is None:
-            return self._take(data)
-        try:
-            decoded = self._decompressor.decompress(data, self._remaining + 1)
-        except zlib.error as e:
-            # Some servers send raw deflate data without the zlib header, which httpx accepts too.
-            if self._coding != "deflate" or self._started:
-                raise httpx.DecodingError(str(e)) from e
-            self._decompressor = zlib.decompressobj(-zlib.MAX_WBITS)
-            decoded = self._decompressor.decompress(data, self._remaining + 1)
-        self._started = True
-        return self._take(decoded)
-
-    def flush(self) -> bytes:
-        if self._decompressor is None:
-            return b""
-        try:
-            return self._take(self._decompressor.flush())
-        except zlib.error as e:
-            raise httpx.DecodingError(str(e)) from e
-
-
-async def _read_body_async(max_bytes: int, response: httpx.Response) -> None:
-    """Reads the body into the response, redirects included, which httpx would otherwise read whole."""
+    The body of a redirect counts against the budget and is then dropped.
+    """
     try:
-        decoder = _BoundedDecoder(response.headers.get("content-encoding"), max_bytes)
+        decoder = _BoundedDecoder(response.headers.get("content-encoding"), call)
         chunks = [decoder.decode(raw) async for raw in response.aiter_raw(READ_CHUNK_BYTES)]
         chunks.append(decoder.flush())
     except BaseException:
         await response.aclose()
         raise
-    response._content = b"".join(chunks)
+    response._content = b"" if response.has_redirect_location else b"".join(chunks)
 
 
 async def send_async(policy: EgressPolicy, *, timeout: float | None = None, **request_kwargs: Any) -> httpx.Response:
@@ -462,10 +561,11 @@ async def send_async(policy: EgressPolicy, *, timeout: float | None = None, **re
 
     Raises:
         EgressRefusedError: The request, or a redirect, would connect to an address the policy does not allow.
-        EgressLimitError: The response was too large or used an encoding other than gzip or deflate, or the request
-            took longer than the policy allows.
+        EgressLimitError: The request redirected too often, or the response was too large, used an encoding other than
+            gzip or deflate, or took longer than the policy allows.
         httpx.HTTPError: The request failed, as httpx reports it.
     """
+    call = _Call(policy)
     async with httpx.AsyncClient(
         transport=_PolicyTransport(policy),
         follow_redirects=True,
@@ -473,7 +573,7 @@ async def send_async(policy: EgressPolicy, *, timeout: float | None = None, **re
         trust_env=False,
         timeout=policy.timeout_seconds,
         headers={"Accept-Encoding": ACCEPT_ENCODING},
-        event_hooks={"response": [partial(_read_body_async, policy.max_response_bytes)]},
+        event_hooks={"response": [partial(_read_body_async, call)]},
     ) as client:
         deadline = asyncio.timeout(policy.timeout_seconds)
         try:
@@ -483,5 +583,11 @@ async def send_async(policy: EgressPolicy, *, timeout: float | None = None, **re
                 )
         except TimeoutError as e:
             if deadline.expired():
-                raise EgressLimitError(f"The request took longer than {policy.timeout_seconds:g} seconds.") from e
+                raise _timed_out(policy.timeout_seconds) from e
             raise
+        except httpx.TimeoutException as e:
+            if asyncio.get_running_loop().time() > deadline.when() - DEADLINE_SLACK_SECONDS:
+                raise _timed_out(policy.timeout_seconds) from e
+            raise
+        except httpx.TooManyRedirects as e:
+            raise EgressLimitError(f"The request was redirected more than {policy.max_redirects} times.") from e

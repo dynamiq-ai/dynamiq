@@ -1480,6 +1480,7 @@ dependencies = [
     { name = "click" },
     { name = "filetype" },
     { name = "google-auth" },
+    { name = "httpcore" },
     { name = "httpx" },
     { name = "jinja2" },
     { name = "jsonpath-ng" },
@@ -1512,6 +1513,7 @@ dependencies = [
     { name = "tenacity" },
     { name = "tiktoken" },
     { name = "typing-extensions" },
+    { name = "urllib3" },
 ]
 
 [package.optional-dependencies]
@@ -1685,6 +1687,7 @@ requires-dist = [
     { name = "google-cloud-aiplatform", marker = "extra == 'gcp'", specifier = ">=1.133.0,<2.0.0" },
     { name = "google-cloud-bigquery", marker = "extra == 'sql'", specifier = ">=3.40.1,<4.0.0" },
     { name = "google-cloud-documentai", marker = "extra == 'gcp'", specifier = ">=3.15.0,<4.0.0" },
+    { name = "httpcore", specifier = ">=1.0.0,<2.0.0" },
     { name = "httpx", specifier = ">=0.28.0,<1.0.0" },
     { name = "inscriptis", marker = "extra == 'files'", specifier = ">=2.7.5,<3.0.0" },
     { name = "jinja2", specifier = ">=3.1.6,<3.2.0" },
@@ -1744,6 +1747,7 @@ requires-dist = [
     { name = "turbopuffer", marker = "extra == 'vectorstores'", specifier = ">=2.10.2,<2.11.0" },
     { name = "typing-extensions", specifier = ">=4.12.2" },
     { name = "unstructured-client", marker = "extra == 'files'", specifier = ">=0.42.3,<0.43.0" },
+    { name = "urllib3", specifier = ">=2.0.0,<3.0.0" },
     { name = "weaviate-client", marker = "extra == 'vectorstores'", specifier = ">=4.22.0,<4.23.0" },
 ]
 provides-extras = ["files", "data", "vectorstores", "sql", "browser", "sandboxes", "gcp", "evals", "cua", "monty", "all"]

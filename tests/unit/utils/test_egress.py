@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import gzip
 import ipaddress
@@ -5,7 +6,9 @@ import socket
 import ssl
 import threading
 import time
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest.mock import AsyncMock, Mock
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -18,9 +21,10 @@ from cryptography.x509.oid import NameOID
 
 from dynamiq import connections
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
+from dynamiq.nodes.node import ErrorHandling
 from dynamiq.nodes.tools import HttpApiCall, ResponseType
 from dynamiq.nodes.tools.http_api_call import EGRESS_ERROR_BODY_CHARS, HttpApiCallInputSchema
-from dynamiq.runnables import RunnableConfig
+from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.egress import EgressPolicy, set_default_egress_policy
 from dynamiq.utils import egress
 
@@ -62,8 +66,18 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, GZIP_BOMB, {"Content-Encoding": "gzip"})
         elif path == "/gzip":
             self._send(200, gzip.compress(b"hello"), {"Content-Encoding": "gzip"})
+        elif path == "/gzip-trailing":
+            self._send(200, gzip.compress(b"hello") + b"\0" * (MAX_BYTES * 4), {"Content-Encoding": "gzip"})
+        elif path == "/deflate-raw":
+            compressor = zlib.compressobj(wbits=-zlib.MAX_WBITS)
+            self._send(200, compressor.compress(b"hello") + compressor.flush(), {"Content-Encoding": "deflate"})
         elif path == "/brotli":
             self._send(200, b"\x0b\x02\x80hello\x03", {"Content-Encoding": "br"})
+        elif path == "/zstd":
+            self._send(200, b"\x28\xb5\x2f\xfd", {"Content-Encoding": "zstd"})
+        elif path == "/slow-redirect":
+            time.sleep(0.8)
+            self._send(302, b"", {"Location": query["to"]})
         elif path == "/set-cookie":
             self._send(200, b"", {"Set-Cookie": "session=secret; Path=/"})
         elif path == "/echo-cookie":
@@ -131,7 +145,9 @@ def resolver(monkeypatch):
         "metadata.test": [["169.254.169.254"]],
         "mixed.test": [["127.0.0.1", "10.0.0.1"]],
         "v6.test": [[]],
+        "slow.test": [["127.0.0.1"]],
     }
+    delays = {"slow.test": 3.0}
     lookups: list[str] = []
 
     def getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
@@ -140,6 +156,7 @@ def resolver(monkeypatch):
         if host not in answers:
             return real_getaddrinfo(host, port, family, type, proto, flags)
         lookups.append(host)
+        time.sleep(delays.get(host, 0))
         sequence = answers[host]
         addresses = sequence.pop(0) if len(sequence) > 1 else sequence[0]
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, port)) for address in addresses]
@@ -309,24 +326,35 @@ async def test_send_async_limits_response_size(resolver, loopback_allowed, port)
         await _send_async(POLICY, f"http://public.test:{port}/size?n={MAX_BYTES + 1}")
 
 
-@pytest.mark.parametrize("path", ["/gzip-bomb", "/redirect-big?to=/ok"])
+@pytest.mark.parametrize("path", ["/gzip-bomb", "/gzip-trailing", "/redirect-big?to=/ok", "/brotli", "/zstd"])
 def test_send_limits_decoded_and_redirect_bodies(resolver, loopback_allowed, port, path):
     with pytest.raises(egress.EgressLimitError):
         _send_sync(POLICY, f"http://public.test:{port}{path}")
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("path", ["/gzip-bomb", "/redirect-big?to=/ok", "/brotli"])
+@pytest.mark.parametrize("path", ["/gzip-bomb", "/gzip-trailing", "/redirect-big?to=/ok", "/brotli", "/zstd"])
 async def test_send_async_limits_decoded_and_redirect_bodies(resolver, loopback_allowed, port, path):
     with pytest.raises(egress.EgressLimitError):
         await _send_async(POLICY, f"http://public.test:{port}{path}")
 
 
-@pytest.mark.asyncio
-async def test_send_async_decodes_gzip(resolver, loopback_allowed, port):
-    response = await _send_async(POLICY, f"http://public.test:{port}/gzip")
+@pytest.mark.parametrize("path", ["/gzip", "/deflate-raw"])
+def test_send_decodes_gzip_and_deflate(resolver, loopback_allowed, port, path):
+    assert _send_sync(POLICY, f"http://public.test:{port}{path}").content == b"hello"
 
-    assert response.content == b"hello"
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/gzip", "/deflate-raw"])
+async def test_send_async_decodes_gzip_and_deflate(resolver, loopback_allowed, port, path):
+    assert (await _send_async(POLICY, f"http://public.test:{port}{path}")).content == b"hello"
+
+
+def test_send_drops_redirect_bodies(resolver, loopback_allowed, port):
+    response = _send_sync(POLICY, f"http://public.test:{port}/redirect?to=/ok")
+
+    assert response.text == "hello"
+    assert [r.content for r in response.history] == [b""]
 
 
 @pytest.mark.parametrize("path", ["/drip", "/drip-headers"])
@@ -351,13 +379,13 @@ async def test_send_async_stops_at_the_policy_timeout(resolver, loopback_allowed
 
 
 def test_send_limits_redirects(resolver, loopback_allowed, port):
-    with pytest.raises(requests.TooManyRedirects):
+    with pytest.raises(egress.EgressLimitError, match="redirected"):
         _send_sync(POLICY, f"http://public.test:{port}/loop")
 
 
 @pytest.mark.asyncio
 async def test_send_async_limits_redirects(resolver, loopback_allowed, port):
-    with pytest.raises(httpx.TooManyRedirects):
+    with pytest.raises(egress.EgressLimitError, match="redirected"):
         await _send_async(POLICY, f"http://public.test:{port}/loop")
 
 
@@ -467,7 +495,7 @@ def test_send_verifies_the_certificate_against_the_host_name(resolver, loopback_
 async def test_send_async_verifies_the_certificate_against_the_host_name(resolver, loopback_allowed, tls, monkeypatch):
     port, ca_file = tls
     client_context = ssl.create_default_context(cafile=ca_file)
-    monkeypatch.setattr(egress, "_shared_ssl_context", lambda: client_context)
+    monkeypatch.setattr(egress, "_ssl_context", lambda: client_context)
 
     assert (await _send_async(POLICY, f"https://public.test:{port}/ok")).text == "hello"
     with pytest.raises(httpx.ConnectError, match="CERTIFICATE_VERIFY_FAILED"):
@@ -503,6 +531,7 @@ def test_send_async_under_uvloop(loopback_allowed, port):
         ("http://user@catalyst.internal/v1/conversations/abc/x", False),
         ("http://catalyst.internal/v1/other", False),
         ("http://catalyst.internal:bad/v1/conversations/abc/x", False),
+        ("http://catalyst.internal:0/v1/conversations/abc/x", False),
     ],
 )
 def test_egress_policy_is_exempt(url, exempt):
@@ -592,3 +621,154 @@ def test_http_api_call_without_policy_connects_anywhere(port):
     result = _node(f"http://127.0.0.1:{port}/ok").execute(HttpApiCallInputSchema())
 
     assert result == {"content": "hello", "status_code": 200}
+
+
+def _within(start: float, seconds: float) -> bool:
+    return time.monotonic() - start < seconds
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/slow-redirect?to=http://slow.test:{port}/drip",
+        "/redirect?to=http://slow.test:{port}/drip",
+    ],
+)
+def test_send_deadline_covers_lookups_and_later_connections(resolver, loopback_allowed, port, path):
+    policy = POLICY.model_copy(update={"timeout_seconds": 1})
+    start = time.monotonic()
+
+    with pytest.raises(egress.EgressLimitError, match="took longer"):
+        _send_sync(policy, f"http://public.test:{port}{path.format(port=port)}")
+    assert _within(start, 2)
+
+
+def test_send_deadline_covers_a_slow_first_lookup(resolver, loopback_allowed, port):
+    policy = POLICY.model_copy(update={"timeout_seconds": 1})
+    start = time.monotonic()
+
+    with pytest.raises(egress.EgressLimitError, match="took longer"):
+        _send_sync(policy, f"http://slow.test:{port}/drip")
+    assert _within(start, 2)
+
+
+@pytest.mark.parametrize("exempt", [False, True])
+def test_send_drops_a_connection_that_opens_after_the_deadline(resolver, loopback_allowed, port, monkeypatch, exempt):
+    real_create_connection = egress.urllib3_connection.create_connection
+
+    def slow_create_connection(*args, **kwargs):
+        time.sleep(1.5)
+        return real_create_connection(*args, **kwargs)
+
+    monkeypatch.setattr(egress.urllib3_connection, "create_connection", slow_create_connection)
+    host = "internal.test" if exempt else "public.test"
+    policy = POLICY.model_copy(
+        update={"timeout_seconds": 1, "exempt_url_prefixes": (f"http://internal.test:{port}/",) if exempt else ()}
+    )
+    start = time.monotonic()
+
+    with pytest.raises(egress.EgressLimitError, match="took longer"):
+        _send_sync(policy, f"http://{host}:{port}/drip")
+    assert _within(start, 3)
+
+
+@pytest.fixture
+def tls_handshake_drip():
+    """A server that starts a TLS handshake record and then sends one byte of it every 0.1 s for 10 s."""
+    listener = socket.create_server(("127.0.0.1", 0))
+    stop = threading.Event()
+
+    def serve(conn):
+        with conn:
+            try:
+                conn.sendall(b"\x16\x03\x03\x40\x00")
+                for _ in range(100):
+                    if stop.wait(0.1):
+                        return
+                    conn.sendall(b"\0")
+            except OSError:
+                pass
+
+    def accept():
+        while not stop.is_set():
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                return
+            threading.Thread(target=serve, args=(conn,), daemon=True).start()
+
+    threading.Thread(target=accept, daemon=True).start()
+    yield listener.getsockname()[1]
+    stop.set()
+    listener.close()
+
+
+def test_send_deadline_covers_the_tls_handshake(resolver, loopback_allowed, tls_handshake_drip):
+    policy = POLICY.model_copy(update={"timeout_seconds": 1})
+    start = time.monotonic()
+
+    with pytest.raises(egress.EgressLimitError, match="took longer"):
+        _send_sync(policy, f"https://public.test:{tls_handshake_drip}/ok")
+    assert _within(start, 3)
+
+
+@pytest.mark.asyncio
+async def test_send_async_deadline_covers_the_tls_handshake(resolver, loopback_allowed, tls_handshake_drip):
+    policy = POLICY.model_copy(update={"timeout_seconds": 1})
+    start = time.monotonic()
+
+    with pytest.raises(egress.EgressLimitError, match="took longer"):
+        await _send_async(policy, f"https://public.test:{tls_handshake_drip}/ok")
+    assert _within(start, 3)
+
+
+@pytest.mark.asyncio
+async def test_send_async_deadline_covers_a_slow_lookup(resolver, loopback_allowed, port):
+    policy = POLICY.model_copy(update={"timeout_seconds": 1})
+    start = time.monotonic()
+
+    with pytest.raises(egress.EgressLimitError, match="took longer"):
+        await _send_async(policy, f"http://public.test:{port}/redirect?to=http://slow.test:{port}/ok")
+    assert _within(start, 2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("use_async", [False, True])
+@pytest.mark.parametrize("from_checkpoint", [False, True])
+async def test_http_api_call_sends_a_refused_request_once(monkeypatch, use_async, from_checkpoint):
+    default_policy = EgressPolicy(max_redirects=1)
+    run_policy = EgressPolicy(max_redirects=2)
+    set_default_egress_policy(default_policy)
+    try:
+        config = RunnableConfig(egress=run_policy)
+        if from_checkpoint:
+            config = RunnableConfig.model_validate(config.to_checkpoint_dict())
+        send = (AsyncMock if use_async else Mock)(side_effect=egress.EgressRefusedError("Refused."))
+        monkeypatch.setattr(egress, "send_async" if use_async else "send", send)
+        node = HttpApiCall(
+            connection=connections.Http(method=connections.HTTPMethod.GET, url="https://example.test/resource"),
+            error_handling=ErrorHandling(max_retries=2, retry_interval_seconds=0),
+        )
+        input_data = {"egress": {"max_redirects": 9}}
+        if use_async:
+            result = await node.run_async(input_data, config=config)
+        else:
+            result = await asyncio.to_thread(node.run, input_data, config=config)
+    finally:
+        set_default_egress_policy(None)
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "Request refused" in result.error.message
+    assert send.call_count == 1
+    assert send.call_args.args[0] is (default_policy if from_checkpoint else run_policy)
+
+
+def test_send_refuses_other_schemes():
+    with pytest.raises(requests.exceptions.InvalidSchema):
+        egress.send(POLICY, method="GET", url="ftp://example.test/resource")
+
+
+@pytest.mark.asyncio
+async def test_send_async_refuses_other_schemes():
+    with pytest.raises(httpx.UnsupportedProtocol):
+        await egress.send_async(POLICY, method="GET", url="ftp://example.test/resource")

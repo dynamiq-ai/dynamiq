@@ -15,7 +15,9 @@ def _origin_and_path(url: str) -> tuple[tuple[str, str, int], str] | None:
     scheme = parts.scheme.lower()
     if scheme not in DEFAULT_PORTS or not parts.hostname or parts.username is not None or parts.password is not None:
         return None
-    return (scheme, parts.hostname.rstrip("."), port or DEFAULT_PORTS[scheme]), parts.path or "/"
+    if port == 0:
+        return None
+    return (scheme, parts.hostname.rstrip("."), DEFAULT_PORTS[scheme] if port is None else port), parts.path or "/"
 
 
 def _has_ambiguous_segment(path: str) -> bool:
