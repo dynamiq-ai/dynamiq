@@ -4,6 +4,7 @@ from typing import Any
 from google.auth.transport.requests import Request
 
 from dynamiq.connections import AWSRedshift, BigQuery, DatabricksSQL, MySQL, PostgreSQL, Snowflake
+from dynamiq.nodes.tools.sql_executor import BIGQUERY_DEFAULT_MAXIMUM_BYTES_BILLED
 
 BIGQUERY_SCOPES = ["https://www.googleapis.com/auth/bigquery"]
 CONNECT_TIMEOUT_SECONDS = 10
@@ -27,7 +28,8 @@ def sql_cli_connection(connection: Any) -> dict[str, Any]:
     """The connection payload sql-cli expects for ``connection``, as the platform serves it.
 
     TLS is never weaker than on the agent's own connection. BigQuery gets an access token that expires within the
-    hour, minted from the service account key, which stays out of the sandbox.
+    hour, minted from the service account key, which stays out of the sandbox, and the byte limit of the agent's tool,
+    which sql-cli applies to its own jobs but the token does not enforce.
 
     Raises:
         ValueError: If sql-cli cannot use the connection.
@@ -53,8 +55,9 @@ def sql_cli_connection(connection: Any) -> dict[str, Any]:
             "user": connection.user,
             "password": connection.password,
             "connect_timeout": CONNECT_TIMEOUT_SECONDS,
-            # sql-cli has no opportunistic TLS, which the agent's mysql-connector uses: require it, without the
-            # hostname check that mysql-connector does not make either.
+            # sql-cli has no opportunistic TLS, which the agent's mysql-connector uses, so it is required. The
+            # certificate must chain to a CA the sandbox trusts, which a private one such as RDS's does not; its host
+            # name is not checked, as mysql-connector does not check it either.
             "ssl": {"verify_identity": False},
         }
     if isinstance(connection, Snowflake):
@@ -82,7 +85,7 @@ def sql_cli_connection(connection: Any) -> dict[str, Any]:
         return {
             "project": connection.project,
             "location": connection.location,
-            "maximum_bytes_billed": connection.maximum_bytes_billed,
+            "maximum_bytes_billed": connection.maximum_bytes_billed or BIGQUERY_DEFAULT_MAXIMUM_BYTES_BILLED,
             "access_token": credentials.token,
             "expires_at": credentials.expiry.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z"),
         }

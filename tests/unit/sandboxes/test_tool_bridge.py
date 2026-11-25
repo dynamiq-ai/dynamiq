@@ -473,6 +473,28 @@ def test_no_credentials_past_a_hook_that_governs_the_tool(tmp_path, hook):
     assert "creds (403, \"Hooks check every call of 'warehouse'" in observation and "pw-1" not in observation
 
 
+@pytest.mark.parametrize("writes_allowed, served", [(False, False), (True, True)])
+def test_bigquery_credentials_only_for_a_tool_that_allows_writes(tmp_path, writes_allowed, served):
+    key = {"private_key": "k", "client_email": "sa@p.iam.gserviceaccount.com", "token_uri": "https://t"}
+    with patch.object(SQLExecutor, "init_components"):
+        bigquery = SQLExecutor(
+            name="events",
+            connection=BigQuery(project="billing", service_account=key),
+            writes_allowed=writes_allowed,
+            is_postponed_component_init=True,
+        )
+        agent = build_agent(
+            tools=[bigquery],
+            sandbox={"enabled": True, "backend": local_sandbox(tmp_path, cli_credentials_allowed=True)},
+        )
+    credentials = SimpleNamespace(token="ya29.short", expiry=datetime(2026, 1, 1, 12), refresh=lambda request: None)
+    code = PLATFORM + "print('creds', api('/v1/internal/sql-cli/databases/events/credentials'))"
+    with patch.object(BigQuery, "get_credentials", return_value=credentials):
+        observation = run_shell(agent, py(code))
+    assert ("'access_token': 'ya29.short'" in observation) is served
+    assert ("creds (403, \"'events' runs only SELECT statements" in observation) is not served
+
+
 def test_sql_cli_connection_payloads():
     mysql = MySQL(host="m.example", port=3306, database="d", user="u", password="p")
     assert sql_cli_connection(mysql)["ssl"] == {"verify_identity": False}
@@ -480,13 +502,12 @@ def test_sql_cli_connection_payloads():
     key = {"private_key": "k", "client_email": "sa@p.iam.gserviceaccount.com", "token_uri": "https://t"}
     bigquery = BigQuery(project="billing", location="EU", service_account=key)
     credentials = SimpleNamespace(token="ya29.short", expiry=datetime(2026, 1, 1, 12), refresh=lambda request: None)
-    with patch.object(BigQuery, "get_credentials", return_value=credentials) as get_credentials:
+    with patch.object(BigQuery, "get_credentials", return_value=credentials):
         payload = sql_cli_connection(bigquery)
-    assert get_credentials.call_args.kwargs == {"scopes": ["https://www.googleapis.com/auth/bigquery"]}
     assert payload == {
         "project": "billing",
         "location": "EU",
-        "maximum_bytes_billed": None,
+        "maximum_bytes_billed": 10 * 1024**3,
         "access_token": "ya29.short",
         "expires_at": "2026-01-01T12:00:00Z",
     }

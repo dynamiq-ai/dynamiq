@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from dynamiq.checkpoints.types import RunPausedException
+from dynamiq.connections import BigQuery
 from dynamiq.nodes.agents.components.schema_generator import generate_function_calling_schemas
 from dynamiq.nodes.agents.exceptions import BridgedApprovalRequired, HookBlockedException, ToolBlockedException
 from dynamiq.nodes.agents.hooks.core import TOOL_POINTS, ToolCall
@@ -212,8 +213,9 @@ class AgentToolBridge:
     def _database_credentials(self, entry: dict[str, Any], tool: SQLExecutor) -> dict[str, Any]:
         """The credentials sql-cli connects with, which any code in the command can then read.
 
-        Served only where the sandbox allows CLI credentials and no hook governs the tool, since a direct connection
-        bypasses the checks and masking hooks apply to each call. Each grant shows in traces as a run of the tool.
+        Served only where the sandbox allows CLI credentials, and only when they allow no more than the tool does: not
+        when a hook governs the tool, since its checks and masking apply to each call, nor to a BigQuery tool kept to
+        SELECT, which a token cannot enforce. Each grant shows in traces as a run of the tool.
         """
         if not self._agent.sandbox_backend.tool_bridge.cli_credentials_allowed:
             message = f"This agent's sandbox gets no database credentials; query through the '{tool.name}' tool."
@@ -221,6 +223,9 @@ class AgentToolBridge:
         call = ToolCall(name=tool.name, input={}, tool_id=tool.authored_id)
         if any(hook.points() & set(TOOL_POINTS) and hook.applies_to(call) for hook in self._agent._hook_runner().hooks):
             message = f"Hooks check every call of '{tool.name}', which a direct connection would bypass; use the tool."
+            return _http_error(403, "forbidden", message)
+        if isinstance(tool.connection, BigQuery) and not tool.writes_allowed:
+            message = f"'{tool.name}' runs only SELECT statements, which a token cannot enforce; use the tool."
             return _http_error(403, "forbidden", message)
         try:
             connection = sql_cli_connection(tool.connection)

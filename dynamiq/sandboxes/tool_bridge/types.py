@@ -17,7 +17,8 @@ class ToolBridgeConfig(BaseModel):
         default=False,
         description=(
             "Serve sql-cli the credentials of the agent's SQL tools, so it can query their databases directly. Any "
-            "code in the command can read them."
+            "code in the command can read them and do whatever the database user may, so none are served for a tool "
+            "a hook governs, or for a BigQuery tool kept to SELECT."
         ),
     )
     max_calls_per_command: int = Field(default=50, ge=1, description="Requests of any kind one command may make.")
