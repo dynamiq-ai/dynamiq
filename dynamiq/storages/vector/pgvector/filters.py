@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from psycopg.sql import SQL
+from psycopg.sql import Literal as SQLLiteral
 from psycopg.types.json import Jsonb
 
 from dynamiq.storages.vector.exceptions import VectorStoreFilterException
@@ -61,8 +62,16 @@ def _qualify_metadata_fields(filters: dict[str, Any], top_level_fields: set[str]
     if "field" in filters:
         condition = filters.copy()
         field = condition["field"]
-        if isinstance(field, str) and "." not in field and field not in top_level_fields:
-            condition["field"] = f"metadata.{field}"
+        if not isinstance(field, str):
+            msg = f"Filter field must be a string, got {type(field)}"
+            raise VectorStoreFilterException(msg)
+        if field in top_level_fields or field.startswith("metadata."):
+            return condition
+        if "." in field:
+            # Anything that is neither a known column nor a metadata key would be inlined into the SQL as-is.
+            msg = f"Unknown filter field '{field}'. Use a top-level field or 'metadata.<key>'"
+            raise VectorStoreFilterException(msg)
+        condition["field"] = f"metadata.{field}"
         return condition
 
     if "conditions" not in filters:
@@ -185,7 +194,10 @@ def _parse_metadata_fields_in_metadata(field: str, value: Any) -> str:
 
     field_name = field.split(".", 1)[-1]
 
-    field = f"metadata->>'{field_name}'"
+    # The key is user-controlled: quote it as a SQL string literal, and escape `%` so psycopg
+    # does not read it as a parameter placeholder.
+    key_literal = SQLLiteral(field_name).as_string(None).strip().replace("%", "%%")
+    field = f"metadata->>{key_literal}"
 
     type_value = None
     if isinstance(value, list) and value:

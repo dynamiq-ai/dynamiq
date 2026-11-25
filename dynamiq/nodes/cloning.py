@@ -82,6 +82,8 @@ def _regenerate_ids(
             return obj
         if hasattr(obj, "id") and getattr(obj, "id") not in keep_ids:
             previous_id = getattr(obj, "id")
+            if isinstance(obj, Node) and obj._authored_id is None:
+                obj._authored_id = previous_id
             new_id = str(uuid4())
             setattr(obj, "id", new_id)
             if isinstance(previous_id, str):

@@ -109,6 +109,7 @@ class AgentToolData(BaseModel):
     name: str
     type: str
     action_type: str | None = None
+    id: str | None = None
 
 
 class AgentReasoningEventMessageData(BaseModel):

@@ -756,6 +756,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                 name=tool.name,
                 type=tool.type,
                 action_type=tool.action_type.value if tool.action_type else None,
+                id=tool.id,
             )
         return AgentToolData(name=action_name, type="unknown")
 
