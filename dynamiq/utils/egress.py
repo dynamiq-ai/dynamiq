@@ -68,6 +68,9 @@ SUPPORTED_ENCODINGS = frozenset({"gzip", "x-gzip", "deflate"})
 
 READ_CHUNK_BYTES = 64 * 1024
 
+# What the response headers of a request, its redirects included, may take beyond the body budget.
+HEADER_ALLOWANCE_BYTES = 64 * 1024
+
 # Each connect and read waits at most until the deadline, so its own timeout and the deadline fire together; a failure
 # this close to the deadline is reported as the deadline.
 DEADLINE_SLACK_SECONDS = 0.1
@@ -82,37 +85,59 @@ RESOLVER_THREADS = 16
 # never end.
 RESOLVER_CAPACITY = 4 * RESOLVER_THREADS
 
-
-def _new_resolver() -> ThreadPoolExecutor:
-    return ThreadPoolExecutor(max_workers=RESOLVER_THREADS, thread_name_prefix="dynamiq-egress-resolver")
-
-
-_resolver = _new_resolver()
-_resolver_slots = threading.BoundedSemaphore(RESOLVER_CAPACITY)
+# Lookups of the host's own exempt URLs have a smaller pool of their own, so that tenants' lookups, which may hang,
+# cannot crowd out the platform's own tools.
+EXEMPT_RESOLVER_THREADS = 4
+EXEMPT_RESOLVER_CAPACITY = 4 * EXEMPT_RESOLVER_THREADS
 
 
-def _reset_resolver() -> None:
-    # A forked child has none of the pool's threads, but the pool would still count one as idle and never start another.
-    global _resolver, _resolver_slots
-    _resolver = _new_resolver()
-    _resolver_slots = threading.BoundedSemaphore(RESOLVER_CAPACITY)
+class _Resolver:
+    """A pool of lookup threads and the places it admits lookups to."""
+
+    def __init__(self, threads: int, capacity: int, name: str):
+        self.pool = ThreadPoolExecutor(max_workers=threads, thread_name_prefix=name)
+        self.slots = threading.BoundedSemaphore(capacity)
+
+
+def _new_resolvers() -> dict[bool, _Resolver]:
+    """The resolvers by public_only."""
+    return {
+        True: _Resolver(RESOLVER_THREADS, RESOLVER_CAPACITY, "dynamiq-egress-resolver"),
+        False: _Resolver(EXEMPT_RESOLVER_THREADS, EXEMPT_RESOLVER_CAPACITY, "dynamiq-egress-exempt-resolver"),
+    }
+
+
+_resolvers = _new_resolvers()
+
+
+def _reset_resolvers() -> None:
+    # A forked child has none of the pools' threads, but a pool would still count one as idle and never start another.
+    global _resolvers
+    _resolvers = _new_resolvers()
 
 
 if hasattr(os, "register_at_fork"):  # not on Windows, which does not fork
-    os.register_at_fork(after_in_child=_reset_resolver)
+    os.register_at_fork(after_in_child=_reset_resolvers)
 
 
 class EgressError(Exception):
-    """A request the egress policy stopped. Sending it again gives the same result."""
+    """A request the egress policy stopped."""
 
 
 class EgressRefusedError(EgressError):
-    """A request that would connect to an address the policy does not allow."""
+    """A request that would connect to an address the policy does not allow. Sending it again gives the same result."""
 
 
 class EgressLimitError(EgressError):
     """A request that redirects too often, or a response that is too large, takes too long or uses an encoding the
-    policy cannot bound."""
+    policy cannot bound. Sending it again gives the same result."""
+
+
+class EgressBusyError(EgressError):
+    """A request that could not start because too many lookups are in progress in the process. It may succeed later."""
+
+
+NOT_PUBLIC = "The host does not resolve to a public IPv4 address, which is required."
 
 
 def is_public_address(address: str) -> bool:
@@ -141,40 +166,58 @@ def _public_addresses(host: str, addresses: list[str]) -> list[str]:
         raise socket.gaierror(socket.EAI_NONAME, f"{host} has no IPv4 address")
     # One answer outside the public internet refuses the host, so it cannot pass by sometimes resolving to it.
     if not all(is_public_address(address) for address in addresses):
-        raise EgressRefusedError("The host resolves to an address outside the public internet, which is not allowed.")
+        raise EgressRefusedError(NOT_PUBLIC)
     return addresses
 
 
 def _lookup(host: str, port: int, public_only: bool = True) -> list[str]:
-    infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        # The same refusal as for a private address, so that it does not tell which internal names exist.
+        if public_only:
+            raise EgressRefusedError(NOT_PUBLIC) from e
+        raise
     addresses = list(dict.fromkeys(info[4][0] for info in infos))
     if not public_only:
         if not addresses:
             raise socket.gaierror(socket.EAI_NONAME, f"{host} has no IPv4 address")
         return addresses
+    if not addresses:
+        raise EgressRefusedError(NOT_PUBLIC)
     return _public_addresses(host, addresses)
 
 
-def _charged_lookup(slots: threading.BoundedSemaphore, host: str, port: int, public_only: bool) -> list[str]:
+class _AbandonedLookupError(Exception):
+    """A lookup that its request stopped waiting for before a thread took it up."""
+
+
+def _charged_lookup(
+    slots: threading.BoundedSemaphore, abandoned: threading.Event, host: str, port: int, public_only: bool
+) -> list[str]:
     try:
+        if abandoned.is_set():
+            raise _AbandonedLookupError(host)
         return _lookup(host, port, public_only)
     finally:
         slots.release()
 
 
-def _submit_lookup(host: str, port: int, public_only: bool) -> Future:
-    """Starts a lookup in the pool. Raises EgressLimitError when the pool holds RESOLVER_CAPACITY lookups already.
+def _submit_lookup(host: str, port: int, public_only: bool) -> tuple[Future, threading.Event]:
+    """Starts a lookup in the pool for public_only, and returns it with the event to set when nobody waits for it.
 
-    The lookup is never cancelled: a cancelled one would leave its queue entry behind without giving its place back, so
-    one a request stopped waiting for still runs, and holds its place until it ends.
+    Raises EgressBusyError when the pool is full. A lookup holds its place until a thread takes it off the queue: a
+    cancelled future would leave its queue entry behind without giving the place back, so it is never cancelled, and a
+    thread skips one that was given up instead. A lookup a thread has started holds its place until it ends.
     """
-    if not _resolver_slots.acquire(blocking=False):
-        raise EgressLimitError("Too many host name lookups are in progress. Try again later.")
-    slots = _resolver_slots
+    resolver = _resolvers[public_only]
+    if not resolver.slots.acquire(blocking=False):
+        raise EgressBusyError("Too many host name lookups are in progress. Try again later.")
+    abandoned = threading.Event()
     try:
-        return _resolver.submit(_charged_lookup, slots, host, port, public_only)
+        return resolver.pool.submit(_charged_lookup, resolver.slots, abandoned, host, port, public_only), abandoned
     except BaseException:
-        slots.release()
+        resolver.slots.release()
         raise
 
 
@@ -191,17 +234,18 @@ def resolve_public(host: str, port: int, timeout: float | None = None, public_on
 
     Raises:
         EgressRefusedError: host is an IPv6 address, or one of its addresses is not public.
-        EgressLimitError: too many lookups are in progress in the process.
+        EgressBusyError: too many lookups are in progress in the process.
         TimeoutError: the lookup did not finish within timeout seconds.
         socket.gaierror: host has no IPv4 address.
     """
     host = _check_host(host)
     if (address := _literal(host)) is not None:
         return _public_addresses(host, [address]) if public_only else [address]
-    future = _submit_lookup(host, port, public_only)
+    future, abandoned = _submit_lookup(host, port, public_only)
     try:
         return future.result(timeout=timeout)
     except FutureTimeoutError as e:
+        abandoned.set()
         raise TimeoutError(f"Looking up {host} took too long.") from e
 
 
@@ -210,11 +254,16 @@ async def resolve_public_async(host: str, port: int, public_only: bool = True) -
     host = _check_host(host)
     if (address := _literal(host)) is not None:
         return _public_addresses(host, [address]) if public_only else [address]
-    lookup = asyncio.wrap_future(_submit_lookup(host, port, public_only))
+    future, abandoned = _submit_lookup(host, port, public_only)
+    lookup = asyncio.wrap_future(future)
     # Read the result even when nobody awaits it any more, so that its error is not reported as never retrieved.
     lookup.add_done_callback(lambda done: done.cancelled() or done.exception())
-    # Shielded, so that cancelling the request does not cancel the lookup; see _submit_lookup.
-    return await asyncio.shield(lookup)
+    try:
+        # Shielded, so that cancelling the request does not cancel the lookup; see _submit_lookup.
+        return await asyncio.shield(lookup)
+    except asyncio.CancelledError:
+        abandoned.set()
+        raise
 
 
 @cache
@@ -239,7 +288,7 @@ class _Call:
     def __init__(self, policy: EgressPolicy):
         self.policy = policy
         self.deadline = time.monotonic() + policy.timeout_seconds
-        self.wire_bytes_left = policy.max_response_bytes
+        self.wire_bytes_left = policy.max_response_bytes + HEADER_ALLOWANCE_BYTES
         self.body_bytes_left = policy.max_response_bytes
         self.expired = False
         self._sockets: list[socket.socket] = []
@@ -248,6 +297,12 @@ class _Call:
 
     def remaining(self) -> float:
         return self.deadline - time.monotonic()
+
+    def take_wire_bytes(self, size: int) -> None:
+        """Counts size bytes received against the budget. Raises EgressLimitError when it runs out."""
+        if size > self.wire_bytes_left:
+            raise _too_large(self.policy.max_response_bytes)
+        self.wire_bytes_left -= size
 
     def check(self) -> None:
         """Raises EgressLimitError once the deadline has passed."""
@@ -406,8 +461,24 @@ class _PoolAdapter(HTTPAdapter):
         raise EgressRefusedError("Requests may not go through a proxy.")
 
 
-# Headers by which a front end routes a request to another host or path than its URL names.
-ROUTING_HEADERS = frozenset({"forwarded", "x-forwarded-host", "x-host", "x-original-url", "x-rewrite-url"})
+# The headers a request to an exempt URL may carry: the ones the clients set themselves and those that describe its
+# body. Front ends route by many other headers, so the rest are refused rather than listed.
+EXEMPT_HEADERS = frozenset(
+    {
+        "accept",
+        "accept-encoding",
+        "accept-language",
+        "cache-control",
+        "connection",
+        "content-length",
+        "content-type",
+        "host",
+        "user-agent",
+    }
+)
+
+# What a failed request to an exempt URL says, instead of the client's text, which names the internal host and path.
+EXEMPT_FAILURE = "The request to an exempt URL failed."
 
 
 def _same_authority(url: SplitResult, host_header: str) -> bool:
@@ -426,15 +497,15 @@ def _same_authority(url: SplitResult, host_header: str) -> bool:
 
 
 def _check_exempt_headers(url: str, headers: Mapping[str, str]) -> None:
-    """Raises EgressRefusedError when a header would route a request to an exempt URL outside that URL.
+    """Raises EgressRefusedError when a request to an exempt URL carries a header outside EXEMPT_HEADERS, or a Host that
+    names another host.
 
-    The exemption is decided on the URL, but a front end that routes by the Host header or a rewrite header serves what
-    the header names instead.
+    The exemption is decided on the URL, but a front end that routes by a header serves what the header names instead.
     """
     parts = urlsplit(url)
     for name, value in headers.items():
-        if name.lower() in ROUTING_HEADERS:
-            raise EgressRefusedError(f"A request to an exempt URL may not set the {name} header.")
+        if name.lower() not in EXEMPT_HEADERS:
+            raise EgressRefusedError(f"A request to an exempt URL may not set the {name!r} header.")
         if name.lower() == "host" and not _same_authority(parts, value):
             raise EgressRefusedError("A request to an exempt URL may not name another host in its Host header.")
 
@@ -462,11 +533,17 @@ class _PolicyAdapter(BaseAdapter):
         self._first_hop = True
 
     def send(self, request: requests.PreparedRequest, timeout: float | None = None, **kwargs) -> requests.Response:
-        adapter = self._public
-        if _exempt_hop(self._policy, self._first_hop, request.url, request.headers):
-            adapter = self._exempt
+        exempt = _exempt_hop(self._policy, self._first_hop, request.url, request.headers)
         self._first_hop = False
-        return adapter.send(request, timeout=_require_call().timeout(timeout), **kwargs)
+        timeout = _require_call().timeout(timeout)
+        if not exempt:
+            return self._public.send(request, timeout=timeout, **kwargs)
+        try:
+            return self._exempt.send(request, timeout=timeout, **kwargs)
+        except requests.exceptions.Timeout as e:
+            raise requests.exceptions.Timeout(EXEMPT_FAILURE) from e
+        except requests.exceptions.ConnectionError as e:
+            raise requests.exceptions.ConnectionError(EXEMPT_FAILURE) from e
 
     def close(self) -> None:
         self._public.close()
@@ -546,9 +623,7 @@ class _BoundedDecoder:
             return b""
         if self._unsupported:
             raise EgressLimitError(f"Responses with the content encoding {self._content_encoding!r} are not supported.")
-        if len(data) > self._call.wire_bytes_left:
-            raise _too_large(self._call.policy.max_response_bytes)
-        self._call.wire_bytes_left -= len(data)
+        self._call.take_wire_bytes(len(data))
         if self._decompressor is None:
             return self._take(data)
         decoded = bytearray()
@@ -598,6 +673,8 @@ def _read_body(call: _Call, response: requests.Response, **kwargs) -> requests.R
     """
     body = bytearray()
     try:
+        # http.client keeps up to 100 header lines of 64 KiB each, and requests keeps every redirect's.
+        call.take_wire_bytes(sum(len(name) + len(value) + 4 for name, value in response.raw.headers.items()))
         decoder = _BoundedDecoder(response.headers.get("content-encoding"), call)
         for raw in _raw_chunks(response):
             body += decoder.decode(raw)
@@ -722,11 +799,16 @@ class _PolicyTransport(httpx.AsyncBaseTransport):
         self._first_hop = True
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        transport = self._public
-        if _exempt_hop(self._policy, self._first_hop, str(request.url), request.headers):
-            transport = self._exempt
+        exempt = _exempt_hop(self._policy, self._first_hop, str(request.url), request.headers)
         self._first_hop = False
-        return await transport.handle_async_request(request)
+        if not exempt:
+            return await self._public.handle_async_request(request)
+        try:
+            return await self._exempt.handle_async_request(request)
+        except httpx.TimeoutException as e:
+            raise type(e)(EXEMPT_FAILURE, request=request) from e
+        except httpx.TransportError as e:
+            raise httpx.ConnectError(EXEMPT_FAILURE, request=request) from e
 
     async def aclose(self) -> None:
         await self._public.aclose()
@@ -740,6 +822,7 @@ async def _read_body_async(call: _Call, response: httpx.Response) -> None:
     """
     body = bytearray()
     try:
+        call.take_wire_bytes(sum(len(name) + len(value) + 4 for name, value in response.headers.raw))
         decoder = _BoundedDecoder(response.headers.get("content-encoding"), call)
         async for raw in response.aiter_raw(READ_CHUNK_BYTES):
             body += decoder.decode(raw)

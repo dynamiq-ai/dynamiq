@@ -331,7 +331,7 @@ class HttpApiCall(ConnectionNode):
         refused = ToolExecutionException(
             f"Request refused: {error} Please analyze the error and take appropriate action.", recoverable=True
         )
-        refused.retryable = False
+        refused.retryable = isinstance(error, egress.EgressBusyError)
         return refused
 
     def execute(self, input_data: HttpApiCallInputSchema, config: RunnableConfig = None, **kwargs):

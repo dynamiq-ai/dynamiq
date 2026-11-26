@@ -7,7 +7,6 @@ import ssl
 import threading
 import time
 import zlib
-from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -97,6 +96,8 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b"x" * 10)
             self.wfile.flush()
             time.sleep(2)
+        elif path == "/big-headers":
+            self._send(200, b"", {"X-Big-1": "x" * 40000, "X-Big-2": "x" * 40000})
         elif path == "/slow-redirect":
             time.sleep(0.8)
             self._send(302, b"", {"Location": query["to"]})
@@ -862,13 +863,13 @@ async def test_send_async_accepts_an_empty_body_in_any_encoding(resolver, loopba
 @pytest.fixture
 def busy_resolver(monkeypatch):
     """A resolver pool whose only thread is taken by a lookup that does not end until the test does."""
-    pool = ThreadPoolExecutor(max_workers=1)
+    resolver = egress._Resolver(1, egress.RESOLVER_CAPACITY, "test-resolver")
     release = threading.Event()
-    pool.submit(release.wait)
-    monkeypatch.setattr(egress, "_resolver", pool)
+    resolver.pool.submit(release.wait)
+    monkeypatch.setitem(egress._resolvers, True, resolver)
     yield
     release.set()
-    pool.shutdown()
+    resolver.pool.shutdown()
 
 
 def test_send_needs_no_lookup_for_an_address(loopback_allowed, port, busy_resolver):
@@ -919,6 +920,11 @@ def test_bounded_decoder_decodes_a_body_split_anywhere(content_encoding, body, d
         {"X-Forwarded-Host": "admin.internal"},
         {"X-Original-URL": "/admin"},
         {"Forwarded": "host=admin.internal"},
+        {"X-Original-Host": "admin.internal"},
+        {"X-Envoy-Original-Path": "/admin"},
+        {"X_Forwarded_Host": "admin.internal"},
+        {"Host ": "admin.internal"},
+        {"Transfer-Encoding": "chunked"},
     ],
 )
 def test_send_refuses_an_exempt_request_that_routes_elsewhere(resolver, port, headers):
@@ -1038,23 +1044,33 @@ async def test_send_async_checks_the_deadline_after_the_client_returns(monkeypat
         await egress.send_async(EgressPolicy(timeout_seconds=0.1), method="GET", url="http://public.test/")
 
 
+def _full_resolver() -> "egress._Resolver":
+    resolver = egress._Resolver(1, 1, "test-resolver")
+    resolver.slots.acquire()
+    return resolver
+
+
 @pytest.fixture
 def full_resolver(monkeypatch):
-    """A resolver that admits no more lookups."""
-    slots = threading.BoundedSemaphore(1)
-    slots.acquire()
-    monkeypatch.setattr(egress, "_resolver_slots", slots)
+    """A resolver for public hosts that admits no more lookups."""
+    monkeypatch.setitem(egress._resolvers, True, _full_resolver())
+
+
+@pytest.fixture
+def full_exempt_resolver(monkeypatch):
+    """A resolver for exempt hosts that admits no more lookups."""
+    monkeypatch.setitem(egress._resolvers, False, _full_resolver())
 
 
 def test_send_refuses_a_lookup_beyond_the_resolver_capacity(loopback_allowed, port, full_resolver):
-    with pytest.raises(egress.EgressLimitError, match="Too many host name lookups"):
+    with pytest.raises(egress.EgressBusyError, match="Too many host name lookups"):
         _send_sync(POLICY, f"http://localhost:{port}/ok")
     assert _send_sync(POLICY, f"http://127.0.0.1:{port}/ok").text == "hello"
 
 
 @pytest.mark.asyncio
 async def test_send_async_refuses_a_lookup_beyond_the_resolver_capacity(loopback_allowed, port, full_resolver):
-    with pytest.raises(egress.EgressLimitError, match="Too many host name lookups"):
+    with pytest.raises(egress.EgressBusyError, match="Too many host name lookups"):
         await _send_async(POLICY, f"http://localhost:{port}/ok")
 
 
@@ -1083,38 +1099,39 @@ def test_bounded_decoder_refuses_a_body_that_ends_inside_the_header_of_a_next_gz
         _decode("gzip", [body])
 
 
-def test_send_resolves_an_exempt_host_in_the_bounded_pool(resolver, port, full_resolver):
+def test_send_resolves_an_exempt_host_in_the_bounded_pool(resolver, port, full_exempt_resolver):
     policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
 
-    with pytest.raises(egress.EgressLimitError, match="Too many host name lookups"):
+    with pytest.raises(egress.EgressBusyError, match="Too many host name lookups"):
         _send_sync(policy, f"http://internal.test:{port}/exempt/ok")
 
 
 @pytest.mark.asyncio
-async def test_send_async_resolves_an_exempt_host_in_the_bounded_pool(resolver, port, full_resolver):
+async def test_send_async_resolves_an_exempt_host_in_the_bounded_pool(resolver, port, full_exempt_resolver):
     policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
 
-    with pytest.raises(egress.EgressLimitError, match="Too many host name lookups"):
+    with pytest.raises(egress.EgressBusyError, match="Too many host name lookups"):
         await _send_async(policy, f"http://internal.test:{port}/exempt/ok")
 
 
 @pytest.fixture
 def one_slot_resolver(monkeypatch):
     """A resolver with one place and one thread, the thread taken until the test releases it."""
-    pool = ThreadPoolExecutor(max_workers=1)
+    resolver = egress._Resolver(1, 1, "test-resolver")
     release = threading.Event()
-    pool.submit(release.wait)
-    monkeypatch.setattr(egress, "_resolver", pool)
-    monkeypatch.setattr(egress, "_resolver_slots", threading.BoundedSemaphore(1))
+    resolver.pool.submit(release.wait)
+    resolver.slots.acquire()
+    resolver.slots.release()
+    monkeypatch.setitem(egress._resolvers, True, resolver)
     yield release
     release.set()
-    pool.shutdown()
+    resolver.pool.shutdown()
 
 
 def test_resolve_public_keeps_the_place_of_a_lookup_it_stopped_waiting_for(resolver, one_slot_resolver):
     with pytest.raises(TimeoutError):
         egress.resolve_public("public.test", 80, timeout=0.1)
-    with pytest.raises(egress.EgressLimitError, match="Too many host name lookups"):
+    with pytest.raises(egress.EgressBusyError, match="Too many host name lookups"):
         egress.resolve_public("other.test", 80, timeout=0.1)
 
     one_slot_resolver.set()
@@ -1122,7 +1139,7 @@ def test_resolve_public_keeps_the_place_of_a_lookup_it_stopped_waiting_for(resol
     while True:
         try:
             egress.resolve_public("private.test", 80, timeout=5)
-        except egress.EgressLimitError:
+        except egress.EgressBusyError:
             assert time.monotonic() < deadline
             time.sleep(0.01)
         except egress.EgressRefusedError:
@@ -1134,7 +1151,7 @@ async def test_resolve_public_async_keeps_the_place_of_a_cancelled_lookup(resolv
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(egress.resolve_public_async("public.test", 80), 0.1)
 
-    with pytest.raises(egress.EgressLimitError, match="Too many host name lookups"):
+    with pytest.raises(egress.EgressBusyError, match="Too many host name lookups"):
         await egress.resolve_public_async("other.test", 80)
 
 
@@ -1148,3 +1165,88 @@ async def test_http_api_call_refuses_a_malformed_url_without_naming_it(use_async
 
     assert "Request refused" in result.error.message
     assert "10.1.2.3" not in result.error.message
+
+
+def test_send_accepts_an_exempt_request_with_ordinary_headers(resolver, port):
+    policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
+
+    response = _send_sync(
+        policy, f"http://internal.test:{port}/exempt/ok", headers={"Content-Type": "application/json", "Accept": "*/*"}
+    )
+
+    assert response.text == "hello"
+
+
+def test_send_keeps_exempt_requests_out_of_a_full_public_resolver(resolver, port, full_resolver):
+    policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
+
+    assert _send_sync(policy, f"http://internal.test:{port}/exempt/ok").text == "hello"
+
+
+@pytest.mark.asyncio
+async def test_send_async_keeps_exempt_requests_out_of_a_full_public_resolver(resolver, port, full_resolver):
+    policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
+
+    assert (await _send_async(policy, f"http://internal.test:{port}/exempt/ok")).text == "hello"
+
+
+# Small enough that the test's headers outgrow the budget and its allowance for headers, but stay within httpx's own
+# limit on a header block.
+SMALL_BODY_POLICY = POLICY.model_copy(update={"max_response_bytes": 4096})
+
+
+def test_send_counts_response_headers_against_the_budget(resolver, loopback_allowed, port):
+    with pytest.raises(egress.EgressLimitError, match="larger than"):
+        _send_sync(SMALL_BODY_POLICY, f"http://public.test:{port}/big-headers")
+
+
+@pytest.mark.asyncio
+async def test_send_async_counts_response_headers_against_the_budget(resolver, loopback_allowed, port):
+    with pytest.raises(egress.EgressLimitError, match="larger than"):
+        await _send_async(SMALL_BODY_POLICY, f"http://public.test:{port}/big-headers")
+
+
+def test_send_names_no_internal_host_when_an_exempt_request_fails(resolver):
+    policy = POLICY.model_copy(update={"exempt_url_prefixes": ("http://internal.test:1/exempt/",)})
+
+    with pytest.raises(requests.ConnectionError) as error:
+        _send_sync(policy, "http://internal.test:1/exempt/ok")
+    assert str(error.value) == egress.EXEMPT_FAILURE
+
+
+@pytest.mark.asyncio
+async def test_send_async_names_no_internal_host_when_an_exempt_request_fails(resolver):
+    policy = POLICY.model_copy(update={"exempt_url_prefixes": ("http://internal.test:1/exempt/",)})
+
+    with pytest.raises(httpx.ConnectError) as error:
+        await _send_async(policy, "http://internal.test:1/exempt/ok")
+    assert str(error.value) == egress.EXEMPT_FAILURE
+
+
+@pytest.mark.parametrize("host", ["private.test", "v6.test"], ids=["private", "unresolvable"])
+def test_send_refuses_a_private_and_an_unresolvable_host_alike(resolver, port, host):
+    with pytest.raises(egress.EgressRefusedError) as error:
+        _send_sync(POLICY, f"http://{host}:{port}/ok")
+    assert str(error.value) == egress.NOT_PUBLIC
+
+
+def test_http_api_call_retries_a_request_the_resolver_had_no_room_for(full_resolver, port):
+    node = _node(f"http://localhost:{port}/ok")
+
+    with pytest.raises(ToolExecutionException) as error:
+        node.execute(HttpApiCallInputSchema(), config=RunnableConfig(egress=POLICY))
+    assert error.value.retryable is True
+
+
+def test_resolve_public_skips_a_queued_lookup_its_request_gave_up_on(resolver, one_slot_resolver, monkeypatch):
+    _, lookups = resolver
+    resolver_with_room = egress._resolvers[True]
+    monkeypatch.setattr(resolver_with_room, "slots", threading.BoundedSemaphore(2))
+
+    with pytest.raises(TimeoutError):
+        egress.resolve_public("public.test", 80, timeout=0.1)
+    one_slot_resolver.set()
+
+    with pytest.raises(egress.EgressRefusedError):
+        egress.resolve_public("private.test", 80, timeout=5)
+    assert lookups == ["private.test"]
