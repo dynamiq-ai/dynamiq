@@ -93,6 +93,49 @@ def test_read_raises_when_the_server_returns_an_empty_envelope(store, client):
         store.read("gone.md")
 
 
+def test_read_note_parses_links_and_backlinks(store, client):
+    client.request.return_value = _mock_response(
+        {
+            "data": {
+                "path": "customers/larkspur.md",
+                "content": "Approved by [[dana-okafor]] under the [[msa]].",
+                "links": [{"target": "dana-okafor", "path": "people/dana-okafor.md"}, {"target": "msa", "path": None}],
+                "backlinks": ["projects/q3-pricing.md"],
+            }
+        }
+    )
+
+    note = store.read_note("customers/larkspur.md")
+
+    assert [(link.target, link.path) for link in note.links] == [
+        ("dana-okafor", "people/dana-okafor.md"),
+        ("msa", None),
+    ]
+    assert note.backlinks == ["projects/q3-pricing.md"]
+
+
+def test_search_posts_the_query_in_the_body(store, client):
+    client.request.return_value = _mock_response(
+        {"data": [{"path": "team/oncall.md", "score": 0.5, "snippet": "Billing pages go to Marco at weekends."}]}
+    )
+
+    hits = store.search("weekend billing", prefix="team/", limit=5)
+
+    verb, url = client.request.call_args.args
+    assert verb == "POST"
+    assert url == "https://api.example.ai/v1/memory-stores/ms-123/files/search"
+    assert client.request.call_args.kwargs["json"] == {
+        "query": "weekend billing",
+        "path": "team/",
+        "limit": 5,
+        "user_id": "u-42",
+    }
+    assert client.request.call_args.kwargs["params"] is None
+    assert [(hit.path, hit.score, hit.snippet) for hit in hits] == [
+        ("team/oncall.md", 0.5, "Billing pages go to Marco at weekends.")
+    ]
+
+
 def test_list_parses_entries(store, client):
     client.request.return_value = _mock_response(
         {"data": [{"path": "prefs.md", "size": 24, "updated_at": "2026-01-15T10:30:00Z"}, {"path": "team/x.md"}]}

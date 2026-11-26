@@ -391,3 +391,28 @@ def test_workflow_with_elevenlabssts_input_schema_output_filename(mock_elevenlab
 
     audio_file = response.output[wf_elevenlabs.flow.nodes[0].id]["output"]["files"][0]
     assert audio_file.name == "input_level_name.mp3"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://api.elevenlabs.io/v1",
+        "https://api.elevenlabs.io/v1/",
+        "https://api.elevenlabs.io/v1/text-to-speech",
+        "https://api.elevenlabs.io/v1/text-to-speech/",
+        "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+        f"https://api.elevenlabs.io/v1/text-to-speech/{Voices.Dave.value}",
+    ],
+)
+def test_elevenlabstts_request_url(mock_elevenlabs_response_text, requests_mock, url):
+    connection = connections.ElevenLabs(url=url, api_key="api-key")
+    call_mock = requests_mock.post(
+        url=f"https://api.elevenlabs.io/v1/text-to-speech/{Voices.Dave.value}",
+        content=mock_elevenlabs_response_text,
+    )
+    node = ElevenLabsTTS(name="elevenlabs", connection=connection, voice_id=Voices.Dave.value)
+
+    response = node.run(input_data={"text": "Mock text"})
+
+    assert response.status == RunnableStatus.SUCCESS
+    assert call_mock.called_once

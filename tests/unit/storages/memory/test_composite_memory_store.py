@@ -3,7 +3,15 @@ import json
 import pytest
 
 from dynamiq.connections import Dynamiq
-from dynamiq.storages.memory import CompositeMemoryStore, DynamiqMemoryStore, MemoryStoreError
+from dynamiq.storages.memory import (
+    CompositeMemoryStore,
+    DynamiqMemoryStore,
+    MemoryChangedError,
+    MemoryHit,
+    MemoryLink,
+    MemoryNote,
+    MemoryStoreError,
+)
 from dynamiq.storages.memory.composite import normalize_path
 from tests.unit.storages.memory.conftest import FakeMemoryStore
 
@@ -243,3 +251,66 @@ def test_same_id_on_a_different_deployment_is_allowed():
     )
 
     assert list(composite.routes) == ["user/", "team/"]
+
+
+def test_search_merges_routes_and_mounts_paths():
+    user, team = FakeMemoryStore(), FakeMemoryStore()
+    user.write("oncall.md", "billing billing weekend")
+    team.write("oncall.md", "billing rota")
+    store = CompositeMemoryStore(routes={"user/": user, "team/": team})
+
+    assert [hit.path for hit in store.search("billing weekend")] == ["user/oncall.md", "team/oncall.md"]
+    assert [hit.path for hit in store.search("billing", prefix="team/")] == ["team/oncall.md"]
+
+
+def test_search_keeps_each_route_order_among_equal_scores():
+    class NewestFirst(FakeMemoryStore):
+        def search(self, query, prefix="", limit=10, user_id=None):
+            return [MemoryHit(path="zeta.md", score=1.0), MemoryHit(path="alpha.md", score=1.0)]
+
+    store = CompositeMemoryStore(routes={"user/": NewestFirst(), "team/": FakeMemoryStore()})
+
+    assert [hit.path for hit in store.search("billing")] == ["user/zeta.md", "user/alpha.md"]
+
+
+def test_scope_of_names_the_route_holding_a_path(store):
+    assert store.scope_of("team/playbook/refunds.md") == "team/"
+
+
+def test_read_note_mounts_links_on_the_note_route():
+    class Linked(FakeMemoryStore):
+        def read_note(self, path, user_id=None):
+            return MemoryNote(
+                path=path,
+                content=self.read(path),
+                links=[MemoryLink(target="b", path="b.md"), MemoryLink(target="gone")],
+                backlinks=["c.md"],
+            )
+
+    team = Linked()
+    team.write("a.md", "see [[b]]")
+    note = CompositeMemoryStore(routes={"user/": FakeMemoryStore(), "team/": team}).read_note("team/a.md")
+
+    assert note.path == "team/a.md"
+    assert [link.path for link in note.links] == ["team/b.md", None]
+    assert note.backlinks == ["team/c.md"]
+
+
+def test_write_if_unchanged_follows_the_route(store, team):
+    store.write("team/oncall.md", "Marco covers weekends.")
+    note = store.read_note("team/oncall.md")
+    team.write("oncall.md", "Priya covers weekends.")
+
+    with pytest.raises(MemoryChangedError):
+        store.write_if_unchanged("team/oncall.md", "Ana covers weekends.", note.content_hash)
+
+    fresh = store.read_note("team/oncall.md")
+    entry = store.write_if_unchanged("team/oncall.md", "Ana covers weekends.", fresh.content_hash)
+    assert entry.path == "team/oncall.md"
+    assert team.read("oncall.md") == "Ana covers weekends."
+
+    with pytest.raises(MemoryChangedError):
+        store.write_if_unchanged("team/oncall.md", "Created over it.", None)
+    assert (
+        store.write_if_unchanged("team/escalation.md", "Escalate after 15 minutes.", None).path == "team/escalation.md"
+    )

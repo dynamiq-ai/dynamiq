@@ -1,3 +1,4 @@
+import numbers
 import re
 import threading
 import weakref
@@ -1099,18 +1100,38 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             return [float(x) for x in pg_embedding.strip("[]").split(",") if x]
         return pg_embedding
 
-    def _convert_query_embedding_to_pgvector_format(self, query_embedding: list[float]) -> str:
+    def _convert_query_embedding_to_pgvector_format(self, query_embedding: list[float]) -> SQLLiteral:
         """
-        Helper method to convert query embedding to pgvector format.
+        Helper method to convert query embedding to a pgvector literal.
         e.g. [0.1, 0.2, 0.3] -> '[0.1,0.2,0.3]'
 
         Args:
             query_embedding (list[float]): The query embedding vector.
 
         Returns:
-            str: The query embedding in pgvector format (e.g. '[0.1,0.2,0.3]').
+            SQLLiteral: The query embedding as a quoted pgvector literal (e.g. '[0.1,0.2,0.3]').
+
+        Raises:
+            ValueError: If an element is not a number.
         """
-        return f"'[{','.join(str(el) for el in query_embedding)}]'"
+        for el in query_embedding:
+            if isinstance(el, bool) or not isinstance(el, numbers.Real):
+                raise ValueError(f"query_embedding must contain only numbers, got {type(el).__name__}")
+        return SQLLiteral(f"[{','.join(repr(float(el)) for el in query_embedding)}]")
+
+    @staticmethod
+    def _score_definition(vector_function: str, embedding_key: str, query_embedding: SQLLiteral) -> SQL:
+        """Builds the similarity score expression with the embedding column quoted as an identifier."""
+        return SQL(VECTOR_FUNCTION_TO_SCORE_DEFINITION[vector_function]).format(
+            embedding_key=Identifier(embedding_key), query_embedding=query_embedding
+        )
+
+    @staticmethod
+    def _select_fields(content_key: str, exclude_document_embeddings: bool) -> SQL:
+        """Builds the selected columns with the content column quoted as an identifier."""
+        if not exclude_document_embeddings:
+            return SQL("*")
+        return SQL("id, {content_key}, metadata").format(content_key=Identifier(content_key))
 
     def _embedding_retrieval(
         self,
@@ -1151,16 +1172,11 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         query_embedding = self._convert_query_embedding_to_pgvector_format(query_embedding)
 
-        score_definition = VECTOR_FUNCTION_TO_SCORE_DEFINITION[vector_function].format(
-            embedding_key=embedding_key, query_embedding=query_embedding
-        )
-        score_definition = f"{score_definition} AS score"
+        score_definition = self._score_definition(vector_function, embedding_key, query_embedding)
 
-        select_fields = f"id, {content_key}, metadata" if exclude_document_embeddings else "*"
-
-        base_select = SQL("SELECT {fields}, {score} FROM {schema_name}.{table_name}").format(
-            fields=SQL(select_fields),
-            score=SQL(score_definition),
+        base_select = SQL("SELECT {fields}, {score} AS score FROM {schema_name}.{table_name}").format(
+            fields=self._select_fields(content_key, exclude_document_embeddings),
+            score=score_definition,
             schema_name=Identifier(self.schema_name),
             table_name=Identifier(self.table_name),
         )
@@ -1222,8 +1238,6 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         content_key = content_key or self.content_key
         search_vector = self._keyword_search_vector(content_key)
 
-        select_fields = f"id, {content_key}, metadata" if exclude_document_embeddings else "*"
-
         base_select = SQL(
             """
             SELECT {fields}, ts_rank_cd({search_vector}, query) AS score
@@ -1231,7 +1245,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             WHERE {search_vector} @@ query
             """
         ).format(
-            fields=SQL(select_fields),
+            fields=self._select_fields(content_key, exclude_document_embeddings),
             schema_name=Identifier(self.schema_name),
             table_name=Identifier(self.table_name),
             language=SQLLiteral(self.language),
@@ -1322,9 +1336,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         query_embedding = self._convert_query_embedding_to_pgvector_format(query_embedding)
 
-        score_definition = VECTOR_FUNCTION_TO_SCORE_DEFINITION[vector_function].format(
-            embedding_key=embedding_key, query_embedding=query_embedding
-        )
+        score_definition = self._score_definition(vector_function, embedding_key, query_embedding)
 
         is_distance_metric = vector_function in ["l2_distance", "l1_distance"]
         sort_order = "ASC" if is_distance_metric else "DESC"
@@ -1353,7 +1365,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         ).format(
             content_key=Identifier(content_key),
             embedding_select=embedding_select,
-            score_definition=SQL(score_definition),
+            score_definition=score_definition,
             schema_name=Identifier(self.schema_name),
             table_name=Identifier(self.table_name),
             where_clause=semantic_where_clause,

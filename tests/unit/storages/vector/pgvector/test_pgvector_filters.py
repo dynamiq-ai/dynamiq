@@ -76,3 +76,35 @@ def test_in_operator_top_level_field_keeps_text_array():
     query, params = _convert_filters_to_query({"field": "id", "operator": "in", "value": [1, 2]})
     assert "%s::text[]" in repr(query)
     assert params == ([1, 2],)
+
+
+@pytest.mark.parametrize(
+    "key, expected",
+    [
+        ("category", "(metadata->>'category')::text = %s"),
+        ("x' OR '1'='1", "(metadata->>'x'' OR ''1''=''1')::text = %s"),
+        (
+            "x')::text='' OR 1=1 UNION SELECT usename||':'||passwd,NULL,NULL,NULL FROM pg_shadow--",
+            "(metadata->>'x'')::text='''' OR 1=1 UNION SELECT usename||'':''||passwd,NULL,NULL,NULL "
+            "FROM pg_shadow--')::text = %s",
+        ),
+        ("a\\'b", "(metadata->>E'a\\\\''b')::text = %s"),
+        ("a%sb", "(metadata->>'a%%sb')::text = %s"),
+    ],
+)
+def test_metadata_key_is_quoted_as_sql_literal(key, expected):
+    for field in (f"metadata.{key}", key):
+        query, params = _convert_filters_to_query({"field": field, "operator": "==", "value": "v"})
+        assert query.as_string(None) == f" WHERE {expected}"
+        assert params == ("v",)
+
+
+@pytest.mark.parametrize("field", ["foo.bar", "x.y' OR '1'='1", "content.x"])
+def test_unknown_dotted_field_is_rejected(field):
+    with pytest.raises(VectorStoreFilterException, match="Unknown filter field"):
+        _convert_filters_to_query({"field": field, "operator": "==", "value": "v"})
+
+
+def test_non_string_field_is_rejected():
+    with pytest.raises(VectorStoreFilterException, match="must be a string"):
+        _convert_filters_to_query({"field": 1, "operator": "==", "value": "v"})
