@@ -153,6 +153,38 @@ def test_list_inside_a_route_still_sees_nested_routes(team, prefix):
     assert "team/private/pay.md" in listed
 
 
+def test_list_only_exposes_entries_owned_by_their_mount():
+    parent, child = FakeMemoryStore(), FakeMemoryStore()
+    store = CompositeMemoryStore(routes={"notes/": parent, "notes/nested/": child})
+    parent.write("nested/summary.md", "stale")
+    parent.write("nested/old.md", "hidden by the child mount")
+    parent.write("nested-other/keep.md", "visible")
+    path = "notes/nested/summary.md"
+    written = store.write(path, "current summary")
+
+    entries = store.list("notes/")
+
+    assert [(entry.path, entry.size) for entry in entries if entry.path == path] == [(path, written.size)]
+    assert {entry.path for entry in entries} == {path, "notes/nested-other/keep.md"}
+
+
+def test_search_only_exposes_hits_owned_by_their_mount():
+    parent, child = FakeMemoryStore(), FakeMemoryStore()
+    store = CompositeMemoryStore(routes={"notes/": parent, "notes/nested/": child})
+    parent.write("nested/summary.md", "billing weekend stale")
+    parent.write("nested/old.md", "billing weekend hidden")
+    parent.write("nested-other/keep.md", "billing visible")
+    path = "notes/nested/summary.md"
+    written = store.write(path, "billing current")
+
+    hits = store.search("billing weekend", prefix="notes/")
+
+    sibling = "notes/nested-other/keep.md"
+    assert [(hit.path, hit.score) for hit in hits] == [(sibling, 0.5), (path, 0.5)]
+    assert hits[1].size == written.size
+    assert [hit.path for hit in store.search("billing weekend", prefix="notes/", limit=1)] == [sibling]
+
+
 def test_describe_namespaces_composes_the_routes(store):
     assert store.describe_namespaces() == {
         "user/": "What you learn about this user.",
