@@ -9,6 +9,7 @@ import pytest
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.hooks import BlockAs, ToolPolicyHook
+from dynamiq.nodes.agents.utils import SummarizationConfig
 from dynamiq.nodes.node import Node
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
 from dynamiq.nodes.types import InferenceMode
@@ -256,6 +257,75 @@ def test_the_run_fails_with_the_tool_error_when_streaming_its_end_fails():
 
     assert result.status == RunnableStatus.FAILURE
     assert "disk full" in result.error.message
+
+
+def test_a_batch_fails_with_the_tool_error_when_streaming_its_end_fails():
+    agent = one_at_a_time(CrashingTool(), SearchTool())
+    steps = [parallel_step(("crash", {"query": "a"}), ("search", {"query": "b"})), final_step("unreached")]
+
+    with scripted_streaming(agent, InferenceMode.FUNCTION_CALLING, steps):
+        record = Agent.stream_content
+
+        def fail_on_the_batch_end(self, content, source, step, config=None, **kwargs):
+            if step == "tool" and content.get("name") == BATCH:
+                raise RuntimeError("stream closed")
+            record(self, content, source, step, config, **kwargs)
+
+        with patch.object(Agent, "stream_content", fail_on_the_batch_end):
+            result = agent.run(input_data={"input": "go"})
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "disk full" in result.error.message
+
+
+def test_a_skipped_compaction_is_not_ended_again_when_streaming_its_end_fails():
+    agent = build_agent(
+        tools=[SearchTool()], streaming=STREAM_ALL, summarization_config=SummarizationConfig(enabled=True)
+    )
+    steps = [tool_step("context-manager", notes="x"), final_step("unreached")]
+
+    with scripted_streaming(agent, InferenceMode.FUNCTION_CALLING, steps) as (_, streamed):
+        record = Agent.stream_content
+
+        def record_then_fail_on_the_end(self, content, source, step, config=None, **kwargs):
+            record(self, content, source, step, config, **kwargs)
+            if step == "tool":
+                raise RuntimeError("stream closed")
+
+        with patch.object(Agent, "stream_content", record_then_fail_on_the_end):
+            result = agent.run(input_data={"input": "go"})
+
+    assert result.status == RunnableStatus.FAILURE
+    assert ends(streamed) == {"context-manager": ["skip"]}
+
+
+def test_a_sub_agent_stopped_by_its_own_hook_is_streamed_as_failed():
+    hook = ToolPolicyHook(tools=["search"], deny=True, on_violation=BlockAs.FAIL, message="No searching.")
+    child = build_agent([hook], tools=[SearchTool()], name="Researcher", id="child")
+    parent = build_agent(
+        tools=[SubAgentTool(agent=child, name="Researcher", description="researches")], streaming=STREAM_ALL
+    )
+    steps = [tool_step("Researcher", input="q"), final_step("unreached")]
+
+    with scripted(child, InferenceMode.FUNCTION_CALLING, [tool_step("search", query="x"), final_step("no")]):
+        result, streamed = run(parent, InferenceMode.FUNCTION_CALLING, steps)
+
+    assert result.status == RunnableStatus.FAILURE
+    assert ends(streamed)["Researcher"] == ["failure"]
+
+
+def test_a_batch_with_a_sub_agent_stopped_by_its_own_hook_is_streamed_as_failed():
+    hook = ToolPolicyHook(tools=["search"], deny=True, on_violation=BlockAs.FAIL, message="No searching.")
+    child = build_agent([hook], tools=[SearchTool()], name="Researcher", id="child")
+    parent = one_at_a_time(SubAgentTool(agent=child, name="Researcher", description="researches"), SearchTool())
+    steps = [parallel_step(("Researcher", {"input": "q"}), ("search", {"query": "b"})), final_step("unreached")]
+
+    with scripted(child, InferenceMode.FUNCTION_CALLING, [tool_step("search", query="x"), final_step("no")]):
+        result, streamed = run(parent, InferenceMode.FUNCTION_CALLING, steps)
+
+    assert result.status == RunnableStatus.FAILURE
+    assert ends(streamed)["Researcher"] == ["failure"]
+    assert ends(streamed)[BATCH] == ["failure"]
 
 
 def test_a_call_that_ended_is_not_ended_again_when_streaming_its_delegated_answer_fails():

@@ -18,6 +18,7 @@ from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     HookBlockedException,
+    HookStopException,
     JSONParsingError,
     MaxLoopsExceededException,
     OutputFileNotFoundError,
@@ -198,6 +199,14 @@ RUN_FAILING_TOOL_RESULT = "The tool failed with an error that ended the run."
 # Calls these leave open: a canceled call and a timed-out wait for a person are ended by the run that resumes,
 # and a hook that ends the run streams its own event.
 CALL_LEFT_OPEN = (CanceledException, InputStreamingTimeoutError, HookBlockedException)
+
+
+def is_sub_agent_hook_stop(error: Exception) -> bool:
+    """A sub-agent stopped by its own hook: that hook's event is on the sub-agent's run, not on this call.
+
+    Its stop reaches this agent rebuilt without a hook name, which a block by this agent's own hooks always has.
+    """
+    return isinstance(error, HookStopException) and error.hook is None
 
 
 def mark_tool_failure(content: str, success: Any) -> str:
@@ -1468,6 +1477,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     skip_message = (
                         "Nothing was summarized because the conversation history is small enough to fit in context."
                     )
+                    result_streamed = True
                     self._stream_agent_event(
                         AgentToolResultEventMessageData(
                             tool_run_id=tool_run_id,
@@ -1624,11 +1634,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
             return error_message, [], False, False, None
 
-        except CALL_LEFT_OPEN:
-            raise
-
-        except Exception:
-            if result_streamed:
+        except Exception as error:
+            if result_streamed or (isinstance(error, CALL_LEFT_OPEN) and not is_sub_agent_hook_stop(error)):
                 raise
             # The call still gets its end event, without the error's text: no AFTER_TOOL hook has seen it, so it
             # could show what a hook would have masked.
@@ -2807,12 +2814,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     **extra,
                     **kwargs,
                 )
-            except CALL_LEFT_OPEN:
-                # The batch stays open with this call, and the run still fails with the error that came first.
-                if run_failures:
-                    raise run_failures[0]
-                raise
             except Exception as e:
+                if isinstance(e, CALL_LEFT_OPEN) and not is_sub_agent_hook_stop(e):
+                    # The batch stays open with this call, and the run still fails with the error that came first.
+                    if run_failures:
+                        raise run_failures[0]
+                    raise
                 run_failures.append(e)
                 tool_result, tool_files, is_delegated, success, dependency = (
                     RUN_FAILING_TOOL_RESULT,
@@ -2910,9 +2917,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         )
                     )
 
-                self._stream_batch_tool_result_event(
-                    batch_tool_run_id, prepared_tools, all_results, loop_num, config, **kwargs
-                )
+                try:
+                    self._stream_batch_tool_result_event(
+                        batch_tool_run_id, prepared_tools, all_results, loop_num, config, **kwargs
+                    )
+                except Exception as stream_error:
+                    if not run_failures:
+                        raise
+                    # The run fails with the tool's error, not with the stream's.
+                    logger.error(f"Failed to stream the end of tool batch {batch_tool_run_id}: {stream_error}")
 
             if run_failures:
                 raise run_failures[0]
