@@ -96,6 +96,8 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b"x" * 10)
             self.wfile.flush()
             time.sleep(2)
+        elif path == "/echo-accept-encoding":
+            self._send(200, (self.headers.get("Accept-Encoding") or "").encode())
         elif path == "/big-headers":
             self._send(200, b"", {"X-Big-1": "x" * 40000, "X-Big-2": "x" * 40000})
         elif path == "/slow-redirect":
@@ -168,6 +170,7 @@ def resolver(monkeypatch):
         "metadata.test": [["169.254.169.254"]],
         "mixed.test": [["127.0.0.1", "10.0.0.1"]],
         "v6.test": [[]],
+        "flaky.test": socket.gaierror(socket.EAI_AGAIN, "Temporary failure in name resolution"),
         "slow.test": [["127.0.0.1"]],
     }
     delays = {"slow.test": 3.0}
@@ -180,6 +183,8 @@ def resolver(monkeypatch):
             return real_getaddrinfo(host, port, family, type, proto, flags)
         lookups.append(host)
         time.sleep(delays.get(host, 0))
+        if isinstance(answers[host], Exception):
+            raise answers[host]
         sequence = answers[host]
         addresses = sequence.pop(0) if len(sequence) > 1 else sequence[0]
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, port)) for address in addresses]
@@ -1250,3 +1255,65 @@ def test_resolve_public_skips_a_queued_lookup_its_request_gave_up_on(resolver, o
     with pytest.raises(egress.EgressRefusedError):
         egress.resolve_public("private.test", 80, timeout=5)
     assert lookups == ["private.test"]
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [{"Content-Length": "1000"}, {"Connection": "upgrade"}, {"Connection": "keep-alive, X-Secret"}],
+)
+def test_send_refuses_an_exempt_request_that_frames_itself(resolver, port, headers):
+    policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
+
+    with pytest.raises(egress.EgressRefusedError):
+        _send_sync(policy, f"http://internal.test:{port}/exempt/ok", headers=headers)
+
+
+@pytest.mark.parametrize("use_async", [False, True])
+@pytest.mark.asyncio
+async def test_send_lets_an_exempt_request_carry_credentials(resolver, port, use_async):
+    policy = POLICY.model_copy(
+        update={
+            "exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",),
+            "exempt_request_headers": ("X-Api-Key",),
+        }
+    )
+    url = f"http://internal.test:{port}/exempt/ok"
+    headers = {"Authorization": "Bearer token", "Cookie": "session=1", "X-Api-Key": "key"}
+
+    response = (
+        await _send_async(policy, url, headers=headers) if use_async else _send_sync(policy, url, headers=headers)
+    )
+
+    assert response.text == "hello"
+
+
+@pytest.mark.parametrize("name", ["Transfer-Encoding", "Host", "X-Forwarded-Host", "Upgrade", "bad name"])
+def test_egress_policy_refuses_an_exempt_request_header_that_routes_or_frames(name):
+    with pytest.raises(ValueError):
+        EgressPolicy(exempt_request_headers=(name,))
+
+
+def test_send_reports_a_temporary_lookup_failure_as_retryable(resolver, port):
+    with pytest.raises(egress.EgressBusyError):
+        _send_sync(POLICY, f"http://flaky.test:{port}/ok")
+
+
+@pytest.mark.asyncio
+async def test_send_async_reports_a_temporary_lookup_failure_as_retryable(resolver, port):
+    with pytest.raises(egress.EgressBusyError):
+        await _send_async(POLICY, f"http://flaky.test:{port}/ok")
+
+
+def test_send_asks_only_for_encodings_it_can_bound(resolver, loopback_allowed, port):
+    url = f"http://public.test:{port}/echo-accept-encoding"
+
+    assert _send_sync(POLICY, url, headers={"Accept-Encoding": "gzip, deflate, br"}).text == egress.ACCEPT_ENCODING
+
+
+@pytest.mark.asyncio
+async def test_send_async_asks_only_for_encodings_it_can_bound(resolver, loopback_allowed, port):
+    url = f"http://public.test:{port}/echo-accept-encoding"
+
+    response = await _send_async(POLICY, url, headers={"Accept-Encoding": "gzip, deflate, br"})
+
+    assert response.text == egress.ACCEPT_ENCODING

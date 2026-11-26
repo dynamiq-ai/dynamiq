@@ -134,7 +134,8 @@ class EgressLimitError(EgressError):
 
 
 class EgressBusyError(EgressError):
-    """A request that could not start because too many lookups are in progress in the process. It may succeed later."""
+    """A request that could not start just now, because too many lookups are in progress in the process or the resolver
+    failed for a while. It may succeed later."""
 
 
 NOT_PUBLIC = "The host does not resolve to a public IPv4 address, which is required."
@@ -174,6 +175,8 @@ def _lookup(host: str, port: int, public_only: bool = True) -> list[str]:
     try:
         infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
     except socket.gaierror as e:
+        if public_only and e.errno == socket.EAI_AGAIN:
+            raise EgressBusyError("The host could not be looked up just now. Try again later.") from e
         # The same refusal as for a private address, so that it does not tell which internal names exist.
         if public_only:
             raise EgressRefusedError(NOT_PUBLIC) from e
@@ -468,14 +471,19 @@ EXEMPT_HEADERS = frozenset(
         "accept",
         "accept-encoding",
         "accept-language",
+        "authorization",
         "cache-control",
         "connection",
         "content-length",
         "content-type",
+        "cookie",
         "host",
         "user-agent",
     }
 )
+
+# The values of Connection an exempt request may send: one that lists header names would have a front end drop them.
+EXEMPT_CONNECTION_OPTIONS = frozenset({"keep-alive", "close"})
 
 # What a failed request to an exempt URL says, instead of the client's text, which names the internal host and path.
 EXEMPT_FAILURE = "The request to an exempt URL failed."
@@ -496,21 +504,35 @@ def _same_authority(url: SplitResult, host_header: str) -> bool:
     return header_origin == ((url.hostname or "").rstrip("."), url.port or default_port)
 
 
-def _check_exempt_headers(url: str, headers: Mapping[str, str]) -> None:
-    """Raises EgressRefusedError when a request to an exempt URL carries a header outside EXEMPT_HEADERS, or a Host that
-    names another host.
+def _check_exempt_headers(
+    url: str, headers: Mapping[str, str], body_length: int | None, allowed: tuple[str, ...]
+) -> None:
+    """Raises EgressRefusedError when a request to an exempt URL carries a header that could have it served elsewhere.
 
-    The exemption is decided on the URL, but a front end that routes by a header serves what the header names instead.
+    That is a header outside EXEMPT_HEADERS and allowed, a Host that names another host, a Connection other than
+    "keep-alive" or "close", or a Content-Length other than body_length, when that is known. The exemption is decided
+    on the URL, but a front end serves what such a header names instead, or reads a second request from the body.
     """
     parts = urlsplit(url)
+    allowed_names = EXEMPT_HEADERS | {name.lower() for name in allowed}
     for name, value in headers.items():
-        if name.lower() not in EXEMPT_HEADERS:
+        lowered = name.lower()
+        if lowered not in allowed_names:
             raise EgressRefusedError(f"A request to an exempt URL may not set the {name!r} header.")
-        if name.lower() == "host" and not _same_authority(parts, value):
+        if lowered == "host" and not _same_authority(parts, value):
             raise EgressRefusedError("A request to an exempt URL may not name another host in its Host header.")
+        if (
+            lowered == "connection"
+            and not {option.strip().lower() for option in value.split(",")} <= EXEMPT_CONNECTION_OPTIONS
+        ):
+            raise EgressRefusedError("A request to an exempt URL may not set Connection options.")
+        if lowered == "content-length" and body_length is not None and value.strip() != str(body_length):
+            raise EgressRefusedError("A request to an exempt URL may not set a Content-Length its body does not have.")
 
 
-def _exempt_hop(policy: EgressPolicy, first_hop: bool, url: str, headers: Mapping[str, str]) -> bool:
+def _exempt_hop(
+    policy: EgressPolicy, first_hop: bool, url: str, headers: Mapping[str, str], body_length: int | None
+) -> bool:
     """Reports whether a hop of a request skips the address check.
 
     Only the URL the node was given may be exempt: a redirect, even to another exempt URL, is checked as any other.
@@ -518,8 +540,17 @@ def _exempt_hop(policy: EgressPolicy, first_hop: bool, url: str, headers: Mappin
     """
     if not first_hop or not policy.is_exempt(url):
         return False
-    _check_exempt_headers(url, headers)
+    _check_exempt_headers(url, headers, body_length, policy.exempt_request_headers)
     return True
+
+
+def _body_length(body: Any) -> int | None:
+    """The length of a prepared request body, as requests counts it for Content-Length; None for a stream."""
+    if body is None:
+        return 0
+    if isinstance(body, (bytes, bytearray, str)):
+        return len(body)
+    return None
 
 
 class _PolicyAdapter(BaseAdapter):
@@ -533,7 +564,9 @@ class _PolicyAdapter(BaseAdapter):
         self._first_hop = True
 
     def send(self, request: requests.PreparedRequest, timeout: float | None = None, **kwargs) -> requests.Response:
-        exempt = _exempt_hop(self._policy, self._first_hop, request.url, request.headers)
+        # Set on every hop, so that a caller's own header cannot ask for an encoding the decoder cannot bound.
+        request.headers["Accept-Encoding"] = ACCEPT_ENCODING
+        exempt = _exempt_hop(self._policy, self._first_hop, request.url, request.headers, _body_length(request.body))
         self._first_hop = False
         timeout = _require_call().timeout(timeout)
         if not exempt:
@@ -799,7 +832,13 @@ class _PolicyTransport(httpx.AsyncBaseTransport):
         self._first_hop = True
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        exempt = _exempt_hop(self._policy, self._first_hop, str(request.url), request.headers)
+        # Set on every hop, so that a caller's own header cannot ask for an encoding the decoder cannot bound.
+        request.headers["Accept-Encoding"] = ACCEPT_ENCODING
+        try:
+            body_length = len(request.content)
+        except httpx.RequestNotRead:
+            body_length = None
+        exempt = _exempt_hop(self._policy, self._first_hop, str(request.url), request.headers, body_length)
         self._first_hop = False
         if not exempt:
             return await self._public.handle_async_request(request)

@@ -1,8 +1,31 @@
+import re
 from urllib.parse import SplitResult, unquote, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 DEFAULT_PORTS = {"http": 80, "https": 443}
+
+# A header name as HTTP defines it.
+HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+
+# Headers that frame a request or tell a front end where to route it, which no policy may allow on an exempt request.
+ROUTING_HEADER_NAMES = frozenset(
+    {
+        "connection",
+        "content-length",
+        "forwarded",
+        "host",
+        "keep-alive",
+        "proxy-authorization",
+        "proxy-connection",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+        "via",
+    }
+)
+ROUTING_HEADER_PREFIXES = ("x-forwarded-", "x-original-", "x-rewrite-", "x-envoy-", "x-host")
 
 
 def _origin_and_path(url: str) -> tuple[tuple[str, str, int], str] | None:
@@ -50,6 +73,9 @@ class EgressPolicy(BaseModel):
             node's own timeout.
         max_response_bytes: The most a response body may hold once decoded.
         max_redirects: The most redirects one request follows.
+        exempt_request_headers: Header names an exempt request may carry besides the ones the clients set themselves,
+            those that describe the body, "Authorization" and "Cookie", such as "X-Api-Key". Names that frame a request
+            or that a front end routes by are refused.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -58,6 +84,7 @@ class EgressPolicy(BaseModel):
     timeout_seconds: float = Field(default=120, gt=0)
     max_response_bytes: int = Field(default=1024 * 1024, gt=0)
     max_redirects: int = Field(default=10, ge=0)
+    exempt_request_headers: tuple[str, ...] = ()
 
     @field_validator("exempt_url_prefixes")
     @classmethod
@@ -69,6 +96,19 @@ class EgressPolicy(BaseModel):
                     f"An exempt URL prefix must be an http or https URL with a host and a plain path: {prefix!r}."
                 )
         return prefixes
+
+    @field_validator("exempt_request_headers")
+    @classmethod
+    def validate_exempt_request_headers(cls, names: tuple[str, ...]) -> tuple[str, ...]:
+        for name in names:
+            lowered = name.lower()
+            if (
+                not HEADER_NAME.match(name)
+                or lowered in ROUTING_HEADER_NAMES
+                or lowered.startswith(ROUTING_HEADER_PREFIXES)
+            ):
+                raise ValueError(f"An exempt request may not be allowed the header {name!r}.")
+        return names
 
     def is_exempt(self, url: str) -> bool:
         """Reports whether a request to url skips the address check."""
