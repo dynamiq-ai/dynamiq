@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from .python import Python
     from .python_code_executor import PythonCodeExecutor
     from .python_monty import PythonMonty
+    from .remote_context import RemoteContextTool
     from .scale_serp import ScaleSerpTool
     from .serply import SerplyTool
     from .skills_tool import SkillsTool
@@ -64,6 +65,7 @@ _LAZY_EXPORTS = {
     "FirecrawlSearchTool": ".firecrawl_search",
     "FXMacroDataTool": ".fxmacrodata",
     "HttpApiCall": ".http_api_call",
+    "RemoteContextTool": ".remote_context",
     "ResponseType": ".http_api_call",
     "HumanFeedbackTool": ".human_feedback",
     "JinaResponseFormat": ".jina",
@@ -124,6 +126,7 @@ __all__ = [
     "FirecrawlSearchTool",
     "FXMacroDataTool",
     "HttpApiCall",
+    "RemoteContextTool",
     "ResponseType",
     "HumanFeedbackTool",
     "JinaResponseFormat",

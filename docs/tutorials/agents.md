@@ -168,6 +168,122 @@ result = workflow.run(
 print(result.output[manager_agent.id]["output"]["content"])
 ```
 
----
+## Remote lifecycle authorization
 
-This tutorial provides a comprehensive guide to setting up and running agents using Dynamiq. By following these steps, you can create individual agents to tackle complex tasks and combine specialists under a manager to deliver richer multi-agent workflows.
+`RemoteLifecycleHook` checks a fixed HTTPS connection before each model and tool
+call, including each context-summary chunk, merge and retry. Configure a POST
+`Http` connection and add the hook to the agent's `hooks`. It is inherited by
+sub-agents by default. The endpoint cannot be chosen by the model.
+
+The host passes opaque authorization state using
+`RunnableConfig(trusted_context={"control_context": {...}, "app_id": ...,
+"deployment_id": ...})`. This is separate from agent input and is excluded from
+checkpoint serialization; the host supplies current state again on resume.
+
+The hook sends only `phase` (`before_model` or `before_tool`), the root `run_id`,
+`app_id`, `deployment_id`, and `control_context`. No prompts, model responses or
+tool arguments are sent. The endpoint must return HTTP 200 JSON with a Boolean
+`allow`; denial, malformed output and transport failure stop the run. Response
+reasons are ignored. Requests do not follow redirects or use environment proxies,
+and both the request timeout and response size are bounded. A lifecycle endpoint
+must be a read-only admission check, not a consequential operation.
+
+Authorization runs once immediately before each SDK-controlled model transport
+request or tool execution, including automatic node retries, parameter recovery,
+and context-summary requests. Other agent hooks still run at their normal logical
+boundaries; a skipped or policy-blocked tool does not make an authorization request.
+Tool selection retains the agent's authored identity, including MCP server groups
+and sub-agent metadata, after a factory resolves or a parallel call clones its
+target. Every node group dispatched as an agent tool is checked. A composite
+tool's ordinary tool descendants and internal model requests retain their own
+checks, using their own identities. This dispatch state is private to the current
+call and is not serialized. A remote context failure raises a terminal node error;
+it does not become an observation for another model turn. Explicit node retry policies
+remain separate; those attempts still receive their own authorization check.
+Provider libraries may retry an already-dispatched HTTP operation internally;
+configure those libraries' retry limits separately when an individual HTTP attempt
+needs to be controlled.
+
+SDK node output caching is bypassed when the run supplies the `control_context`
+key, or the node has an authored/inherited remote lifecycle hook. This prevents
+cached model, tool or whole-agent results from bypassing live authorization or
+being reused across opaque private contexts. Supplying the required trusted
+context at the top level also covers cached composite parents before their child
+agent installs its hooks. Unguarded runs that omit the key retain their cache
+behavior. An admission layer may normalize an opted-in request's absent context
+to an empty object; those runs conservatively bypass caching too. Do not strip
+authorization context to reenable caching.
+Hosts wrapping guarded agents in arbitrary Python closures must still supply that
+top-level context and control their own caches; the SDK cannot discover hidden
+calls. Operator-authored mocks suppress external work and lifecycle requests;
+their output is a fixture, not proof that authorization succeeded.
+
+The `Dynamiq` router LLM maps an explicitly configured `num_retries` to the
+OpenAI SDK client's per-call `max_retries`; unset values preserve that client's
+default. These internal HTTP retries still occur inside one SDK invocation.
+The native `OpenAI` transport honors the same setting. Native `OpenAI` and
+`DynamiqRouter` share the standard SDK raw-response interface to distinguish reported
+usage from local compatibility estimates without another HTTP request. Non-streaming
+calls add the SDK's `x-stainless-raw-response: true` header; the streaming path already
+uses that interface. Authentication, configured headers and request bodies remain
+intact, but the header set is not byte-for-byte identical. The `OpenAI` node has the
+existing `use_native_sdk=False` option for a gateway that rejects this SDK header;
+`DynamiqRouter` has no corresponding opt-out.
+
+LLM usage metadata includes `complete`: missing or invalid required counters and
+known local token estimates make it false, even when compatibility token or cost
+fields remain populated. Reported zero counters are distinct from missing usage.
+Completeness describes what the SDK adapter can observe, including usage supplied
+by upstream libraries; it is not invoice reconciliation or proof about hidden
+library/provider work. Unknown prices remain null. Hosts must preserve these
+distinctions when recording spend after failures or cancellation.
+The shared LiteLLM stream builder marks counters incomplete when its assembled
+values were not observed in the SDK-visible chunks, including its own replacements
+for missing or zero counters. This preserves legacy estimated counts and cost.
+An upstream library may already normalize or estimate values before yielding a
+chunk; that original field presence and provider zero cannot be recovered here.
+
+`dynamiq.nodes.tools.RemoteContextTool` uses the same fixed connection transport for
+host-authorized tools. Configure its `parameters` with an object JSON Schema. It
+posts `{run_id, app_id, deployment_id, control_context, input}`; only `input` comes
+from validated tool arguments. The connection URL and opaque context are never
+tool parameters. Responses must be JSON objects and are limited to 1 MiB. The
+runtime must reauthorize the resource request at that endpoint before returning
+private data.
+
+Exa search, Jina search/Reader and Firecrawl scrape emit a `research_receipt`
+callback observation. It contains bounded query/URL/status metadata from the
+actual transport, independently of rendering the model-facing output. Receipt
+status describes delivery of the configured requested representation, not a
+universal claim that document text was read. When Firecrawl requests any of
+`markdown`, `html` or `rawHtml`, at least one requested text representation must
+be nonempty; a links list, screenshot or extracted JSON cannot substitute for
+missing text. An observed unsuccessful source HTTP status also fails that
+receipt, even when Firecrawl's API returns HTTP 200.
+
+Non-text-only requests can succeed with a valid corresponding payload, including
+an empty links list or JSON object. Hosts that use receipts as document-read
+evidence must pin and verify text-extraction formats in their deployed workflow.
+Jina screenshot/pageshot keep their existing JSON image-URL output; no image is
+fetched, hashed or stored in a receipt. Receipts contain no document bodies,
+asset URLs, image bytes, headers or error messages. Exa's `costDollars.total`, when valid, is
+retained as its estimated `cost_usd`, not an invoice. Jina Reader reports
+`usage_units` in `tokens` from `X-Usage-Tokens` or `data.usage.tokens`;
+Firecrawl reports `credits` from `data.metadata.creditsUsed`. Zero differs from
+unknown, and malformed optional accounting stays unknown. No USD conversion is
+inferred from units; an absent receipt price remains unknown usage.
+
+Jina Reader and Firecrawl scrape optionally accept a static `unit_price_usd`
+configuration, in USD per reported token or credit respectively. It defaults to
+`None`. Only observed units multiplied by an explicitly declared, validated rate
+produce an estimated receipt cost. The rate is a JSON number, survives YAML
+loading (including explicit zero), and is not a model input or upstream parameter.
+It is a host-declared accounting estimate, not provider billing reconciliation.
+
+Jina Reader has optional `page_timeout_seconds`, `proxy` (`auto`, `none`, or a
+two-letter country), `token_budget`, `wait_for_selector`, and
+`cache_tolerance_seconds` settings. They become `X-Timeout`, `X-Proxy`,
+`X-Token-Budget`, `X-Wait-For-Selector`, and `X-Cache-Tolerance` headers.
+`no_cache=True` suppresses cache tolerance. Timeout, proxy, budget and cache
+controls are hidden from the agent schema; their configured defaults remain
+unchanged when omitted.

@@ -755,7 +755,15 @@ def test_every_builtin_hook_publishes_a_json_schema_for_ui_forms():
     from dynamiq.nodes.agents.hooks import hook_json_schemas
 
     schemas = hook_json_schemas()
-    names = ["PIIHook", "PromptInjectionHook", "ToolPolicyHook", "CallLimitHook", "RegexHook", "TransformHook"]
+    names = [
+        "PIIHook",
+        "PromptInjectionHook",
+        "ToolPolicyHook",
+        "CallLimitHook",
+        "RegexHook",
+        "TransformHook",
+        "RemoteLifecycleHook",
+    ]
     assert set(schemas) == {f"dynamiq.nodes.agents.hooks.{name}" for name in names}
     assert "restore_in_tools" in schemas["dynamiq.nodes.agents.hooks.PIIHook"]["properties"]
     assert "max_per_run" in schemas["dynamiq.nodes.agents.hooks.CallLimitHook"]["properties"]

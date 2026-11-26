@@ -9,6 +9,7 @@ import pytest
 from litellm.completion_extras import responses_api_bridge
 from openai import AsyncOpenAI
 from openai import OpenAI as OpenAIClient
+from openai._base_client import BaseClient
 
 from dynamiq.callbacks.streaming import BaseStreamingCallbackHandler
 from dynamiq.connections import OpenAI as OpenAIConnection
@@ -119,11 +120,14 @@ class Collector(BaseStreamingCallbackHandler):
     def __init__(self):
         self.chunks = []
         self.usage = None
+        self.model_calls = []
 
     def on_node_execute_stream(self, serialized, chunk=None, **kwargs):
         self.chunks.append(chunk)
 
     def on_node_execute_run(self, serialized, **kwargs):
+        if "model_call" in kwargs:
+            self.model_calls.append(kwargs["model_call"])
         if "usage_data" in kwargs:
             self.usage = kwargs["usage_data"]
 
@@ -207,7 +211,6 @@ class TestBuildRequest:
         "extra",
         [
             {"thinking": {"type": "enabled", "budget_tokens": 1024}},
-            {"num_retries": 3},
             {"response_format": MagicMock()},
         ],
     )
@@ -434,6 +437,91 @@ class TestNativeStreaming:
         assert collector.usage["total_tokens"] == 18
 
 
+class TestNativeRetryConfiguration:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("asynchronous", [False, True])
+    @pytest.mark.parametrize("failure", ["http500", "connect"])
+    @pytest.mark.parametrize("limit, expected", [(None, 3), (0, 1), (1, 2)])
+    async def test_retry_limit_keeps_native_transport_and_shared_client(
+        self, monkeypatch, asynchronous, failure, limit, expected
+    ):
+        monkeypatch.setattr(BaseClient, "_calculate_retry_timeout", lambda *args, **kwargs: 0)
+        fake = FakeOpenAI(status_code=500)
+
+        def handler(request):
+            if failure == "connect":
+                fake.requests.append(json.loads(request.content))
+                raise httpx.ConnectError("synthetic connection failure", request=request)
+            return fake.handler(request)
+
+        client = OpenAIClient(
+            api_key="k",
+            base_url=BASE_URL,
+            max_retries=2,
+            http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        )
+        async_client = AsyncOpenAI(
+            api_key="k",
+            base_url=BASE_URL,
+            max_retries=2,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+        node = OpenAI(
+            model="gpt-4o-mini",
+            connection=OpenAIConnection(api_key="k", url=BASE_URL),
+            client=client,
+            prompt=Prompt(messages=[{"role": "user", "content": "hi"}]),
+            use_native_sdk=True,
+            num_retries=limit,
+            error_handling={"max_retries": 0},
+        )
+        node._completion = MagicMock(side_effect=AssertionError("must retain native transport"))
+        node._acompletion = AsyncMock(side_effect=AssertionError("must retain native transport"))
+        try:
+            with patch.object(OpenAIConnection, "connect_async", AsyncMock(return_value=async_client)):
+                result = await node.run_async({}) if asynchronous else node.run_sync({})
+            assert result.status == RunnableStatus.FAILURE
+            expected_error = litellm.APIConnectionError if failure == "connect" else litellm.InternalServerError
+            assert issubclass(result.error.type, expected_error)
+            assert len(fake.requests) == expected
+            assert client.max_retries == async_client.max_retries == 2
+            assert node.client is client
+            assert not client.is_closed() and not async_client.is_closed()
+            assert all("num_retries" not in body for body in fake.requests)
+            assert all(
+                body["model"] == "gpt-4o-mini" and body["messages"][0]["content"] == "hi" for body in fake.requests
+            )
+            node._completion.assert_not_called()
+            node._acompletion.assert_not_called()
+        finally:
+            client.close()
+            await async_client.close()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("asynchronous", [False, True])
+    async def test_retry_override_keeps_the_same_native_request_body(self, asynchronous):
+        fake = FakeOpenAI()
+        node = make_node(fake, error_handling={"max_retries": 0})
+        async_client = fake.async_client()
+        node._completion = MagicMock(side_effect=AssertionError("must retain native transport"))
+        node._acompletion = AsyncMock(side_effect=AssertionError("must retain native transport"))
+        try:
+            with patch.object(OpenAIConnection, "connect_async", AsyncMock(return_value=async_client)):
+                for limit in (None, 1):
+                    node.num_retries = limit
+                    result = await node.run_async({}) if asynchronous else node.run_sync({})
+                    assert result.status == RunnableStatus.SUCCESS, result.error
+                    assert result.output["content"] == "Hello"
+            assert len(fake.requests) == 2
+            assert fake.requests[0] == fake.requests[1]
+            assert node.client.max_retries == async_client.max_retries == 0
+            node._completion.assert_not_called()
+            node._acompletion.assert_not_called()
+        finally:
+            node.client.close()
+            await async_client.close()
+
+
 class TestNativeErrors:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -520,9 +608,10 @@ class TestTransportChoice:
     @pytest.mark.parametrize(
         "native, extra", [(False, {}), (True, {"thinking_enabled": True}), (True, {"model": "gpt-5-pro"})]
     )
-    async def test_goes_through_litellm_when_off_or_untranslatable(self, async_sdk_client, native, extra):
+    @pytest.mark.parametrize("limit", [None, 0, 1])
+    async def test_goes_through_litellm_when_off_or_untranslatable(self, async_sdk_client, native, extra, limit):
         fake = FakeOpenAI()
-        node = make_node(fake, native=native, **extra)
+        node = make_node(fake, native=native, num_retries=limit, **extra)
         response = litellm.ModelResponse(choices=[{"message": {"role": "assistant", "content": "via litellm"}}])
         node._acompletion = AsyncMock(return_value=response)
 
@@ -531,6 +620,11 @@ class TestTransportChoice:
 
         assert output["content"] == "via litellm"
         assert fake.requests == []
+        sent = node._acompletion.call_args.kwargs
+        if limit is None:
+            assert "num_retries" not in sent
+        else:
+            assert sent["num_retries"] == limit
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("internal", ["_litellm_model_params", "_litellm_config"])
@@ -695,6 +789,162 @@ class TestCostReporting:
         )
         assert usage["total_tokens_cost_usd"] == pytest.approx(prompt_cost + completion_cost)
         assert usage["total_tokens_cost_usd"] > 0
+
+
+class TestNativeUsageConfidence:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("asynchronous", [False, True])
+    @pytest.mark.parametrize("streaming", [False, True])
+    @pytest.mark.parametrize(
+        "raw, complete, expected",
+        [
+            (None, False, None),
+            (USAGE, True, (11, 7)),
+            ({"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, True, (0, 0)),
+            ({"prompt_tokens": 11, "total_tokens": 11}, False, (11, 0)),
+            ({"prompt_tokens": "11", "completion_tokens": "7", "total_tokens": "18"}, False, (11, 7)),
+            ({"prompt_tokens": 11.0, "completion_tokens": 7, "total_tokens": 18}, False, (11, 7)),
+            ({"prompt_tokens": True, "completion_tokens": 7, "total_tokens": 8}, False, (1, 7)),
+            ({"prompt_tokens": -1, "completion_tokens": 7, "total_tokens": 6}, False, (-1, 7)),
+        ],
+        ids=["missing", "reported", "reported-zero", "partial", "strings", "float", "boolean", "negative"],
+    )
+    async def test_provider_usage_origin_survives_native_normalization(
+        self, async_sdk_client, asynchronous, streaming, raw, complete, expected
+    ):
+        fake = FakeOpenAI(usage=raw)
+        node = make_node(fake, streaming=StreamingConfig(enabled=streaming), num_retries=0)
+        collector = Collector()
+        responses = []
+        handle = node._handle_completion_response
+
+        def capture(response, **kwargs):
+            responses.append(response)
+            return handle(response=response, **kwargs)
+
+        with async_sdk_client(fake), patch.object(node, "_handle_completion_response", side_effect=capture):
+            result = (
+                await node.run_async({}, config=RunnableConfig(callbacks=[collector]))
+                if asynchronous
+                else node.run_sync({}, config=RunnableConfig(callbacks=[collector]))
+            )
+
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        assert result.output == {"content": "Hello"}
+        assert len(fake.requests) == 1
+        assert collector.usage["complete"] is complete
+        # Retain the native transport's legacy estimates and normalized counters, not just its answer.
+        expected = expected or ((8, 1) if streaming else (0, 0))
+        assert (collector.usage["prompt_tokens"], collector.usage["completion_tokens"]) == expected
+        prompt_cost, completion_cost = litellm.cost_per_token(
+            model=node.model,
+            prompt_tokens=expected[0],
+            completion_tokens=expected[1],
+            cache_read_input_tokens=min(0, expected[0]),
+        )
+        assert collector.usage["total_tokens_cost_usd"] == pytest.approx(prompt_cost + completion_cost)
+        if raw is not None and "completion_tokens" in raw:
+            # OpenAI has already coerced string/float/bool counts to ints at this boundary.
+            assert type(responses[0].usage.prompt_tokens) is int
+            assert type(responses[0].usage.completion_tokens) is int
+        assert "_dynamiq_usage_observed" not in responses[0].model_dump()
+        assert "_dynamiq_usage_observed" not in json.dumps(result.to_dict())
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("asynchronous", [False, True])
+    @pytest.mark.parametrize("streaming", [False, True])
+    async def test_fractional_counters_keep_the_existing_failure_without_claiming_complete_usage(
+        self, async_sdk_client, asynchronous, streaming
+    ):
+        fake = FakeOpenAI(usage={"prompt_tokens": 11.5, "completion_tokens": 7, "total_tokens": 18.5})
+        node = make_node(fake, streaming=StreamingConfig(enabled=streaming), num_retries=0)
+        collector = Collector()
+        responses = []
+        handle = node._handle_completion_response
+
+        def capture(response, **kwargs):
+            responses.append(response)
+            return handle(response=response, **kwargs)
+
+        with async_sdk_client(fake), patch.object(node, "_handle_completion_response", side_effect=capture):
+            result = (
+                await node.run_async({}, config=RunnableConfig(callbacks=[collector]))
+                if asynchronous
+                else node.run_sync({}, config=RunnableConfig(callbacks=[collector]))
+            )
+        assert result.status == RunnableStatus.FAILURE
+        assert result.error.type.__name__ == "ValidationError"
+        assert collector.usage is None
+        assert [call["status"] for call in collector.model_calls] == ["started", "failed"]
+        assert getattr(responses[0], "_dynamiq_usage_observed") is False
+        assert "_dynamiq_usage_observed" not in responses[0].model_dump()
+        assert len(fake.requests) == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("asynchronous", [False, True])
+    @pytest.mark.parametrize("streaming", [False, True])
+    async def test_explicit_reported_zero_cost_is_retained(self, async_sdk_client, asynchronous, streaming):
+        fake = FakeOpenAI(usage=USAGE | {"cost": 0})
+        node = make_node(
+            fake, model="gpt-native-unpriced-test", streaming=StreamingConfig(enabled=streaming), num_retries=0
+        )
+        collector = Collector()
+        with async_sdk_client(fake):
+            result = (
+                await node.run_async({}, config=RunnableConfig(callbacks=[collector]))
+                if asynchronous
+                else node.run_sync({}, config=RunnableConfig(callbacks=[collector]))
+            )
+        assert result.status == RunnableStatus.SUCCESS, result.error
+        assert collector.usage["total_tokens_cost_usd"] == 0
+        assert collector.usage["complete"] is True
+        assert len(fake.requests) == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("asynchronous", [False, True])
+    async def test_raw_usage_inspection_preserves_request_and_client_lifecycle(self, asynchronous):
+        fake = FakeOpenAI()
+        sent, responses = [], []
+
+        def handler(request):
+            sent.append(dict(request.headers))
+            response = fake.handler(request)
+            responses.append(response)
+            return response
+
+        transport = httpx.MockTransport(handler)
+        client = (
+            AsyncOpenAI(
+                api_key="k", base_url=BASE_URL, max_retries=0, http_client=httpx.AsyncClient(transport=transport)
+            )
+            if asynchronous
+            else OpenAIClient(
+                api_key="k", base_url=BASE_URL, max_retries=0, http_client=httpx.Client(transport=transport)
+            )
+        )
+        headers = {"X-Caller-Trace": "preserved"}
+        request = {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}], "extra_headers": headers}
+        try:
+            if asynchronous:
+                baseline = await client.chat.completions.create(**request)
+                observed = await _openai_sdk.acreate(client, request)
+            else:
+                baseline = client.chat.completions.create(**request)
+                observed = _openai_sdk.create(client, request)
+            assert len(fake.requests) == 2
+            assert fake.requests[0] == fake.requests[1]
+            assert observed.model_dump() == baseline.model_dump()
+            assert sent[0]["authorization"] == sent[1]["authorization"] == "Bearer k"
+            assert sent[0]["x-caller-trace"] == sent[1]["x-caller-trace"] == "preserved"
+            assert sent[1] == sent[0] | {"x-stainless-raw-response": "true"}
+            assert headers == {"X-Caller-Trace": "preserved"}
+            assert all(response.is_closed for response in responses)
+            assert client.max_retries == 0 and not client.is_closed()
+        finally:
+            if asynchronous:
+                await client.close()
+            else:
+                client.close()
 
 
 class TestRequestShapeFallbacks:

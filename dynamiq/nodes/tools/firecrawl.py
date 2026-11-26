@@ -8,6 +8,7 @@ from dynamiq.connections import Firecrawl
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.tools.research_receipts import UnitPrice, emit_research_receipt, estimated_receipt_cost
 from dynamiq.nodes.tools.utils import http_error_detail
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
@@ -190,6 +191,10 @@ class FirecrawlTool(ConnectionNode):
     is_parallel_execution_allowed: bool = True
     connection: Firecrawl
     url: str | None = None
+    unit_price_usd: UnitPrice | None = Field(
+        default=None,
+        description="Declared estimated USD per reported Firecrawl credit. No price is assumed when unset.",
+    )
     input_schema: ClassVar[type[FirecrawlInputSchema]] = FirecrawlInputSchema
 
     formats: list[str | dict[str, Any]] = Field(default_factory=lambda: ["markdown"])
@@ -372,6 +377,37 @@ class FirecrawlTool(ConnectionNode):
             output = {"content": result}
         return output
 
+    @staticmethod
+    def _has_requested_content(result: dict, request: dict) -> bool:
+        """Whether the response delivered a requested representation, not proof of document text for every format."""
+        if result.get("success") is not True or not isinstance(data := result.get("data"), dict):
+            return False
+        metadata = data.get("metadata") or {}
+        status = metadata.get("statusCode") if isinstance(metadata, dict) else None
+        if status is not None and (type(status) is not int or not 200 <= status < 400):
+            return False
+        formats = [item.get("type") if isinstance(item, dict) else item for item in request["formats"]]
+        formats = [name for name in formats if isinstance(name, str)]
+        text_formats = [item for item in formats if item in {"markdown", "html", "rawHtml"}]
+        if text_formats:
+            # A links/screenshot/JSON sibling cannot stand in for the full text the caller requested.
+            return any(isinstance(value := data.get(item), str) and bool(value.strip()) for item in text_formats)
+        for item in formats:
+            value = data.get(item)
+            if item in {"summary", "screenshot"} and isinstance(value, str) and value.strip():
+                return True
+            if item == "links" and isinstance(value, list) and all(isinstance(link, str) for link in value):
+                return True
+            if (
+                item == "json"
+                and "json" in data
+                and (value is None or isinstance(value, (dict, list, str, bool, int, float)))
+            ):
+                return True
+            if item in {"branding", "changeTracking"} and isinstance(value, dict):
+                return True
+        return False
+
     def execute(
         self, input_data: FirecrawlInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
@@ -393,8 +429,36 @@ class FirecrawlTool(ConnectionNode):
             response.raise_for_status()
             scrape_result = response.json()
         except Exception as e:
+            emit_research_receipt(
+                self,
+                config,
+                kwargs,
+                provider="firecrawl",
+                kind="fetch",
+                status="failed",
+                url=url,
+                error_code="transport_error",
+            )
             raise self._wrap_scrape_exception(e)
 
+        data = scrape_result.get("data") or {}
+        metadata = data.get("metadata") or {}
+        usable = self._has_requested_content(scrape_result, scrape_data)
+        emit_research_receipt(
+            self,
+            config,
+            kwargs,
+            provider="firecrawl",
+            kind="fetch",
+            status="succeeded" if usable else "failed",
+            url=url,
+            final_url=metadata.get("url") or metadata.get("sourceURL"),
+            status_code=metadata.get("statusCode") or getattr(response, "status_code", None),
+            error_code=None if usable else "empty_content",
+            usage_units=metadata.get("creditsUsed"),
+            usage_unit="credits",
+            cost_usd=estimated_receipt_cost(metadata.get("creditsUsed"), self.unit_price_usd),
+        )
         return self._format_scrape_output(url, scrape_result)
 
     async def execute_async(
@@ -418,6 +482,34 @@ class FirecrawlTool(ConnectionNode):
             response.raise_for_status()
             scrape_result = response.json()
         except Exception as e:
+            emit_research_receipt(
+                self,
+                config,
+                kwargs,
+                provider="firecrawl",
+                kind="fetch",
+                status="failed",
+                url=url,
+                error_code="transport_error",
+            )
             raise self._wrap_scrape_exception(e)
 
+        data = scrape_result.get("data") or {}
+        metadata = data.get("metadata") or {}
+        usable = self._has_requested_content(scrape_result, scrape_data)
+        emit_research_receipt(
+            self,
+            config,
+            kwargs,
+            provider="firecrawl",
+            kind="fetch",
+            status="succeeded" if usable else "failed",
+            url=url,
+            final_url=metadata.get("url") or metadata.get("sourceURL"),
+            status_code=metadata.get("statusCode") or getattr(response, "status_code", None),
+            error_code=None if usable else "empty_content",
+            usage_units=metadata.get("creditsUsed"),
+            usage_unit="credits",
+            cost_usd=estimated_receipt_cost(metadata.get("creditsUsed"), self.unit_price_usd),
+        )
         return self._format_scrape_output(url, scrape_result)

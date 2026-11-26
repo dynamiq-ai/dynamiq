@@ -33,6 +33,7 @@ from dynamiq.nodes.agents.hooks.core import (
     register_hook,
     resolve_hook,
 )
+from dynamiq.nodes.agents.hooks.remote import RemoteLifecycleHook
 
 __all__ = [
     "hook_json_schemas",
@@ -58,6 +59,7 @@ __all__ = [
     "PIIHook",
     "PromptInjectionHook",
     "RegexHook",
+    "RemoteLifecycleHook",
     "Skip",
     "TextGuardHook",
     "ToolCall",
