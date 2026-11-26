@@ -33,6 +33,14 @@ _created_tables: set[tuple] = set()
 _create_tables_lock = threading.Lock()
 
 
+def _to_jsonb_text(value: Any) -> str:
+    """Renders a filter value the way `metadata->>key` returns the stored one."""
+    # str(True) is "True", but JSONB renders booleans as "true"/"false".
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
 class PostgreSQL(MemoryBackend):
     """
     PostgreSQL implementation of the memory storage backend.
@@ -302,27 +310,35 @@ class PostgreSQL(MemoryBackend):
 
         if filters:
             for key, value in filters.items():
-                if isinstance(value, list):
-                    # A list means "any of these", matching InMemory, SQLite and DynamoDB.
-                    # metadata->>key is text, so each item is stringified like the equality path.
-                    # An empty IN () is invalid SQL and matches nothing.
-                    if not value:
-                        where_clauses.append(SQL("FALSE"))
-                        continue
-                    placeholders = SQL(", ").join(SQL("%s") for _ in value)
-                    where_clauses.append(
-                        SQL("{metadata_col}->>%s IN ({placeholders})").format(
-                            metadata_col=Identifier(self.metadata_col),
-                            placeholders=placeholders,
+                # A list means "any of these", matching InMemory, SQLite and DynamoDB.
+                values = value if isinstance(value, list) else [value]
+                # metadata->>key is NULL for a JSON null or a missing key, which `=` and IN never match.
+                texts = [_to_jsonb_text(item) for item in values if item is not None]
+                conditions = []
+                if texts:
+                    if isinstance(value, list):
+                        operator = SQL("IN ({})").format(SQL(", ").join(SQL("%s") for _ in texts))
+                    else:
+                        operator = SQL("= %s")
+                    conditions.append(
+                        SQL("{metadata_col}->>%s {operator}").format(
+                            metadata_col=Identifier(self.metadata_col), operator=operator
                         )
                     )
-                    params.append(key)
-                    params.extend(str(item) for item in value)
-                else:
-                    where_clauses.append(
-                        SQL("{metadata_col}->>%s = %s").format(metadata_col=Identifier(self.metadata_col))
+                    params.extend([key, *texts])
+                if any(item is None for item in values):
+                    conditions.append(
+                        SQL("{metadata_col}->>%s IS NULL").format(metadata_col=Identifier(self.metadata_col))
                     )
-                    params.extend([key, str(value)])  # Compare as text
+                    params.append(key)
+
+                if not conditions:
+                    # An empty IN () is invalid SQL and matches nothing.
+                    where_clauses.append(SQL("FALSE"))
+                elif len(conditions) == 1:
+                    where_clauses.append(conditions[0])
+                else:
+                    where_clauses.append(SQL("({})").format(SQL(" OR ").join(conditions)))
 
         if query:
             where_clauses.append(SQL("{content_col} ILIKE %s").format(content_col=Identifier(self.content_col)))
