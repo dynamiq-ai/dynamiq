@@ -249,3 +249,21 @@ def test_weaviate_filter_only_search_with_limit_returns_the_most_recent(mocker):
     result = backend.search(query=None, filters={"field": "user_id", "operator": "==", "value": "u"}, limit=LIMIT)
 
     assert [m.content for m in result] == ["msg-7", "msg-8", "msg-9"]
+
+
+def test_qdrant_filter_only_search_with_limit_returns_the_most_recent(mocker):
+    """filter_documents returns an unordered set; the limit must keep the newest, oldest first."""
+    from dynamiq.memory.backends.qdrant import Qdrant
+
+    mocker.patch.object(Qdrant, "_collection_exists", return_value=True)
+    store = mocker.Mock()
+    # Stored out of order, as a vector DB is free to return them.
+    store.filter_documents.return_value = [
+        Document(id=str(i), content=f"msg-{i}", metadata={"role": "user", "timestamp": float(i)})
+        for i in [5, 1, 9, 0, 7, 3, 8, 2, 6, 4]
+    ]
+    backend = Qdrant.model_construct(vector_store=store, embedder=mocker.Mock(), connection=mocker.Mock())
+
+    result = backend.search(query=None, filters={"user_id": "u"}, limit=LIMIT)
+
+    assert [m.content for m in result] == ["msg-7", "msg-8", "msg-9"]

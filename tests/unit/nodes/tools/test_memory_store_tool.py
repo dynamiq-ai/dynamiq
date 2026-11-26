@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -5,7 +6,14 @@ import pytest
 from dynamiq.connections import Dynamiq
 from dynamiq.nodes.tools.memory_store_tool import MemoryStoreTool, MemoryStoreToolInputSchema
 from dynamiq.runnables import RunnableStatus
-from dynamiq.storages.memory import CompositeMemoryStore, DynamiqMemoryStore
+from dynamiq.storages.memory import (
+    CompositeMemoryStore,
+    DynamiqMemoryStore,
+    MemoryEntry,
+    MemoryLink,
+    MemoryNote,
+    MemoryStoreError,
+)
 from tests.unit.storages.memory.conftest import FakeMemoryStore
 
 
@@ -284,3 +292,226 @@ def test_the_listing_of_an_undescribed_memory_still_shows_paths(backend):
     content(tool, action="write", path="notes.md", content="x")
 
     assert "notes.md" in content(tool, action="list")
+
+
+def test_a_large_listing_describes_the_most_recent_memories_that_fit():
+    start = datetime(2026, 1, 1)
+    entries = [
+        MemoryEntry(
+            path=f"notes/n{i:03}.md",
+            size=10,
+            description="Note on one topic. " * 6,
+            updated_at=start + timedelta(days=i),
+        )
+        for i in range(250)
+    ]
+    entries[0] = entries[0].model_copy(update={"updated_at": None})
+    entries[1] = entries[1].model_copy(update={"updated_at": entries[1].updated_at.replace(tzinfo=timezone.utc)})
+
+    class ManyMemories(FakeMemoryStore):
+        def list(self, prefix: str = "", user_id: str | None = None):
+            return entries
+
+    result = run(MemoryStoreTool(backend=ManyMemories()), action="list")
+    text = result.output["content"]
+    described = text.count(" — Note on one topic.")
+
+    assert 0 < described < 250
+    assert "notes/n249.md — Note on one topic." in text
+    assert "  - notes/n000.md (10 chars)" in text
+    assert f"250 memories; the {described} changed most recently are described." in text
+    assert len(result.output["paths"]) == 250
+
+
+def test_search_finds_a_memory_by_its_content(tool):
+    content(tool, action="write", path="team/oncall.md", content="Billing pages go to Marco at weekends.")
+    content(tool, action="write", path="preferences.md", content="Prefers British English.")
+
+    result = run(tool, action="search", query="who is paged at weekends")
+
+    assert result.output["paths"] == ["team/oncall.md"]
+    assert "No memories" in content(tool, action="search", query="kubernetes")
+
+
+def test_search_needs_a_query(tool):
+    result = run(tool, action="search", query="  ")
+
+    assert result.status == RunnableStatus.FAILURE
+
+
+def test_write_names_memories_on_the_same_topic(tool):
+    content(tool, action="write", path="playbook/refund-policy.md", content="Refunds over 500 EUR need approval.")
+
+    text = content(tool, action="write", path="playbook/refund-exceptions.md", content="Exceptions for refunds.")
+
+    assert "Memories on nearby topics: playbook/refund-policy.md" in text
+
+
+def test_write_names_no_memory_that_shares_only_a_common_word(tool):
+    content(tool, action="write", path="customers/larkspur.md", content="Larkspur renews in March.")
+
+    assert "nearby topics" not in content(tool, action="write", path="team/march-offsite-agenda.md", content="Agenda.")
+
+
+def test_write_names_related_memories_only_inside_its_own_memory():
+    user, team = FakeMemoryStore(), FakeMemoryStore()
+    team.write("timezone-policy.md", "Everyone schedules in the user's timezone.")
+    tool = MemoryStoreTool(backend=CompositeMemoryStore(routes={"user/": user, "team/": team}))
+
+    assert content(tool, action="write", path="user/timezone.md", content="Works from Kyiv.") == (
+        "Remembered in 'user/timezone.md'."
+    )
+
+
+def test_write_survives_a_failing_search(tool, backend, monkeypatch):
+    monkeypatch.setattr(type(backend), "search", MagicMock(side_effect=MemoryStoreError("index down")))
+
+    assert content(tool, action="write", path="a.md", content="x") == "Remembered in 'a.md'."
+
+
+def test_read_names_the_memories_around_it():
+    class LinkedMemoryStore(FakeMemoryStore):
+        def read_note(self, path: str, user_id: str | None = None) -> MemoryNote:
+            return MemoryNote(
+                path=path,
+                content=self.read(path, user_id),
+                links=[MemoryLink(target="dana-okafor", path="people/dana-okafor.md"), MemoryLink(target="msa")],
+                backlinks=["projects/q3-pricing.md"],
+            )
+
+    tool = MemoryStoreTool(backend=LinkedMemoryStore())
+    content(tool, action="write", path="customers/larkspur.md", content="12% discount.")
+
+    text = content(tool, action="read", path="customers/larkspur.md")
+
+    assert text == (
+        "12% discount.\n\n[Links, not part of the memory]\nLinks to: people/dana-okafor.md\n"
+        "Unresolved links, no memory has these names: msa\nLinked from: projects/q3-pricing.md"
+    )
+
+
+def test_write_drops_the_links_a_read_appended():
+    class LinkedMemoryStore(FakeMemoryStore):
+        def read_note(self, path: str, user_id: str | None = None) -> MemoryNote:
+            return MemoryNote(
+                path=path,
+                content=self.read(path, user_id),
+                links=[MemoryLink(target="dana-okafor", path="people/dana-okafor.md")],
+            )
+
+    backend = LinkedMemoryStore()
+    tool = MemoryStoreTool(backend=backend)
+    content(tool, action="write", path="customers/larkspur.md", content="12% discount.")
+    read_back = content(tool, action="read", path="customers/larkspur.md")
+
+    content(tool, action="write", path="customers/larkspur.md", content=read_back + "\nRenews in March.")
+
+    assert backend.read("customers/larkspur.md") == "12% discount.\nRenews in March."
+
+
+def test_write_names_no_memory_that_shares_only_its_folder():
+    backend = FakeMemoryStore()
+    backend.write("team/rota.md", "Holiday rota for December.")
+    tool = MemoryStoreTool(backend=backend)
+
+    assert content(tool, action="write", path="team/oncall.md", content="Pager rotation.") == (
+        "Remembered in 'team/oncall.md'."
+    )
+
+
+@pytest.mark.parametrize("change", ["rewritten", "deleted"])
+def test_write_refuses_to_replace_a_change_made_since_the_read(tool, backend, change):
+    content(tool, action="write", path="team/oncall.md", content="Marco covers weekends.")
+    content(tool, action="read", path="team/oncall.md")
+    if change == "rewritten":
+        backend.write("team/oncall.md", "Priya covers weekends from March.")
+    else:
+        backend.delete("team/oncall.md")
+    current = backend._memories.get("team/oncall.md")
+
+    for _ in range(2):
+        result = run(tool, action="write", path="team/oncall.md", content="Marco covers weekends and holidays.")
+        assert result.status == RunnableStatus.FAILURE
+        assert "changed since you read it" in result.error.message
+    assert backend._memories.get("team/oncall.md") == current
+
+    run(tool, action="read", path="team/oncall.md")
+    assert "Remembered" in content(tool, action="write", path="team/oncall.md", content="Both cover holidays.")
+
+
+def test_edit_applies_only_to_the_text_it_read():
+    class RacedMemoryStore(FakeMemoryStore):
+        def read_note(self, path: str, user_id: str | None = None) -> MemoryNote:
+            note = super().read_note(path, user_id)
+            self.write(path, "Priya covers weekends.")
+            return note
+
+    store = RacedMemoryStore()
+    store.write("team/oncall.md", "Marco covers weekends.")
+
+    result = run(MemoryStoreTool(backend=store), action="edit", path="team/oncall.md", find="Marco", replace="Ana")
+
+    assert result.status == RunnableStatus.FAILURE
+    assert store.read("team/oncall.md") == "Priya covers weekends."
+
+
+def test_a_write_over_a_memory_the_run_never_read_is_refused(tool, backend):
+    backend.write("notes.md", "Marco covers weekends.")
+    content(tool, action="read", path="notes.md")
+    other_run = tool.clone()
+
+    assert (
+        "already exists and you haven't read it"
+        in run(other_run, action="write", path="notes.md", content="Ana covers weekends.").error.message
+    )
+    assert backend.read("notes.md") == "Marco covers weekends."
+
+    content(other_run, action="read", path="notes.md")
+    assert "Remembered" in content(other_run, action="write", path="notes.md", content="Ana covers weekends.")
+    assert "Remembered" in content(other_run, action="write", path="new.md", content="Created without a read.")
+
+
+def test_delete_refuses_a_change_made_since_the_read(tool, backend):
+    content(tool, action="write", path="team/oncall.md", content="Marco covers weekends.")
+    content(tool, action="read", path="team/oncall.md")
+    backend.write("team/oncall.md", "Priya covers weekends from March.")
+
+    result = run(tool, action="delete", path="team/oncall.md")
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "changed since you read it, so it was not deleted" in result.error.message
+    assert backend.read("team/oncall.md") == "Priya covers weekends from March."
+
+    content(tool, action="read", path="team/oncall.md")
+    assert "Deleted" in content(tool, action="delete", path="team/oncall.md")
+
+
+def test_a_store_that_reports_no_hash_on_write_keeps_later_writes_conditional():
+    class UnhashedWritesMemoryStore(FakeMemoryStore):
+        def write(self, path: str, content: str, user_id: str | None = None) -> MemoryEntry:
+            return super().write(path, content, user_id).model_copy(update={"content_hash": ""})
+
+    store = UnhashedWritesMemoryStore()
+    tool = MemoryStoreTool(backend=store)
+    content(tool, action="write", path="team/oncall.md", content="Marco covers weekends.")
+    store.write("team/oncall.md", "Priya covers weekends.")
+
+    result = run(tool, action="write", path="team/oncall.md", content="Marco covers holidays.")
+
+    assert result.status == RunnableStatus.FAILURE
+    assert store.read("team/oncall.md") == "Priya covers weekends."
+
+
+def test_a_store_without_content_hashes_writes_unconditionally():
+    class UnhashedMemoryStore(FakeMemoryStore):
+        def read_note(self, path: str, user_id: str | None = None) -> MemoryNote:
+            return MemoryNote(path=path, content=self.read(path, user_id))
+
+    store = UnhashedMemoryStore()
+    tool = MemoryStoreTool(backend=store)
+    store.write("a.md", "one")
+    content(tool, action="read", path="a.md")
+    store.write("a.md", "two")
+
+    assert "Remembered" in content(tool, action="write", path="a.md", content="three")
+    assert store.read("a.md") == "three"
