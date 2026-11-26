@@ -9,10 +9,14 @@ built on top of it.
 
 import abc
 import builtins
+import hashlib
+import re
 from datetime import datetime
 from typing import Any, ClassVar, Hashable
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+
+_WORD = re.compile(r"\w+")
 
 
 class MemoryStoreError(Exception):
@@ -33,12 +37,55 @@ class MemoryPermissionError(MemoryStoreError):
     """Raised when a memory operation is not permitted."""
 
 
+class MemoryChangedError(MemoryStoreError):
+    """Raised when a memory changed or was deleted since it was read, so a write would lose that change."""
+
+
+def content_hash(content: str) -> str:
+    """The hex SHA-256 of a memory's text, as the platform reports it in ``content_hash``."""
+    return hashlib.sha256(content.encode()).hexdigest()
+
+
 class MemoryEntry(BaseModel):
-    """One memory, without its content."""
+    """One memory, without its content.
+
+    ``description`` is what the store reports the memory holds: its ``description`` property, else its
+    first line of prose. ``content_hash`` identifies the content, for ``write_if_unchanged``. A store that
+    reports neither leaves them empty.
+    """
 
     path: str
     size: int = 0
     updated_at: datetime | None = None
+    description: str = ""
+    content_hash: str = ""
+
+    @field_validator("description", "content_hash", mode="before")
+    @classmethod
+    def _absent_is_empty(cls, value: Any) -> Any:
+        return "" if value is None else value
+
+
+class MemoryHit(MemoryEntry):
+    """A memory that matches a search, with the passage that matched."""
+
+    snippet: str = ""
+    score: float = 0.0
+
+
+class MemoryLink(BaseModel):
+    """A link one memory makes. ``path`` is None when no memory of that name exists yet."""
+
+    target: str
+    path: str | None = None
+
+
+class MemoryNote(MemoryEntry):
+    """One memory with its content, the memories it links to and the memories that link to it."""
+
+    content: str
+    links: list[MemoryLink] = Field(default_factory=list)
+    backlinks: list[str] = Field(default_factory=list)
 
 
 class MemoryStore(abc.ABC, BaseModel):
@@ -80,6 +127,10 @@ class MemoryStore(abc.ABC, BaseModel):
         data = self.model_dump(exclude=exclude, **kwargs)
         data["type"] = self.type
         return data
+
+    def scope_of(self, path: str) -> str:
+        """The prefix of the memory that holds ``path``; links between memories resolve inside it."""
+        return ""
 
     def describe_namespaces(self) -> dict[str, str]:
         """Path prefix -> what lives there.
@@ -126,6 +177,83 @@ class MemoryStore(abc.ABC, BaseModel):
     @abc.abstractmethod
     def delete(self, path: str, user_id: str | None = None) -> bool:
         """Delete one memory. Returns False when it was not there."""
+
+    def read_note(self, path: str, user_id: str | None = None) -> MemoryNote:
+        """Read one memory with the memories it links to and that link to it.
+
+        The default knows nothing beyond the content; a store that tracks links overrides it.
+
+        Raises:
+            MemoryNotFoundError: If the path does not exist.
+        """
+        content = self.read(path, user_id)
+        return MemoryNote(path=path, content=content, content_hash=content_hash(content))
+
+    def write_if_unchanged(
+        self, path: str, content: str, expected_hash: str | None, user_id: str | None = None
+    ) -> MemoryEntry:
+        """Replace a memory only while it still holds the content ``expected_hash`` identifies; with no
+        hash, create it only while no memory exists at the path.
+
+        The default checks, then writes, so a write landing in between goes unnoticed; a store that can
+        check both at once overrides it.
+
+        Raises:
+            MemoryChangedError: If the memory changed or was deleted since it was read, or, with no hash,
+                already exists.
+        """
+        try:
+            current = self.read(path, user_id)
+        except MemoryNotFoundError:
+            if expected_hash is None:
+                return self.write(path, content, user_id)
+            raise MemoryChangedError(f"'{path}' was deleted since it was read", operation="write", path=path) from None
+        if expected_hash is None:
+            raise MemoryChangedError(f"'{path}' already exists", operation="write", path=path)
+        if content_hash(current) != expected_hash:
+            raise MemoryChangedError(f"'{path}' changed since it was read", operation="write", path=path)
+        return self.write(path, content, user_id)
+
+    def delete_if_unchanged(self, path: str, expected_hash: str, user_id: str | None = None) -> bool:
+        """Delete a memory only while it still holds the content ``expected_hash`` identifies. Returns False
+        when it was not there.
+
+        The default checks, then deletes, so a write landing in between goes unnoticed; a store that can
+        check both at once overrides it.
+
+        Raises:
+            MemoryChangedError: If the memory changed since it was read.
+        """
+        try:
+            current = self.read(path, user_id)
+        except MemoryNotFoundError:
+            return False
+        if content_hash(current) != expected_hash:
+            raise MemoryChangedError(f"'{path}' changed since it was read", operation="delete", path=path)
+        return self.delete(path, user_id)
+
+    def search(
+        self, query: str, prefix: str = "", limit: int = 10, user_id: str | None = None
+    ) -> builtins.list[MemoryHit]:
+        """Memories under ``prefix`` that hold the words of ``query``, best first.
+
+        The default reads every memory and counts the query's words in each, which is fine for the few
+        hundred short notes a memory holds; a store with an index of its own overrides it.
+        """
+        words = {word for word in _WORD.findall(query.lower()) if len(word) > 2}
+        if not words:
+            return []
+        hits: builtins.list[MemoryHit] = []
+        for entry in self.list(prefix, user_id):
+            try:
+                text = f"{entry.path} {self.read(entry.path, user_id)}".lower()
+            except MemoryNotFoundError:
+                continue
+            score = sum(1 for word in words if word in text) / len(words)
+            if score:
+                hits.append(MemoryHit(**entry.model_dump(), score=score))
+        hits.sort(key=lambda hit: (-hit.score, hit.path))
+        return hits[:limit]
 
 
 class MemoryStoreConfig(BaseModel):

@@ -346,10 +346,56 @@ def test_a_repeated_read_is_not_served_from_the_tool_cache(llm, mocker):
         return response
 
     mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=respond)
-    reads = mocker.spy(FakeMemoryStore, "read")
+    reads = mocker.spy(FakeMemoryStore, "read_note")
     agent = Agent(name="a", llm=llm, memory_store=_memory(store), inference_mode=InferenceMode.DEFAULT)
 
     result = agent.run({"input": "Which English do I prefer?"})
 
     assert result.status == RunnableStatus.SUCCESS
     assert reads.call_count == 3
+
+
+def test_a_write_after_parallel_reads_is_refused_over_a_change(llm, mocker):
+    store = FakeMemoryStore()
+    store.write("team/oncall.md", "Marco covers weekends.")
+    store.write("team/rota.md", "The rota changes on Mondays.")
+
+    def call(name, **args):
+        return {
+            "id": f"call_{name}_{len(args)}",
+            "type": "function",
+            "function": {"name": name, "arguments": json.dumps({"thought": "Next step.", **args})},
+        }
+
+    turns = [
+        [
+            call("memory-store", action="read", path="team/oncall.md"),
+            call("memory-store", action="read", path="team/rota.md"),
+        ],
+        [call("memory-store", action="write", path="team/oncall.md", content="Ana covers weekends.")],
+        [call("provide_final_answer", answer="Done.")],
+    ]
+
+    def respond(*args, **kwargs):
+        if len(turns) == 2:
+            store.write("team/oncall.md", "Priya covers weekends.")
+        return ModelResponse(
+            choices=[
+                {
+                    "message": {"role": "assistant", "content": None, "tool_calls": turns.pop(0)},
+                    "finish_reason": "tool_calls",
+                }
+            ]
+        )
+
+    mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=respond)
+    agent = Agent(
+        name="a",
+        llm=llm,
+        memory_store=_memory(store),
+        inference_mode=InferenceMode.FUNCTION_CALLING,
+        parallel_tool_calls_enabled=True,
+    )
+
+    assert agent.run({"input": "Ana now covers weekends."}).status == RunnableStatus.SUCCESS
+    assert store.read("team/oncall.md") == "Priya covers weekends."
