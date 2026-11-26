@@ -554,6 +554,13 @@ def test_send_async_under_uvloop(loopback_allowed, port):
         ("http://tools.internal/v1/other", False),
         ("http://tools.internal:bad/v1/conversations/abc/x", False),
         ("http://tools.internal:0/v1/conversations/abc/x", False),
+        ("http://tools.internal/v1/conversations/abc/..;/other/secret", False),
+        ("http://tools.internal/v1/conversations/abc/%2e%2e;/other/x", False),
+        ("http://tools.internal/v1/conversations/abc/runs;jsessionid=1", False),
+        ("http://tools.internal/v1/conversations/abc/%252e%252e/other", False),
+        ("http://tools.internal/v1/conversations/abc/..%20/other", False),
+        ("http://tools.internal/v1/conversations/abc/a%00b", False),
+        ("http://tools.internal/v1/conversations/abc/a%5cb", False),
     ],
 )
 def test_egress_policy_is_exempt(url, exempt):
@@ -564,7 +571,13 @@ def test_egress_policy_is_exempt(url, exempt):
 
 @pytest.mark.parametrize(
     "prefix",
-    ["ftp://tools.internal/", "http:///v1/", "http://u:p@tools.internal/", "http://tools.internal/a/../b/"],
+    [
+        "ftp://tools.internal/",
+        "http:///v1/",
+        "http://u:p@tools.internal/",
+        "http://tools.internal/a/../b/",
+        "http://tools.internal/a;b/",
+    ],
 )
 def test_egress_policy_refuses_bad_prefixes(prefix):
     with pytest.raises(ValueError):

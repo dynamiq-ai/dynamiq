@@ -21,10 +21,17 @@ def _origin_and_path(url: str) -> tuple[tuple[str, str, int], str] | None:
 
 
 def _has_ambiguous_segment(path: str) -> bool:
-    """Whether a segment of the path is a dot segment or hides a slash, which a server may resolve differently."""
+    """Reports whether a segment of the path could name another path on some server.
+
+    That is a dot segment, one with path parameters (servlet containers drop ";..." and then resolve ".."), a slash or
+    backslash hidden by percent-encoding, encoding left after one decoding, which a server that decodes twice resolves,
+    and control characters.
+    """
     for segment in path.split("/"):
         decoded = unquote(segment)
-        if decoded in (".", "..") or "/" in decoded or "\\" in decoded:
+        if decoded.strip(" \t") in (".", ".."):
+            return True
+        if any(char in decoded for char in ";%/\\") or any(ord(char) < 0x20 or ord(char) == 0x7F for char in decoded):
             return True
     return False
 
