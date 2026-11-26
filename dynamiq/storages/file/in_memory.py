@@ -4,6 +4,7 @@ import base64
 import mimetypes
 import os
 from datetime import datetime
+from fnmatch import fnmatchcase
 from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO, Collection
@@ -131,8 +132,9 @@ class InMemoryFileStore(FileStore):
         self,
         directory: str | Path = "",
         recursive: bool = False,
+        pattern: str | None = None,
     ) -> list[FileInfo]:
-        """List files in storage."""
+        """List files in storage, optionally filtering filenames with a glob pattern."""
         directory = str(directory)
         prefix = directory if directory.endswith("/") else directory + "/"
         files_list = []
@@ -145,6 +147,9 @@ class InMemoryFileStore(FileStore):
                 rel_path = file_path[len(directory) :].lstrip("/")
                 if "/" in rel_path:
                     continue
+
+            if pattern is not None and not fnmatchcase(os.path.basename(file_path), pattern):
+                continue
 
             files_list.append(self._create_file_info(file_path, self._files[file_path]))
 

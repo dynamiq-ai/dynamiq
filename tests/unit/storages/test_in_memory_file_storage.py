@@ -135,3 +135,19 @@ def test_list_files_recursive_and_directory_behavior(storage, sample_text_conten
     assert len(docs_files_recursive) == 2
     assert "docs/file2.txt" in [f.path for f in docs_files_recursive]
     assert "docs/sub/file3.txt" in [f.path for f in docs_files_recursive]
+
+
+@pytest.mark.parametrize(
+    ("recursive", "expected"),
+    [(False, ["docs/a.pdf"]), (True, ["docs/a.pdf", "docs/sub/c.pdf"])],
+)
+def test_list_files_filters_by_pattern(storage, recursive, expected):
+    """Apply a filename glob within the requested directory and recursion depth."""
+    storage.store("docs/a.pdf", b"a")
+    storage.store("docs/b.txt", b"b")
+    storage.store("docs/sub/c.pdf", b"c")
+    storage.store("docs-old/d.pdf", b"d")
+
+    files = storage.list_files("docs", recursive=recursive, pattern="*.pdf")
+
+    assert [file.path for file in files] == expected
