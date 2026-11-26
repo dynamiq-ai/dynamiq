@@ -45,23 +45,55 @@ class RecursiveCharacterSplitterComponent(SplitterComponentBase):
                 new_separators = separators[index + 1 :]
                 break
 
-        splits = self._split_with_separator(text, separator)
-        good_splits: list[str] = []
         merge_separator = "" if self.keep_separator else separator
-        for piece in splits:
+        # A regex matches different text in different places, so each piece is rejoined with what stood before it.
+        rejoin_matches = self.is_separator_regex and not self.keep_separator and separator != ""
+        if rejoin_matches:
+            splits, gaps = self._split_with_matches(text, separator)
+        else:
+            splits, gaps = self._split_with_separator(text, separator), []
+        good_splits: list[str] = []
+        good_gaps: list[str] = []
+        for index, piece in enumerate(splits):
             if self._length(piece) < self.chunk_size:
+                if good_splits and rejoin_matches:
+                    good_gaps.append(gaps[index - 1])
                 good_splits.append(piece)
                 continue
             if good_splits:
-                final_chunks.extend(self._merge_splits(good_splits, merge_separator))
-                good_splits = []
+                final_chunks.extend(
+                    self._merge_splits(good_splits, merge_separator, good_gaps if rejoin_matches else None)
+                )
+                good_splits, good_gaps = [], []
             if not new_separators:
                 final_chunks.append(piece)
             else:
                 final_chunks.extend(self._split_text(piece, new_separators))
         if good_splits:
-            final_chunks.extend(self._merge_splits(good_splits, merge_separator))
+            final_chunks.extend(self._merge_splits(good_splits, merge_separator, good_gaps if rejoin_matches else None))
         return final_chunks
+
+    def _split_with_matches(self, text: str, pattern: str) -> tuple[list[str], list[str]]:
+        """Split on a regex, returning the non-empty pieces and the text between each piece and the next."""
+        pieces: list[str] = []
+        gaps: list[str] = []
+        pending_gap = ""
+        start = 0
+        for match in re.finditer(pattern, text):
+            piece = text[start : match.start()]
+            if piece:
+                if pieces:
+                    gaps.append(pending_gap)
+                pieces.append(piece)
+                pending_gap = ""
+            pending_gap += match.group(0)
+            start = match.end()
+        piece = text[start:]
+        if piece:
+            if pieces:
+                gaps.append(pending_gap)
+            pieces.append(piece)
+        return pieces, gaps
 
     def _split_with_separator(self, text: str, separator: str) -> list[str]:
         if separator == "":
