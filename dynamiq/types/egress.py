@@ -49,7 +49,7 @@ class EgressPolicy(BaseModel):
 
     exempt_url_prefixes: tuple[str, ...] = ()
     timeout_seconds: float = Field(default=120, gt=0)
-    max_response_bytes: int = Field(default=10 * 1024 * 1024, gt=0)
+    max_response_bytes: int = Field(default=1024 * 1024, gt=0)
     max_redirects: int = Field(default=10, ge=0)
 
     @field_validator("exempt_url_prefixes")
