@@ -1074,3 +1074,77 @@ async def test_http_api_call_refusal_names_no_address(use_async):
 
     assert "Request refused" in result.error.message
     assert "10.1.2.3" not in result.error.message
+
+
+def test_bounded_decoder_refuses_a_body_that_ends_inside_the_header_of_a_next_gzip_member():
+    body = gzip.compress(b"hello", mtime=0) + b"\x1f"
+
+    with pytest.raises(egress.EgressLimitError, match="ended before"):
+        _decode("gzip", [body])
+
+
+def test_send_resolves_an_exempt_host_in_the_bounded_pool(resolver, port, full_resolver):
+    policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
+
+    with pytest.raises(egress.EgressLimitError, match="Too many host name lookups"):
+        _send_sync(policy, f"http://internal.test:{port}/exempt/ok")
+
+
+@pytest.mark.asyncio
+async def test_send_async_resolves_an_exempt_host_in_the_bounded_pool(resolver, port, full_resolver):
+    policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
+
+    with pytest.raises(egress.EgressLimitError, match="Too many host name lookups"):
+        await _send_async(policy, f"http://internal.test:{port}/exempt/ok")
+
+
+@pytest.fixture
+def one_slot_resolver(monkeypatch):
+    """A resolver with one place and one thread, the thread taken until the test releases it."""
+    pool = ThreadPoolExecutor(max_workers=1)
+    release = threading.Event()
+    pool.submit(release.wait)
+    monkeypatch.setattr(egress, "_resolver", pool)
+    monkeypatch.setattr(egress, "_resolver_slots", threading.BoundedSemaphore(1))
+    yield release
+    release.set()
+    pool.shutdown()
+
+
+def test_resolve_public_keeps_the_place_of_a_lookup_it_stopped_waiting_for(resolver, one_slot_resolver):
+    with pytest.raises(TimeoutError):
+        egress.resolve_public("public.test", 80, timeout=0.1)
+    with pytest.raises(egress.EgressLimitError, match="Too many host name lookups"):
+        egress.resolve_public("other.test", 80, timeout=0.1)
+
+    one_slot_resolver.set()
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            egress.resolve_public("private.test", 80, timeout=5)
+        except egress.EgressLimitError:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        except egress.EgressRefusedError:
+            break
+
+
+@pytest.mark.asyncio
+async def test_resolve_public_async_keeps_the_place_of_a_cancelled_lookup(resolver, one_slot_resolver):
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(egress.resolve_public_async("public.test", 80), 0.1)
+
+    with pytest.raises(egress.EgressLimitError, match="Too many host name lookups"):
+        await egress.resolve_public_async("other.test", 80)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("use_async", [False, True])
+async def test_http_api_call_refuses_a_malformed_url_without_naming_it(use_async):
+    node = _node("http://10.1.2.3:bad/")
+    config = RunnableConfig(egress=POLICY)
+
+    result = await node.run_async(input_data={}, config=config) if use_async else node.run_sync({}, config=config)
+
+    assert "Request refused" in result.error.message
+    assert "10.1.2.3" not in result.error.message

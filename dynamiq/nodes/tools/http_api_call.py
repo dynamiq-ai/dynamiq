@@ -208,7 +208,9 @@ class HttpApiCall(ConnectionNode):
             return super().to_dict_exclude_params | {"response_type": True}
         return super().to_dict_exclude_params
 
-    def _build_request_kwargs(self, input_data: HttpApiCallInputSchema) -> dict[str, Any]:
+    def _build_request_kwargs(
+        self, input_data: HttpApiCallInputSchema, policy: EgressPolicy | None = None
+    ) -> dict[str, Any]:
         """Build the kwargs dict passed to the underlying request call.
 
         ``files`` is only included when at least one upload is present. When files are
@@ -239,6 +241,8 @@ class HttpApiCall(ConnectionNode):
         try:
             prepared.prepare_url(url, params)
         except requests.exceptions.RequestException as e:
+            if policy is not None:
+                raise self._refused(egress.invalid_url_error()) from e
             logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
             error = ToolExecutionException(
                 f"Request failed with error: {str(e)}. Please analyze the error and take appropriate action.",
@@ -350,8 +354,8 @@ class HttpApiCall(ConnectionNode):
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        request_kwargs = self._build_request_kwargs(input_data)
         policy = config.egress or get_default_egress_policy()
+        request_kwargs = self._build_request_kwargs(input_data, policy)
 
         try:
             if policy is None:
@@ -374,8 +378,8 @@ class HttpApiCall(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        request_kwargs = self._build_request_kwargs(input_data)
         policy = config.egress or get_default_egress_policy()
+        request_kwargs = self._build_request_kwargs(input_data, policy)
         client = await self.get_async_client() if policy is None else None
 
         try:

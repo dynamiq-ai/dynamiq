@@ -155,17 +155,27 @@ def _lookup(host: str, port: int, public_only: bool = True) -> list[str]:
     return _public_addresses(host, addresses)
 
 
+def _charged_lookup(slots: threading.BoundedSemaphore, host: str, port: int, public_only: bool) -> list[str]:
+    try:
+        return _lookup(host, port, public_only)
+    finally:
+        slots.release()
+
+
 def _submit_lookup(host: str, port: int, public_only: bool) -> Future:
+    """Starts a lookup in the pool. Raises EgressLimitError when the pool holds RESOLVER_CAPACITY lookups already.
+
+    The lookup is never cancelled: a cancelled one would leave its queue entry behind without giving its place back, so
+    one a request stopped waiting for still runs, and holds its place until it ends.
+    """
     if not _resolver_slots.acquire(blocking=False):
         raise EgressLimitError("Too many host name lookups are in progress. Try again later.")
     slots = _resolver_slots
     try:
-        future = _resolver.submit(_lookup, host, port, public_only)
+        return _resolver.submit(_charged_lookup, slots, host, port, public_only)
     except BaseException:
         slots.release()
         raise
-    future.add_done_callback(lambda _: slots.release())
-    return future
 
 
 def _literal(host: str) -> str | None:
@@ -192,17 +202,19 @@ def resolve_public(host: str, port: int, timeout: float | None = None, public_on
     try:
         return future.result(timeout=timeout)
     except FutureTimeoutError as e:
-        future.cancel()
         raise TimeoutError(f"Looking up {host} took too long.") from e
 
 
-async def resolve_public_async(host: str, port: int) -> list[str]:
+async def resolve_public_async(host: str, port: int, public_only: bool = True) -> list[str]:
     """`resolve_public()` for the running event loop, without a timeout of its own."""
     host = _check_host(host)
     if (address := _literal(host)) is not None:
-        return _public_addresses(host, [address])
-    # Cancelling the awaited future cancels the lookup too, if it has not started.
-    return await asyncio.wrap_future(_submit_lookup(host, port, public_only=True))
+        return _public_addresses(host, [address]) if public_only else [address]
+    lookup = asyncio.wrap_future(_submit_lookup(host, port, public_only))
+    # Read the result even when nobody awaits it any more, so that its error is not reported as never retrieved.
+    lookup.add_done_callback(lambda done: done.cancelled() or done.exception())
+    # Shielded, so that cancelling the request does not cancel the lookup; see _submit_lookup.
+    return await asyncio.shield(lookup)
 
 
 @cache
@@ -563,7 +575,7 @@ class _BoundedDecoder:
 
     def flush(self) -> None:
         """Raises EgressLimitError when the body ended inside a compressed stream, which leaves its data unverified."""
-        if self._decompressor is not None and self._fed and not self._decompressor.eof:
+        if self._pending or (self._decompressor is not None and self._fed and not self._decompressor.eof):
             raise EgressLimitError("The response body ended before its compressed data did.")
 
 
@@ -598,7 +610,8 @@ def _read_body(call: _Call, response: requests.Response, **kwargs) -> requests.R
     return response
 
 
-def _invalid_url() -> EgressRefusedError:
+def invalid_url_error() -> EgressRefusedError:
+    """The refusal of a URL that is not an http or https URL with a host, which names neither."""
     return EgressRefusedError("Only http and https URLs with a host are allowed.")
 
 
@@ -641,7 +654,7 @@ def send(policy: EgressPolicy, *, timeout: float | None = None, **request_kwargs
     except requests.TooManyRedirects as e:
         raise EgressLimitError(f"The request was redirected more than {policy.max_redirects} times.") from e
     except (requests.exceptions.InvalidSchema, requests.exceptions.MissingSchema, requests.exceptions.InvalidURL) as e:
-        raise _invalid_url() from e
+        raise invalid_url_error() from e
     except Exception as e:
         # Every connect and read waits at most until the deadline, so a failure this close to it is the deadline,
         # whichever error the client raised first.
@@ -654,10 +667,11 @@ def send(policy: EgressPolicy, *, timeout: float | None = None, **request_kwargs
         session.close()
 
 
-class _PublicNetworkBackend(httpcore.AsyncNetworkBackend):
-    """Connects only to a public address the host resolved to."""
+class _GuardedNetworkBackend(httpcore.AsyncNetworkBackend):
+    """Connects to an IPv4 address the host resolved to in the bounded pool, a public one only if public_only."""
 
-    def __init__(self):
+    def __init__(self, public_only: bool):
+        self._public_only = public_only
         self._backend = httpcore.AnyIOBackend()
 
     async def connect_tcp(
@@ -669,7 +683,7 @@ class _PublicNetworkBackend(httpcore.AsyncNetworkBackend):
         socket_options: Any = None,
     ) -> httpcore.AsyncNetworkStream:
         try:
-            addresses = await resolve_public_async(host, port)
+            addresses = await resolve_public_async(host, port, public_only=self._public_only)
         except socket.gaierror as e:
             raise httpcore.ConnectError(str(e)) from e
         error: Exception | None = None
@@ -689,11 +703,13 @@ class _PublicNetworkBackend(httpcore.AsyncNetworkBackend):
         await self._backend.sleep(seconds)
 
 
-class _PublicTransport(httpx.AsyncHTTPTransport):
-    def __init__(self):
+class _GuardedTransport(httpx.AsyncHTTPTransport):
+    def __init__(self, public_only: bool):
         super().__init__(verify=_ssl_context(), trust_env=False)
         # httpx takes no network backend, so the pool it built is replaced by one with the same settings that has it.
-        self._pool = httpcore.AsyncConnectionPool(ssl_context=_ssl_context(), network_backend=_PublicNetworkBackend())
+        self._pool = httpcore.AsyncConnectionPool(
+            ssl_context=_ssl_context(), network_backend=_GuardedNetworkBackend(public_only)
+        )
 
 
 class _PolicyTransport(httpx.AsyncBaseTransport):
@@ -701,8 +717,8 @@ class _PolicyTransport(httpx.AsyncBaseTransport):
 
     def __init__(self, policy: EgressPolicy):
         self._policy = policy
-        self._public = _PublicTransport()
-        self._exempt = httpx.AsyncHTTPTransport(verify=_ssl_context(), trust_env=False)
+        self._public = _GuardedTransport(public_only=True)
+        self._exempt = _GuardedTransport(public_only=False)
         self._first_hop = True
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
@@ -781,4 +797,4 @@ async def send_async(policy: EgressPolicy, *, timeout: float | None = None, **re
         except httpx.TooManyRedirects as e:
             raise EgressLimitError(f"The request was redirected more than {policy.max_redirects} times.") from e
         except (httpx.UnsupportedProtocol, httpx.InvalidURL) as e:
-            raise _invalid_url() from e
+            raise invalid_url_error() from e
