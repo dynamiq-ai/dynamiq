@@ -74,6 +74,10 @@ class ToolBlockedException(ToolExecutionException):
         self.point = point
 
 
+class BridgedApprovalRequired(ToolBlockedException):
+    """A call from code in the sandbox that needs a person's approval: code cannot ask for one, so it is refused."""
+
+
 class InvalidActionException(RecoverableAgentException):
     """
     Exception raised when invalid action is chosen. Raising this exception will allow Agent to reiterate.
