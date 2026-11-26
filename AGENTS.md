@@ -1,11 +1,11 @@
 # Dynamiq
 
 Dynamiq is a Python framework for agentic AI and LLM applications: nodes, workflows, agents and tools, serialized to
-YAML and run by the Dynamiq platform. It supports Python 3.11 and later, uses Pydantic 2, and is managed with uv.
+YAML and run by the Dynamiq platform. It supports Python 3.11 to 3.14, uses Pydantic 2, and is managed with uv.
 
 ## Set up and check
 
-- `make install` installs every extra and the pre-commit hooks.
+- `make install` installs every extra except `cua`, and the pre-commit hooks.
 - `uv run pytest tests --ignore=tests/integration_with_creds -m "not smoke" -n auto --dist worksteal` runs the suite
   as CI does.
 - `make prepare` runs the pre-commit hooks on every file: darker with isort, flake8 at 120 columns, pyupgrade for
@@ -17,8 +17,9 @@ YAML and run by the Dynamiq platform. It supports Python 3.11 and later, uses Py
 `tests/unit` and `tests/integration` run without credentials. Mock LLMs and embedders with the fixtures in
 `tests/conftest.py` (`mock_llm_executor`, `mock_embedding_executor`); every test gets a mocked tracing client.
 `tests/helpers/agent_hooks.py` scripts agent runs across inference modes. `tests/integration_with_creds` calls real
-providers and needs their keys. Smoke tests are slow and paid, and run only through `make test-smoke` or the
-`run-smoke-tests` pull request label.
+providers with keys from `.env` (start from `.env.example`): run it with `make test-integration-with-creds`, or on a
+pull request from this repository with the `run-integration-tests-with-creds` label. Smoke tests are slow and paid,
+and run only through `make test-smoke` or the `run-smoke-tests` pull request label.
 
 ## Rules for changes
 
@@ -34,7 +35,8 @@ providers and needs their keys. Smoke tests are slow and paid, and run only thro
   `dynamiq/utils/lazy_imports.py`, so that a missing package names its extra. Import it only from that integration's
   modules.
 - Give every dependency a range below its next major version, run `uv lock`, and say in the pull request why a new
-  one is needed.
+  one is needed. Lock with uv 0.11.24, as CI does. `uv lock` skips releases younger than seven days (`exclude-newer`
+  in `pyproject.toml`), so a dependency that needs a newer one goes into `exclude-newer-package`.
 
 ### Nodes and data
 
@@ -50,12 +52,21 @@ providers and needs their keys. Smoke tests are slow and paid, and run only thro
 - Log with `dynamiq.utils.logger`, never `print`. Comments say why, not what; docstrings and descriptions carry no
   narration or promotional wording.
 - Fail loudly: raise an exception from `dynamiq/nodes/exceptions.py` rather than return `None` or `""` for a failure,
-  and never default a credential to `""`.
+  and never default a credential to `""`. Contain a failure to the item that caused it, so one unreadable record does
+  not break the others, and never catch so broadly that an exception controlling the run is lost: `except Exception`
+  also catches `RunPausedException`.
+- A node that moves to another API or SDK path keeps every parameter and default the old path honored, or rejects
+  what it cannot honor; it never drops one silently.
 
 ### Serialization and compatibility
 
 - The UI, catalyst and the runtime load workflows stored as YAML. A new node or field must survive loading, dumping
-  and reloading with `init_components=True`.
+  and reloading with `init_components=True`: `Workflow.from_yaml_file(..., init_components=True)`, then
+  `to_yaml_file()`.
+- Stored workflows and the platform's UI name every node by its import path, such as `dynamiq.nodes.llms.OpenAI`.
+  Moving a class or dropping an export breaks saved workflows, so keep the old path importable.
+- The platform's services pin a released version, so a change reaches them after a release and a pin bump. Before a
+  release that changes nodes, serialization or execution, maintainers run the services' tests against it.
 - New fields are optional with a default. Renaming or removing a field needs the old name to keep working, and a
   breaking change is called out in the pull request.
 - `to_dict()` leaves out runtime objects such as clients and stores through `to_dict_exclude_params`, never puts
@@ -90,8 +101,11 @@ providers and needs their keys. Smoke tests are slow and paid, and run only thro
 ### Security
 
 - `eval`, `exec` and `compile` run only in `dynamiq/nodes/tools/python.py`, under RestrictedPython.
-- No credentials in code: connections read them from their fields or from environment variables.
+- No credentials in code: connections read them from their fields or from environment variables. Never log a URL,
+  header or body that can carry one.
 - A type string from a request names code to import (`import_type`): resolve only types the caller may use.
+- Render templates only through `dynamiq.utils.jinja.compile_template()`, whose sandbox keeps a template to the
+  values it is given; never build a `jinja2.Template` directly.
 
 ## Finding bugs
 
@@ -113,5 +127,12 @@ public APIs, and skip tests that restate the implementation or only check that a
 ## Commits and pull requests
 
 Commit messages and pull request titles follow Conventional Commits (`feat:`, `fix:`, `perf:`, `refactor:`, `docs:`,
-`test:`, `chore:`), which a pre-commit hook and a CI check enforce. Mark a breaking change with `!` and a
-`BREAKING CHANGE:` footer.
+`test:`, `build:`, `ci:`, `chore:`), which a pre-commit hook and a CI check enforce. Pull requests are squash-merged,
+so the title becomes the commit on `main` and the line in the release notes. Mark a breaking change with `!` in the
+title and describe the migration in the pull request: a `BREAKING CHANGE:` footer does not survive the squash.
+
+Name the branch `<type>/<short-description>`, e.g. `fix/qdrant-filter-search`, and fill in
+`.github/pull_request_template.md`.
+
+A release is a pull request titled `build: dynamiq vX.Y.Z` that bumps the version in `pyproject.toml` and `uv.lock`.
+Once it merges, publishing a GitHub release builds the package and publishes it to PyPI.

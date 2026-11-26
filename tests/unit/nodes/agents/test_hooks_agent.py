@@ -3,6 +3,7 @@
 import json
 import re
 import threading
+from contextlib import ExitStack
 from typing import ClassVar
 
 import pytest
@@ -525,6 +526,99 @@ def test_a_tool_name_that_matches_nothing_is_reported_with_a_warning(monkeypatch
         [final_step("ok")],
     )
     assert any("delete-custmer" in w and "never match" in w for w in warnings)
+
+
+def hook_warnings(monkeypatch) -> list[str]:
+    from dynamiq.nodes.agents import base
+
+    warnings: list[str] = []
+    monkeypatch.setattr(base.logger, "warning", lambda message, *a, **k: warnings.append(str(message)))
+    return warnings
+
+
+def test_an_inherited_hook_on_a_sub_agents_tool_is_not_reported_as_matching_nothing(monkeypatch):
+    warnings = hook_warnings(monkeypatch)
+    parent, child = parent_with_child([ToolPolicyHook(tools=["search"], deny=True, inherit=True)])
+    child.tools = [SearchTool()]
+    steps = [tool_step("Researcher", input="q"), final_step("ok")]
+    with scripted(child, InferenceMode.STRUCTURED_OUTPUT, [tool_step("search", query="c"), final_step("done")]):
+        run_scripted(parent, InferenceMode.STRUCTURED_OUTPUT, steps)
+    assert tool_inputs("search") == []
+    assert not [w for w in warnings if "never match" in w]
+
+
+def test_a_hook_that_is_not_inherited_is_still_reported_for_a_sub_agents_tool(monkeypatch):
+    warnings = hook_warnings(monkeypatch)
+    parent, child = parent_with_child([ToolPolicyHook(tools=["search"], deny=True)])
+    child.tools = [SearchTool()]
+    with scripted(child, InferenceMode.STRUCTURED_OUTPUT, [final_step("done")]):
+        run_scripted(parent, InferenceMode.STRUCTURED_OUTPUT, [final_step("ok")])
+    assert [w for w in warnings if "search" in w and "never match" in w]
+
+
+@modes
+def test_a_policy_that_names_a_tools_id_survives_its_rename(mode, monkeypatch):
+    warnings = hook_warnings(monkeypatch)
+    agent = build_agent(
+        [ToolPolicyHook(tools=["email-tool"], deny=True, on_violation=BlockAs.FAIL, message="no mail")],
+        tools=[SearchTool(), EmailTool(id="email-tool", name="send-mail")],
+    )
+    result, _ = run_scripted(agent, mode, [tool_step("send-mail", to="a@b.c"), final_step("ok")])
+    assert result.status == RunnableStatus.FAILURE and "no mail" in str(result.error.message)
+    assert tool_inputs("send-mail") == []
+    assert not [w for w in warnings if "never match" in w]
+
+
+@modes
+def test_a_hook_that_names_a_tools_id_applies_in_every_map_item(mode):
+    agent = build_agent(
+        [CallLimitHook(tools=["search-tool"], max_per_run=1)], tools=[SearchTool(id="search-tool", name="lookup")]
+    )
+    steps = [tool_step("lookup", query="a"), tool_step("lookup", query="b"), final_step("ok")]
+    with scripted_stateless(mode, steps, agents=[agent]):
+        result = Map(node=agent, max_workers=3).run(input_data={"input": [{"input": f"item {i}"} for i in range(3)]})
+    assert result.status == RunnableStatus.SUCCESS
+    assert len(tool_inputs("lookup")) == 3
+
+
+def test_an_inherited_policy_that_names_a_tools_id_applies_in_a_sub_agent_built_per_call():
+    with ExitStack() as scripts:
+
+        def blueprint():
+            child = build_agent([], tools=[EmailTool(id="email-tool", name="send-mail")], name="Researcher", id="child")
+            steps = [tool_step("send-mail", to="a@b.c"), final_step("done")]
+            scripts.enter_context(scripted(child, InferenceMode.STRUCTURED_OUTPUT, steps))
+            return child
+
+        parent = build_agent(
+            [ToolPolicyHook(tools=["email-tool"], deny=True, inherit=True)],
+            tools=[SubAgentTool(agent_factory=blueprint, name="Researcher", description="researches")],
+            delegation_allowed=True,
+        )
+        steps = [tool_step("Researcher", input="q"), final_step("ok")]
+        result, _ = run_scripted(parent, InferenceMode.STRUCTURED_OUTPUT, steps)
+    assert result.status == RunnableStatus.SUCCESS and tool_inputs("send-mail") == []
+
+
+def test_a_call_limit_that_names_a_tools_id_gets_a_declined_call_back(human):
+    human("no", "")
+    hooks = [
+        CallLimitHook(tools=["search-tool"], max_per_run=1),
+        ToolPolicyHook(tools=["search-tool"], approval=True),
+    ]
+    agent = build_agent(hooks, tools=[SearchTool(id="search-tool", name="lookup")])
+    steps = [tool_step("lookup", query="a"), tool_step("lookup", query="b"), final_step("ok")]
+    run_scripted(agent, InferenceMode.STRUCTURED_OUTPUT, steps)
+    assert [args["query"] for args in tool_inputs("lookup")] == ["b"]
+
+
+def test_a_pattern_does_not_reach_a_tool_through_its_id():
+    agent = build_agent(
+        [ToolPolicyHook(tools=["send-*"], deny=True, on_violation=BlockAs.FAIL)],
+        tools=[SearchTool(id="send-search", name="lookup"), EmailTool()],
+    )
+    result, _ = run_scripted(agent, InferenceMode.STRUCTURED_OUTPUT, [tool_step("lookup", query="a"), final_step("ok")])
+    assert result.status == RunnableStatus.SUCCESS and len(tool_inputs("lookup")) == 1
 
 
 def test_hooks_are_dumped_with_all_their_fields():
@@ -1278,6 +1372,65 @@ def test_pii_values_are_not_shared_across_runs_without_a_trusted_scope_or_across
         hook._mask(second, "bob@b.com", "input")
         # Memory can hold the first run's placeholder; the second run leaves it as it is.
         assert hook._restore(second, f"Contacts on file: {alice}") == f"Contacts on file: {alice}"
+
+
+def session_turn(**trusted):
+    from dynamiq.nodes.agents.hooks.core import HookContext
+
+    return HookContext(hook_key="agent:pii:1", user_id="1", session_id="default", trusted=trusted)
+
+
+def reads_the_others_value(first, second) -> bool:
+    hook = PIIHook(restore_in_output=True)
+    alice = hook._mask(first, "alice@a.com", "input")
+    hook._mask(second, "bob@b.com", "input")
+    return hook._restore(second, f"Contacts on file: {alice}") == "Contacts on file: alice@a.com"
+
+
+def test_pii_placeholders_keep_their_meaning_when_what_the_server_says_of_the_caller_changes_between_turns(
+    session_placeholders,
+):
+    hook = PIIHook(restore_in_output=True)
+    tenant = {"org_id": "acme", "app_id": "support"}
+    turn1 = session_turn(dynamiq=tenant, user_id="u-7", role="viewer", request_id="r-1")
+    turn2 = session_turn(dynamiq=tenant, user_id="u-7", role="admin", request_id="r-2")
+    alice = hook._mask(turn1, "alice@a.com", "input")
+    bob = hook._mask(turn2, "bob@b.com", "input")
+    assert alice.endswith("_1>") and bob == alice[:-3] + "_2>"
+    assert hook._restore(turn2, f"Contacts on file: {alice}") == "Contacts on file: alice@a.com"
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (
+            dict(dynamiq={"org_id": "acme", "app_id": "support"}, role="admin"),
+            dict(dynamiq={"org_id": "globex", "app_id": "support"}, role="admin"),
+        ),
+        (
+            dict(dynamiq={"org_id": "acme", "app_id": "support"}, role="admin"),
+            dict(dynamiq={"org_id": "acme", "app_id": "billing"}, role="admin"),
+        ),
+        (
+            dict(dynamiq={"org_id": "acme"}, user_id="u-7"),
+            dict(dynamiq={"org_id": "acme"}, user_id="u-8"),
+        ),
+        (dict(dynamiq={"org_id": "acme"}), dict(org_id="acme")),
+        (dict(dynamiq={}, tenant="acme"), dict(dynamiq={}, tenant="globex")),
+        (dict(org="acme", role="viewer"), dict(org="acme", role="admin")),
+    ],
+    ids=[
+        "two organizations",
+        "two apps of one organization",
+        "two users the server tells apart",
+        "a scope and a context that only reads like it",
+        "an empty scope, which names nothing",
+        "no scope: the whole context, as before",
+    ],
+)
+def test_pii_values_are_never_shared_across_what_the_server_keeps_apart(session_placeholders, first, second):
+    # Both sides share the agent and the client-chosen user and session ids.
+    assert not reads_the_others_value(session_turn(**first), session_turn(**second))
 
 
 def test_a_pending_approval_in_one_run_does_not_block_another_run(monkeypatch):

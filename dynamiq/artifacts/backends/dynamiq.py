@@ -60,6 +60,11 @@ class Dynamiq(ArtifactBackend):
         return self
 
     @property
+    def is_url_for_reader(self) -> bool:
+        # The url is the artifact's page in the platform's app, which an app's end user has no account to open.
+        return self.artifact_store_id is None
+
+    @property
     def to_dict_exclude_params(self) -> dict[str, bool]:
         """Exclude connection details from the plain dump; ``to_dict`` re-adds them safely."""
         return {"connection": True}

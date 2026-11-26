@@ -60,6 +60,8 @@ class HookPoint(str, Enum):
 
 
 TOOL_POINTS = (HookPoint.BEFORE_TOOL, HookPoint.AFTER_TOOL)
+# Where a server puts what tells its tenants apart in ``RunnableConfig.trusted_context``.
+TRUSTED_SCOPE_KEY = "dynamiq"
 REVERSED_POINTS = (HookPoint.AFTER_MODEL, HookPoint.AFTER_TOOL, HookPoint.ON_OUTPUT)
 
 
@@ -266,7 +268,8 @@ class Hook(BaseModel):
             per agent; unnamed hooks of one type are told apart by their order). Defaults to the hook's short type
             name (``pii``).
         tools: Tool points only: the tools the hook applies to (``*`` or empty = all). An entry is a tool name, an MCP
-            server name (all its tools) or a ``*`` pattern of either, e.g. ``github`` or ``delete_*``.
+            server name (all its tools) or a ``*`` pattern of either, e.g. ``github`` or ``delete_*``. It may also be
+            a tool's ``id``, written as it is: a hook that names the id keeps applying when the tool is renamed.
         inherit: Also apply in the sub-agents this agent calls (and theirs), sharing the run state, so that for
             example a PII mapping stays consistent across agents.
         on_error: What to do if the hook itself raises or times out.
@@ -351,6 +354,13 @@ class Hook(BaseModel):
         names = [sanitize_tool_name(tool_name), *([sanitize_tool_name(group)] if group else [])]
         patterns = [sanitize_tool_name_pattern(pattern) for pattern in self.tools]
         return any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns for name in names)
+
+    def lists_tool_id(self, tool_id: str | None) -> bool:
+        """Whether ``tools`` names the tool by its ``id``, matched whole and as written, never by a pattern."""
+        return tool_id is not None and tool_id in self.tools
+
+    def applies_to(self, call: ToolCall) -> bool:
+        return self.matches_tool(call.name, call.group) or self.lists_tool_id(call.tool_id)
 
     def hides_tool(self, tool_name: str, group: str | None = None) -> bool:
         """Whether the model should not be offered the tool at all (it could only be refused)."""
@@ -540,7 +550,7 @@ class HookRunner:
         for index, hook in indexed:
             if point not in hook.points():
                 continue
-            if point in TOOL_POINTS and call is not None and not hook.matches_tool(call.name, call.group):
+            if point in TOOL_POINTS and call is not None and not hook.applies_to(call):
                 continue
             hook_ctx = ctx.for_call(hook_key=self.keys[index])
             try:
@@ -592,7 +602,7 @@ class HookRunner:
         """Tell the hooks that let ``call`` through (all matching ones by default) that it did not run."""
         hooks = passed if passed is not None else list(enumerate(self.hooks))
         for index, hook in hooks:
-            if hook.matches_tool(call.name, call.group):
+            if hook.applies_to(call):
                 hook.refund(ctx.for_call(hook_key=self.keys[index]), call)
 
     @staticmethod

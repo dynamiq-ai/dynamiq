@@ -302,8 +302,27 @@ class PostgreSQL(MemoryBackend):
 
         if filters:
             for key, value in filters.items():
-                where_clauses.append(SQL("{metadata_col}->>%s = %s").format(metadata_col=Identifier(self.metadata_col)))
-                params.extend([key, str(value)])  # Compare as text
+                if isinstance(value, list):
+                    # A list means "any of these", matching InMemory, SQLite and DynamoDB.
+                    # metadata->>key is text, so each item is stringified like the equality path.
+                    # An empty IN () is invalid SQL and matches nothing.
+                    if not value:
+                        where_clauses.append(SQL("FALSE"))
+                        continue
+                    placeholders = SQL(", ").join(SQL("%s") for _ in value)
+                    where_clauses.append(
+                        SQL("{metadata_col}->>%s IN ({placeholders})").format(
+                            metadata_col=Identifier(self.metadata_col),
+                            placeholders=placeholders,
+                        )
+                    )
+                    params.append(key)
+                    params.extend(str(item) for item in value)
+                else:
+                    where_clauses.append(
+                        SQL("{metadata_col}->>%s = %s").format(metadata_col=Identifier(self.metadata_col))
+                    )
+                    params.extend([key, str(value)])  # Compare as text
 
         if query:
             where_clauses.append(SQL("{content_col} ILIKE %s").format(content_col=Identifier(self.content_col)))

@@ -16,7 +16,7 @@
     <img src="https://img.shields.io/github/release/dynamiq-ai/dynamiq" alt="Release Notes">
   </a>
   <a href="#" target="_blank">
-    <img src="https://img.shields.io/badge/Python-3.11%2B-brightgreen.svg" alt="Python 3.11+">
+    <img src="https://img.shields.io/badge/Python-3.11%E2%80%933.14-brightgreen.svg" alt="Python 3.11–3.14">
   </a>
   <a href="https://github.com/dynamiq-ai/dynamiq/blob/main/LICENSE" target="_blank">
     <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License">
@@ -37,7 +37,7 @@ Ready to dive in? Here's how you can get started with Dynamiq:
 
 ### Installation
 
-First, let's get Dynamiq installed. You'll need Python 3.11 or later, so make sure that's set up on your machine. Then run:
+First, let's get Dynamiq installed. You'll need Python 3.11 to 3.14, so make sure that's set up on your machine. Then run:
 
 ```sh
 pip install dynamiq
@@ -50,7 +50,7 @@ This installs agents, workflows, every LLM provider, the built-in tools and memo
 | `vectorstores` | Chroma, Elasticsearch, Milvus, OpenSearch, pgvector, Pinecone, Qdrant, Turbopuffer and Weaviate writers, retrievers and memory backends |
 | `files` | HTML and Markdown transformers, Markdown to PDF, PDF page images, the HTML header splitter and the Unstructured converter, plus pdfplumber in the Python tools |
 | `data` | matplotlib and seaborn for charts in the Python tools |
-| `sql` | MySQL, Snowflake and Databricks in the SQL executor |
+| `sql` | MySQL, Snowflake, Databricks and BigQuery in the SQL executor |
 | `browser` | The Stagehand browser tool |
 | `sandboxes` | E2B and Daytona sandboxes and the Python Monty tool |
 | `gcp` | Vertex AI RAG search and the Document AI converter |
@@ -64,12 +64,14 @@ pip install "dynamiq[vectorstores,files]"
 
 dynamiq imports an integration, and litellm, the first time it is used, so `import dynamiq` takes a fraction of a second. A multi-threaded server that would rather pay that cost before it serves can set `DYNAMIQ_EAGER_IMPORTS=1`, which imports every installed integration with its package, as earlier versions did. litellm also downloads its model price list when it is imported; `LITELLM_LOCAL_MODEL_COST_MAP=True` makes it use the copy it ships with.
 
-Or build the Python package from the source code:
+Or work on the source code, which needs [uv](https://docs.astral.sh/uv/):
 ```sh
 git clone https://github.com/dynamiq-ai/dynamiq.git
 cd dynamiq
 uv sync --extra all
 ```
+
+[CONTRIBUTING.md](https://github.com/dynamiq-ai/dynamiq/blob/main/CONTRIBUTING.md) shows how to run the checks and tests that CI runs.
 
 ## Documentation
 For more examples and detailed guides, please refer to our [documentation](https://dynamiq-ai.github.io/dynamiq).
@@ -619,12 +621,24 @@ if __name__ == "__main__":
     orchestrator.run(input_data={"input": f"Write and post email, provide feedback about status of email: {email_details}"})
 ```
 
+## More examples
+
+[`examples/`](https://github.com/dynamiq-ai/dynamiq/tree/main/examples) has runnable code for features the examples above don't show:
+
+- [Agent hooks](https://github.com/dynamiq-ai/dynamiq/tree/main/examples/components/agents/hooks): guardrails around an agent's LLM and tool calls, such as PII masking, prompt injection checks and tool policies
+- [Checkpoints](https://github.com/dynamiq-ai/dynamiq/tree/main/examples/components/core/checkpoints): pause a workflow, for example for a person's input, and resume it later
+- [MCP servers as tools](https://github.com/dynamiq-ai/dynamiq/tree/main/examples/components/tools/mcp_server_as_tool)
+- Code sandboxes for agents: [E2B](https://github.com/dynamiq-ai/dynamiq/blob/main/examples/components/agents/agents/agent_e2b_sandbox.py), [Daytona](https://github.com/dynamiq-ai/dynamiq/blob/main/examples/components/agents/agents/agent_daytona_sandbox.py) and [AWS Bedrock AgentCore](https://github.com/dynamiq-ai/dynamiq/blob/main/examples/components/agents/agents/agent_bedrock_agentcore_sandbox.py)
+- With the Dynamiq platform: [artifacts](https://github.com/dynamiq-ai/dynamiq/blob/main/examples/components/agents/agents/agent_artifacts.py), versioned documents an agent publishes, and a [memory store](https://github.com/dynamiq-ai/dynamiq/blob/main/examples/components/agents/agents/agent_memory_store.py), notes an agent keeps across conversations
+
+The package also installs the `dynamiq` command, which works with the Dynamiq platform from a terminal: it deploys workflows as apps and invokes them, and manages knowledge bases, datasets, evaluations and more. Run `dynamiq --help`.
+
 ## Contributing
 
-We love contributions! Whether it's bug reports, feature requests, or pull requests, head over to our [CONTRIBUTING.md](CONTRIBUTING.md) to see how you can help.
+We love contributions! Whether it's bug reports, feature requests, or pull requests, head over to our [CONTRIBUTING.md](https://github.com/dynamiq-ai/dynamiq/blob/main/CONTRIBUTING.md) to see how you can help.
 
 ## License
 
-Dynamiq is open-source and available under the [Apache 2 License](LICENSE).
+Dynamiq is open-source and available under the [Apache 2 License](https://github.com/dynamiq-ai/dynamiq/blob/main/LICENSE).
 
 Happy coding! 🚀

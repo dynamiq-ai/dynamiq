@@ -19,7 +19,6 @@ from typing import Any, Callable, ClassVar, Union
 from urllib.parse import unquote_to_bytes
 from uuid import uuid4
 
-from jinja2.sandbox import SandboxedEnvironment
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -127,6 +126,7 @@ from dynamiq.storages.memory.base import MemoryStore, MemoryStoreConfig
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.feedback import ApprovalConfig, FeedbackMethod
 from dynamiq.types.streaming import InputStreamingTimeoutError, StreamingMode
+from dynamiq.utils.jinja import compile_template
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import TRACING_REDACTED_KEYS, TRACING_REDACTED_PLACEHOLDER, deep_merge
 
@@ -2090,18 +2090,24 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             return json.loads(json.dumps(snapshot.state, default=str)) or None
 
     def _warn_about_unknown_hook_tools(self) -> None:
-        """A hook naming a tool the agent does not have never matches; warn once (a deployment may drop tools)."""
+        """Warn once about a hook that lists a tool this agent does not have: it never matches.
+
+        A hook that sub-agents inherit is not checked, since the tool may be one of theirs.
+        """
         if self._hook_tools_checked or not self.hooks:
             return
         self._hook_tools_checked = True
-        tools = [
-            (self.sanitize_tool_name(tool.name), getattr(getattr(tool, "_owner_server", None), "name", None))
-            for tool in self._all_runtime_tools
-        ]
+        tools = self._all_runtime_tools
         for hook in self.hooks:
+            if hook.inherit:
+                continue
             for entry in hook.tools:
                 probe = hook.model_copy(update={"tools": [entry]})
-                if entry != "*" and not any(probe.matches_tool(name, group) for name, group in tools):
+                if entry != "*" and not any(
+                    probe.matches_tool(tool.name, getattr(getattr(tool, "_owner_server", None), "name", None))
+                    or probe.lists_tool_id(tool.authored_id)
+                    for tool in tools
+                ):
                     logger.warning(
                         f"Agent {self.name} - {self.id}: hook '{hook.display_name}' lists tool '{entry}', "
                         f"which this agent does not have; it will never match."
@@ -2209,7 +2215,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         shown = {key: value for key, value in tool_input.items() if key not in hidden_keys}
         try:
             prompt = (
-                SandboxedEnvironment().from_string(ask.prompt).render(input_data=shown, tool=tool_name)
+                compile_template(ask.prompt).render(input_data=shown, tool=tool_name)
                 if ask.prompt
                 else f"Approve calling '{tool_name}' with these arguments?"
             )
@@ -2331,7 +2337,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             return ToolCall(
                 name=tool.name,
                 input=tool_input,
-                tool_id=tool.id,
+                tool_id=tool.authored_id,
                 is_sub_agent=is_child_agent,
                 group=getattr(getattr(tool, "_owner_server", None), "name", None),
             )
