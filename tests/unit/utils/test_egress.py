@@ -890,3 +890,72 @@ def test_bounded_decoder_decodes_a_body_split_anywhere(content_encoding, body, d
     for split in range(len(body) + 1):
         assert _decode(content_encoding, [body[:split], body[split:]]) == decoded, split
     assert _decode(content_encoding, [bytes([byte]) for byte in body]) == decoded
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Host": "admin.internal"},
+        {"Host": "internal.test:1"},
+        {"Host": "internal.test@admin.internal"},
+        {"X-Forwarded-Host": "admin.internal"},
+        {"X-Original-URL": "/admin"},
+        {"Forwarded": "host=admin.internal"},
+    ],
+)
+def test_send_refuses_an_exempt_request_that_routes_elsewhere(resolver, port, headers):
+    policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
+
+    with pytest.raises(egress.EgressRefusedError):
+        _send_sync(policy, f"http://internal.test:{port}/exempt/ok", headers=headers)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Host": "admin.internal"},
+        {"Host": "internal.test:1"},
+        {"X-Forwarded-Host": "admin.internal"},
+        {"X-Rewrite-URL": "/admin"},
+    ],
+)
+async def test_send_async_refuses_an_exempt_request_that_routes_elsewhere(resolver, port, headers):
+    policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
+
+    with pytest.raises(egress.EgressRefusedError):
+        await _send_async(policy, f"http://internal.test:{port}/exempt/ok", headers=headers)
+
+
+def test_send_accepts_an_exempt_request_that_names_its_own_host(resolver, port):
+    policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
+
+    response = _send_sync(policy, f"http://internal.test:{port}/exempt/ok", headers={"Host": f"INTERNAL.test:{port}"})
+
+    assert response.text == "hello"
+
+
+@pytest.mark.asyncio
+async def test_send_async_accepts_an_exempt_request_that_names_its_own_host(resolver, port):
+    policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
+
+    response = await _send_async(
+        policy, f"http://internal.test:{port}/exempt/ok", headers={"Host": f"internal.test:{port}"}
+    )
+
+    assert response.text == "hello"
+
+
+def test_send_refuses_a_routing_header_carried_into_an_exempt_redirect(resolver, loopback_allowed, port):
+    policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
+
+    with pytest.raises(egress.EgressRefusedError):
+        _send_sync(
+            policy,
+            f"http://public.test:{port}/redirect?to=http://internal.test:{port}/exempt/ok",
+            headers={"X-Forwarded-Host": "admin.internal"},
+        )
+
+
+def test_send_lets_a_public_request_name_any_host(resolver, loopback_allowed, port):
+    assert _send_sync(POLICY, f"http://public.test:{port}/ok", headers={"Host": "virtual.example"}).text == "hello"

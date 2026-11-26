@@ -15,11 +15,13 @@ import sys
 import threading
 import time
 import zlib
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextvars import ContextVar
 from functools import cache, partial
 from typing import Any
+from urllib.parse import SplitResult, urlsplit
 
 import httpcore
 import httpx
@@ -31,7 +33,7 @@ from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 from urllib3.exceptions import ConnectTimeoutError, NameResolutionError, NewConnectionError
 from urllib3.util import connection as urllib3_connection
 
-from dynamiq.types.egress import EgressPolicy
+from dynamiq.types.egress import DEFAULT_PORTS, EgressPolicy
 
 # The private ranges and the rest of the IANA special-purpose IPv4 registry. ipaddress's is_global is not used: it
 # counts multicast and other blocks that no public API is served from as global.
@@ -365,6 +367,39 @@ class _PoolAdapter(HTTPAdapter):
         raise EgressRefusedError("Requests may not go through a proxy.")
 
 
+# Headers by which a front end routes a request to another host or path than its URL names.
+ROUTING_HEADERS = frozenset({"forwarded", "x-forwarded-host", "x-host", "x-original-url", "x-rewrite-url"})
+
+
+def _same_authority(url: SplitResult, host_header: str) -> bool:
+    try:
+        header = urlsplit(f"//{host_header.strip()}")
+        header_port = header.port
+    except ValueError:
+        return False
+    if not header.hostname or header.username is not None or header.password is not None or header.path:
+        return False
+    if header_port == 0:
+        return False
+    default_port = DEFAULT_PORTS.get(url.scheme.lower())
+    header_origin = (header.hostname.rstrip("."), header_port or default_port)
+    return header_origin == ((url.hostname or "").rstrip("."), url.port or default_port)
+
+
+def _check_exempt_headers(url: str, headers: Mapping[str, str]) -> None:
+    """Raises EgressRefusedError when a header would route a request to an exempt URL outside that URL.
+
+    The exemption is decided on the URL, but a front end that routes by the Host header or a rewrite header serves what
+    the header names instead.
+    """
+    parts = urlsplit(url)
+    for name, value in headers.items():
+        if name.lower() in ROUTING_HEADERS:
+            raise EgressRefusedError(f"A request to an exempt URL may not set the {name} header.")
+        if name.lower() == "host" and not _same_authority(parts, value):
+            raise EgressRefusedError("A request to an exempt URL may not name another host in its Host header.")
+
+
 class _PolicyAdapter(BaseAdapter):
     """Sends each request, every redirect included, through the address check unless the policy exempts its URL."""
 
@@ -375,7 +410,10 @@ class _PolicyAdapter(BaseAdapter):
         self._exempt = _PoolAdapter({"http": _TrackedHTTPConnectionPool, "https": _TrackedHTTPSConnectionPool})
 
     def send(self, request: requests.PreparedRequest, timeout: float | None = None, **kwargs) -> requests.Response:
-        adapter = self._exempt if self._policy.is_exempt(request.url) else self._public
+        adapter = self._public
+        if self._policy.is_exempt(request.url):
+            _check_exempt_headers(request.url, request.headers)
+            adapter = self._exempt
         return adapter.send(request, timeout=_require_call().timeout(timeout), **kwargs)
 
     def close(self) -> None:
@@ -620,7 +658,10 @@ class _PolicyTransport(httpx.AsyncBaseTransport):
         self._exempt = httpx.AsyncHTTPTransport(verify=_ssl_context(), trust_env=False)
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        transport = self._exempt if self._policy.is_exempt(str(request.url)) else self._public
+        transport = self._public
+        if self._policy.is_exempt(str(request.url)):
+            _check_exempt_headers(str(request.url), request.headers)
+            transport = self._exempt
         return await transport.handle_async_request(request)
 
     async def aclose(self) -> None:
