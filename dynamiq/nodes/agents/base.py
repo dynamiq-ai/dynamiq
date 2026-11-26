@@ -61,6 +61,7 @@ from dynamiq.nodes.agents.hooks import (
     resolve_hook,
 )
 from dynamiq.nodes.agents.hooks.builtin import map_strings
+from dynamiq.nodes.agents.hooks.remote import RemoteLifecycleHook, remote_tool_dispatch
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.agents.shared_session import (
@@ -724,6 +725,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             tool.is_optimized_for_agents = True
 
         for hook in self.hooks:
+            initialize = getattr(hook, "init_components", None)
+            if callable(initialize):
+                initialize(connection_manager)
             detector = getattr(hook, "detector", None)
             if isinstance(detector, Node) and detector.is_postponed_component_init:
                 detector.init_components(connection_manager)
@@ -1639,6 +1643,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 raise CanceledException()
             if llm_result.status != RunnableStatus.SUCCESS:
                 error_message = f"LLM '{self.llm.name}' failed: {llm_result.error.message}"
+                if issubclass(llm_result.error.type, HookStopException):
+                    raise HookStopException(error_message)
                 raise ValueError(error_message)
 
             hooked_output = self._run_hooks(HookPoint.AFTER_MODEL, deepcopy(llm_result.output), config, **kwargs).value
@@ -2014,9 +2020,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             pairs.append((f"{self.id}:{hook.display_name}:{rank}", hook))
         return pairs
 
-    def _hook_runner(self) -> HookRunner:
+    def _hook_runner(self, point: HookPoint | None = None) -> HookRunner:
         ctx = current_hook_ctx.get()
         pairs = ctx.hooks if ctx is not None else self._own_hook_pairs()
+        # Remote authorization runs at SDK dispatch, after transforms and approvals,
+        # and repeats only when another provider/tool attempt will actually run.
+        if point in (HookPoint.BEFORE_MODEL, HookPoint.BEFORE_TOOL):
+            pairs = [(key, hook) for key, hook in pairs if not isinstance(hook, RemoteLifecycleHook)]
         return HookRunner([hook for _, hook in pairs], [key for key, _ in pairs])
 
     def _new_hook_context(self, input_data: AgentInputSchema, metadata: dict, config) -> HookContext:
@@ -2067,9 +2077,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     def _hook_to_dict(hook: Hook, dumped: dict, **kwargs) -> dict:
         """A hook's detector is a node: serialized as the agent's other nodes are (``for_tracing`` included)."""
         detector = getattr(hook, "detector", None)
-        if not isinstance(detector, Node):
-            return dumped
-        return {**dumped, "detector": detector.to_dict(**kwargs)}
+        if isinstance(detector, Node):
+            dumped = {**dumped, "detector": detector.to_dict(**kwargs)}
+        connection = getattr(hook, "connection", None)
+        if connection is not None:
+            dumped = {**dumped, "connection": connection.to_dict(**kwargs)}
+        return dumped
 
     def _snapshot_hook_state(self) -> dict | None:
         """JSON-safe copy of the run's hook state for checkpoints."""
@@ -2143,7 +2156,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     ) -> HookRun:
         """Run one hook point, record its events on this agent's run (trace) and stream a block if there is one.
         ``runner`` narrows the hooks to a subset of the run's."""
-        runner = runner or self._hook_runner()
+        runner = runner or self._hook_runner(point)
         if not runner.has(point):
             return HookRun(value=value)
         ctx = current_hook_ctx.get() or HookContext(agent_name=self.name, agent_id=self.id)
@@ -2546,12 +2559,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     with run_ctx.lock:
                         run_ctx.pending_calls[reservation_id] = (run_ctx, hook_call(merged_input))
                 try:
-                    tool_result = tool_to_run.run(
-                        input_data=merged_input,
-                        config=tool_config,
-                        run_depends=deepcopy(self._run_depends),
-                        **child_kwargs,
-                    )
+                    with remote_tool_dispatch(tool_to_run, hook_call(merged_input)):
+                        tool_result = tool_to_run.run(
+                            input_data=merged_input,
+                            config=tool_config,
+                            run_depends=deepcopy(self._run_depends),
+                            **child_kwargs,
+                        )
                 finally:
                     if run_ctx is not None:
                         with run_ctx.lock:

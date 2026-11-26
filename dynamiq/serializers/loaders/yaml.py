@@ -594,6 +594,25 @@ class WorkflowYAMLLoader:
             return hooks_data
         resolved = []
         for hook_data in hooks_data:
+            if (
+                isinstance(hook_data, dict)
+                and hook_data.get("type")
+                in {
+                    "remote_lifecycle",
+                    "dynamiq.nodes.agents.hooks.RemoteLifecycleHook",
+                    "dynamiq.nodes.agents.hooks.remote.RemoteLifecycleHook",
+                }
+                and hook_data.get("connection") is not None
+                and not isinstance(hook_data["connection"], BaseConnection)
+            ):
+                hook_id = hook_data.get("name") or hook_data.get("type")
+                connection = cls.get_node_connection(
+                    node_id=f"hook {hook_id}",
+                    node_data=hook_data,
+                    connections=kwargs["connections"],
+                    registry=kwargs["registry"],
+                )
+                hook_data = {**hook_data, "connection": connection}
             detector = hook_data.get("detector") if isinstance(hook_data, dict) else None
             if isinstance(detector, dict) and cls.is_node_type(detector.get("type")):
                 node = cls.get_updated_node_init_data_with_initialized_nodes({"detector": detector}, **kwargs)
