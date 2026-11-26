@@ -166,6 +166,33 @@ def test_a_tool_policy_rules_a_tool_the_model_knows_by_another_name(mode):
     assert fake.calls == [(GITHUB, "delete_repo", {"q": "prod-db"})]
 
 
+@pytest.mark.parametrize(
+    "listed, excluded", [("write_note.", "write_note"), ("write note", "write-note"), ("write note", "write note")]
+)
+def test_an_excluded_name_leaves_out_the_tool_listed_or_offered_under_it(listed, excluded):
+    fake = FakeServers({GITHUB: [listed, "search"]})
+    with fake.serving():
+        agent = Agent(
+            name="a", llm=make_llm(), tools=[mcp_server("github", GITHUB, exclude_tools=[excluded])], inference_mode=FC
+        )
+
+    assert function_names(agent) == ["search"]
+
+
+@pytest.mark.parametrize(
+    "listed, included, offered", [("read_note.", "read_note", "read_note"), ("read note", "read note", "read-note")]
+)
+def test_an_included_name_keeps_the_tool_listed_or_offered_under_it(listed, included, offered):
+    fake = FakeServers({GITHUB: [listed, "write_note"]})
+    with fake.serving():
+        agent = Agent(
+            name="a", llm=make_llm(), tools=[mcp_server("github", GITHUB, include_tools=[included])], inference_mode=FC
+        )
+
+    assert function_names(agent) == [offered]
+    assert [tool.name for tool in agent.tools] == [listed]
+
+
 def test_an_agent_sharing_tool_objects_with_another_keeps_its_own_names():
     fake = FakeServers({GITHUB: ["search"], LINEAR: ["search"]})
     with fake.serving():

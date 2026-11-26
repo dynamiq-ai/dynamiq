@@ -11,6 +11,7 @@ from dynamiq.connections import MCPSse, MCPStdio, MCPStreamableHTTP
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
+from dynamiq.nodes.agents.hooks.core import sanitize_tool_name
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
@@ -780,14 +781,17 @@ Usage Strategy:
         return self._select_tools(await self._list_tools(headers))
 
     def _select_tools(self, tools: dict[str, MCPTool], select_all: bool = False) -> list[MCPTool]:
-        """Applies ``include_tools`` and ``exclude_tools`` to discovered tools."""
+        """Applies ``include_tools`` and ``exclude_tools`` by a tool's name as listed or as agents offer it."""
         if select_all or not self.include_tools and not self.exclude_tools:
             return list(tools.values())
 
-        if self.include_tools:
-            return [v for k, v in tools.items() if k in self.include_tools and k not in self.exclude_tools]
+        def listed(names: list[str], name: str) -> bool:
+            return name in names or sanitize_tool_name(name) in names
 
-        return [v for k, v in tools.items() if k not in self.exclude_tools]
+        if self.include_tools:
+            return [v for k, v in tools.items() if listed(self.include_tools, k) and not listed(self.exclude_tools, k)]
+
+        return [v for k, v in tools.items() if not listed(self.exclude_tools, k)]
 
     def execute(self, **kwargs):
         """

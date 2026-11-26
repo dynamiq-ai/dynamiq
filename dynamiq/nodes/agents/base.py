@@ -61,6 +61,7 @@ from dynamiq.nodes.agents.hooks import (
     resolve_hook,
 )
 from dynamiq.nodes.agents.hooks.builtin import map_strings
+from dynamiq.nodes.agents.hooks.core import sanitize_tool_name
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.agents.shared_session import (
@@ -757,9 +758,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
     def sanitize_tool_name(self, s: str):
         """Sanitize tool name to follow [^a-zA-Z0-9_-]."""
-        s = s.replace(" ", "-")
-        sanitized = re.sub(r"[^a-zA-Z0-9_-]", "", s)
-        return sanitized
+        return sanitize_tool_name(s)
 
     def _init_prompt_blocks(self):
         """Initializes default prompt blocks and variables."""
