@@ -267,3 +267,41 @@ def test_qdrant_filter_only_search_with_limit_returns_the_most_recent(mocker):
     result = backend.search(query=None, filters={"user_id": "u"}, limit=LIMIT)
 
     assert [m.content for m in result] == ["msg-7", "msg-8", "msg-9"]
+
+
+def test_pinecone_filter_only_search_returns_matches_oldest_first(mocker):
+    """The zero-vector query scores every match alike; the result must still be ordered by timestamp."""
+    from dynamiq.memory.backends.pinecone import Pinecone
+
+    store = mocker.Mock()
+    store.dimension = 4
+    # Returned in score-arbitrary order, as the zero-vector query gives no ordering.
+    store._embedding_retrieval.return_value = [
+        Document(id=str(i), content=f"msg-{i}", metadata={"role": "user", "timestamp": float(i)})
+        for i in [5, 1, 9, 0, 7, 3, 8, 2, 6, 4]
+    ]
+    backend = Pinecone.model_construct(
+        vector_store=store, embedder=mocker.Mock(), connection=mocker.Mock(), namespace="ns"
+    )
+
+    result = backend.search(query=None, filters={"user_id": "u"}, limit=TOTAL)
+
+    assert [m.content for m in result] == [f"msg-{i}" for i in range(TOTAL)]
+
+
+def test_pinecone_filter_only_search_orders_a_match_without_timestamp_first(mocker):
+    from dynamiq.memory.backends.pinecone import Pinecone
+
+    store = mocker.Mock()
+    store.dimension = 4
+    store._embedding_retrieval.return_value = [
+        Document(id="b", content="msg-b", metadata={"role": "user", "timestamp": 2.0}),
+        Document(id="a", content="msg-a", metadata={"role": "user", "timestamp": None}),
+    ]
+    backend = Pinecone.model_construct(
+        vector_store=store, embedder=mocker.Mock(), connection=mocker.Mock(), namespace="ns"
+    )
+
+    result = backend.search(query=None, filters={"user_id": "u"}, limit=TOTAL)
+
+    assert [m.content for m in result] == ["msg-a", "msg-b"]
