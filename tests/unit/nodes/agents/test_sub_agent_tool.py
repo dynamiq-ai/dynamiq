@@ -20,6 +20,7 @@ from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableResult, RunnableStatus
 from dynamiq.sandboxes.e2b import E2BSandbox
 from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
+from tests.helpers.agent_hooks import TOOL_CALLS, SearchTool, build_agent, final_step, scripted, tool_step
 
 
 def _sanitize_tool_name(s: str) -> str:
@@ -1077,6 +1078,23 @@ class TestToolParamsResolution:
         passed_tp = kwargs.get("tool_params")
         assert passed_tp is not None, "Nested ToolParams should be propagated"
         assert passed_tp.global_params.get("nested_global") == "yes"
+
+    @pytest.mark.parametrize("key", ["by_name", "by_id"])
+    def test_nested_tool_params_reach_the_childs_tools(self, key):
+        TOOL_CALLS.clear()
+        child = build_agent(id="child", name="researcher", tools=[SearchTool()])
+        parent = build_agent(id="parent", name="lead", tools=[child])
+        nested = {"by_name": {"search": {"mode": "deep"}}}
+        tool_params = {key: {"researcher" if key == "by_name" else "child": {"user_id": "person-7", **nested}}}
+
+        with (
+            scripted(parent, InferenceMode.FUNCTION_CALLING, [tool_step("researcher", input="x"), final_step("p")]),
+            scripted(child, InferenceMode.FUNCTION_CALLING, [tool_step("search", query="q"), final_step("c")]),
+        ):
+            result = parent.run(input_data={"input": "go", "tool_params": tool_params})
+
+        assert result.status == RunnableStatus.SUCCESS
+        assert TOOL_CALLS == [("search", {"query": "q", "mode": "deep"})]
 
     def test_hidden_child_fields_stripped_from_llm_input(self, test_llm):
         """Fields hidden on the child agent's schema (e.g. tool_params) cannot be
