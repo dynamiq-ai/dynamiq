@@ -40,13 +40,13 @@ def format_url(method: str, url: str, voice_id: str) -> str:
         str: The modified URL.
     """
     if url.rstrip("/").endswith("v1"):
-        url = urljoin(url, method)
+        url = urljoin(url.rstrip("/") + "/", method)
     if "{voice_id}" in url:
         url = url.format(voice_id=voice_id)
     elif url.rstrip("/").endswith("text-to-speech") or url.rstrip("/").endswith(
         "speech-to-speech"
     ):
-        url = urljoin(url, voice_id)
+        url = urljoin(url.rstrip("/") + "/", voice_id)
     return url
 
 
