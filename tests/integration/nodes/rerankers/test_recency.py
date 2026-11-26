@@ -39,3 +39,12 @@ def test_recency_ranker_accepts_empty_documents():
 
     assert result.status == RunnableStatus.SUCCESS
     assert result.output["documents"] == []
+
+
+def test_recency_ranker_keeps_score_when_metadata_is_omitted():
+    document = Document(content="Document without metadata", score=0.8)
+
+    result = TimeWeightedDocumentRanker().run(input_data={"documents": [document]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["documents"][0].score == pytest.approx(0.8)
