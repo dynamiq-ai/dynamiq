@@ -1,7 +1,7 @@
 # Tool policy, per-user rules, a call budget and a sub-agent, all with the same hooks list.
 #
-#   admin-only-delete   tool_policy on delete-customer: allowed only when the run's metadata has role=admin
-#                       (the run context carries user_id / session_id / metadata, so the rule is per user).
+#   admin-only-delete   tool_policy on delete-customer: allowed only when the trusted context has
+#                       metadata.role=admin, which the example's runner (_common.py) fills as a server would.
 #   researcher-access   a sub-agent call is an ordinary tool call for the parent's hooks: the same policy applies,
 #                       and a blocked delegation never starts the child.
 #   refund-approval     tool_policy with `approval: true`: a human approves each refund before it runs (the call is

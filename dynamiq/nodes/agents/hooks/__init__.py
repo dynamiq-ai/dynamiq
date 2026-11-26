@@ -12,6 +12,7 @@ from dynamiq.nodes.agents.hooks.builtin import (
 from dynamiq.nodes.agents.hooks.core import (
     ALLOW,
     HOOK_REGISTRY,
+    TRUSTED_SCOPE_KEY,
     Allow,
     Ask,
     Block,
@@ -37,6 +38,7 @@ __all__ = [
     "hook_json_schemas",
     "ALLOW",
     "HOOK_REGISTRY",
+    "TRUSTED_SCOPE_KEY",
     "Allow",
     "Ask",
     "Block",
