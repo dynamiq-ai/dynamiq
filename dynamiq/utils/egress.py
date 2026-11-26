@@ -16,7 +16,7 @@ import threading
 import time
 import zlib
 from collections.abc import Mapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextvars import ContextVar
 from functools import cache, partial
@@ -77,18 +77,25 @@ DEADLINE_SLACK_SECONDS = 0.1
 # for one only until its deadline.
 RESOLVER_THREADS = 16
 
+# The most lookups waiting for a thread or running at once. A lookup holds its place until it ends, even after the
+# request that started it gave up, and one beyond the limit fails at once instead of queueing behind lookups that may
+# never end.
+RESOLVER_CAPACITY = 4 * RESOLVER_THREADS
+
 
 def _new_resolver() -> ThreadPoolExecutor:
     return ThreadPoolExecutor(max_workers=RESOLVER_THREADS, thread_name_prefix="dynamiq-egress-resolver")
 
 
 _resolver = _new_resolver()
+_resolver_slots = threading.BoundedSemaphore(RESOLVER_CAPACITY)
 
 
 def _reset_resolver() -> None:
     # A forked child has none of the pool's threads, but the pool would still count one as idle and never start another.
-    global _resolver
+    global _resolver, _resolver_slots
     _resolver = _new_resolver()
+    _resolver_slots = threading.BoundedSemaphore(RESOLVER_CAPACITY)
 
 
 if hasattr(os, "register_at_fork"):  # not on Windows, which does not fork
@@ -125,7 +132,7 @@ def _check_host(host: str) -> str:
     """The host to resolve, without brackets. Raises EgressRefusedError for an IPv6 address."""
     host = host.strip("[]")
     if ":" in host:
-        raise EgressRefusedError(f"{host} is an IPv6 address. Only public IPv4 addresses are allowed.")
+        raise EgressRefusedError("The host is an IPv6 address; only public IPv4 addresses are allowed.")
     return host
 
 
@@ -134,13 +141,31 @@ def _public_addresses(host: str, addresses: list[str]) -> list[str]:
         raise socket.gaierror(socket.EAI_NONAME, f"{host} has no IPv4 address")
     # One answer outside the public internet refuses the host, so it cannot pass by sometimes resolving to it.
     if not all(is_public_address(address) for address in addresses):
-        raise EgressRefusedError(f"{host} resolves to an address outside the public internet, which is not allowed.")
+        raise EgressRefusedError("The host resolves to an address outside the public internet, which is not allowed.")
     return addresses
 
 
-def _lookup(host: str, port: int) -> list[str]:
+def _lookup(host: str, port: int, public_only: bool = True) -> list[str]:
     infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
-    return _public_addresses(host, list(dict.fromkeys(info[4][0] for info in infos)))
+    addresses = list(dict.fromkeys(info[4][0] for info in infos))
+    if not public_only:
+        if not addresses:
+            raise socket.gaierror(socket.EAI_NONAME, f"{host} has no IPv4 address")
+        return addresses
+    return _public_addresses(host, addresses)
+
+
+def _submit_lookup(host: str, port: int, public_only: bool) -> Future:
+    if not _resolver_slots.acquire(blocking=False):
+        raise EgressLimitError("Too many host name lookups are in progress. Try again later.")
+    slots = _resolver_slots
+    try:
+        future = _resolver.submit(_lookup, host, port, public_only)
+    except BaseException:
+        slots.release()
+        raise
+    future.add_done_callback(lambda _: slots.release())
+    return future
 
 
 def _literal(host: str) -> str | None:
@@ -151,18 +176,19 @@ def _literal(host: str) -> str | None:
         return None
 
 
-def resolve_public(host: str, port: int, timeout: float | None = None) -> list[str]:
-    """The IPv4 addresses host resolves to, when all of them are public.
+def resolve_public(host: str, port: int, timeout: float | None = None, public_only: bool = True) -> list[str]:
+    """The IPv4 addresses host resolves to, when all of them are public, or any IPv4 addresses without public_only.
 
     Raises:
         EgressRefusedError: host is an IPv6 address, or one of its addresses is not public.
+        EgressLimitError: too many lookups are in progress in the process.
         TimeoutError: the lookup did not finish within timeout seconds.
         socket.gaierror: host has no IPv4 address.
     """
     host = _check_host(host)
     if (address := _literal(host)) is not None:
-        return _public_addresses(host, [address])
-    future = _resolver.submit(_lookup, host, port)
+        return _public_addresses(host, [address]) if public_only else [address]
+    future = _submit_lookup(host, port, public_only)
     try:
         return future.result(timeout=timeout)
     except FutureTimeoutError as e:
@@ -176,7 +202,7 @@ async def resolve_public_async(host: str, port: int) -> list[str]:
     if (address := _literal(host)) is not None:
         return _public_addresses(host, [address])
     # Cancelling the awaited future cancels the lookup too, if it has not started.
-    return await asyncio.wrap_future(_resolver.submit(_lookup, host, port))
+    return await asyncio.wrap_future(_submit_lookup(host, port, public_only=True))
 
 
 @cache
@@ -277,24 +303,17 @@ def _require_call() -> _Call:
     return call
 
 
-class _TrackedConnectionMixin:
-    """Connects as urllib3 does, within the request's deadline."""
+class _GuardedConnectionMixin:
+    """Connects within the request's deadline to an address the host resolved to, a public one only if public_only."""
 
-    def _new_conn(self) -> socket.socket:
-        call = _require_call()
-        self.timeout = call.timeout(self.timeout)
-        sock = super()._new_conn()
-        call.watch(sock)
-        return sock
-
-
-class _PublicConnectionMixin:
-    """Connects only to a public address the host resolved to, within the request's deadline."""
+    public_only = True
 
     def _new_conn(self) -> socket.socket:
         call = _require_call()
         try:
-            addresses = resolve_public(self._dns_host, self.port, timeout=call.timeout(None))
+            addresses = resolve_public(
+                self._dns_host, self.port, timeout=call.timeout(None), public_only=self.public_only
+            )
         except TimeoutError as e:
             raise _timed_out(call.policy.timeout_seconds) from e
         except socket.gaierror as e:
@@ -317,6 +336,14 @@ class _PublicConnectionMixin:
                 sys.audit("http.client.connect", self, self.host, self.port)
                 return sock
         raise error
+
+
+class _PublicConnectionMixin(_GuardedConnectionMixin):
+    public_only = True
+
+
+class _TrackedConnectionMixin(_GuardedConnectionMixin):
+    public_only = False
 
 
 class _PublicHTTPConnection(_PublicConnectionMixin, HTTPConnection):
@@ -400,6 +427,18 @@ def _check_exempt_headers(url: str, headers: Mapping[str, str]) -> None:
             raise EgressRefusedError("A request to an exempt URL may not name another host in its Host header.")
 
 
+def _exempt_hop(policy: EgressPolicy, first_hop: bool, url: str, headers: Mapping[str, str]) -> bool:
+    """Reports whether a hop of a request skips the address check.
+
+    Only the URL the node was given may be exempt: a redirect, even to another exempt URL, is checked as any other.
+    Raises EgressRefusedError for an exempt URL whose headers would route it elsewhere.
+    """
+    if not first_hop or not policy.is_exempt(url):
+        return False
+    _check_exempt_headers(url, headers)
+    return True
+
+
 class _PolicyAdapter(BaseAdapter):
     """Sends each request, every redirect included, through the address check unless the policy exempts its URL."""
 
@@ -408,12 +447,13 @@ class _PolicyAdapter(BaseAdapter):
         self._policy = policy
         self._public = _PoolAdapter({"http": _PublicHTTPConnectionPool, "https": _PublicHTTPSConnectionPool})
         self._exempt = _PoolAdapter({"http": _TrackedHTTPConnectionPool, "https": _TrackedHTTPSConnectionPool})
+        self._first_hop = True
 
     def send(self, request: requests.PreparedRequest, timeout: float | None = None, **kwargs) -> requests.Response:
         adapter = self._public
-        if self._policy.is_exempt(request.url):
-            _check_exempt_headers(request.url, request.headers)
+        if _exempt_hop(self._policy, self._first_hop, request.url, request.headers):
             adapter = self._exempt
+        self._first_hop = False
         return adapter.send(request, timeout=_require_call().timeout(timeout), **kwargs)
 
     def close(self) -> None:
@@ -447,6 +487,7 @@ class _BoundedDecoder:
         self._coding = codings[0] if codings and not self._unsupported else None
         self._decompressor = self._new_decompressor()
         self._started = False
+        self._fed = False
         self._first_bytes = b""
         self._done = False
         self._pending = b""
@@ -469,6 +510,7 @@ class _BoundedDecoder:
         # format has produced output, the bytes so far are kept to decode again as raw deflate if it turns out wrong.
         if self._coding == "deflate" and not self._started:
             self._first_bytes += data
+        self._fed = True
         try:
             decoded = self._decompressor.decompress(data, self._call.body_bytes_left + 1)
         except zlib.error as e:
@@ -510,6 +552,7 @@ class _BoundedDecoder:
                     self._pending = data
                 elif data.startswith(GZIP_MAGIC):
                     self._decompressor = self._new_decompressor()
+                    self._fed = False
                     continue
                 else:
                     self._done = True
@@ -518,13 +561,10 @@ class _BoundedDecoder:
             data = self._decompressor.unused_data if self._decompressor.eof else b""
         return bytes(decoded)
 
-    def flush(self) -> bytes:
-        if self._decompressor is None or self._decompressor.eof:
-            return b""
-        try:
-            return self._take(self._decompressor.flush())
-        except zlib.error as e:
-            raise EgressLimitError(f"The response body could not be decoded: {e}") from e
+    def flush(self) -> None:
+        """Raises EgressLimitError when the body ended inside a compressed stream, which leaves its data unverified."""
+        if self._decompressor is not None and self._fed and not self._decompressor.eof:
+            raise EgressLimitError("The response body ended before its compressed data did.")
 
 
 def _raw_chunks(response: requests.Response):
@@ -549,13 +589,17 @@ def _read_body(call: _Call, response: requests.Response, **kwargs) -> requests.R
         decoder = _BoundedDecoder(response.headers.get("content-encoding"), call)
         for raw in _raw_chunks(response):
             body += decoder.decode(raw)
-        body += decoder.flush()
+        decoder.flush()
     except BaseException:
         response.close()
         raise
     response._content = b"" if response.is_redirect else bytes(body)
     response._content_consumed = True
     return response
+
+
+def _invalid_url() -> EgressRefusedError:
+    return EgressRefusedError("Only http and https URLs with a host are allowed.")
 
 
 def send(policy: EgressPolicy, *, timeout: float | None = None, **request_kwargs: Any) -> requests.Response:
@@ -567,9 +611,10 @@ def send(policy: EgressPolicy, *, timeout: float | None = None, **request_kwargs
         **request_kwargs: The arguments of `requests.request()` other than timeout, stream and hooks.
 
     Raises:
-        EgressRefusedError: The request, or a redirect, would connect to an address the policy does not allow.
-        EgressLimitError: The request redirected too often, or the response was too large, used an encoding other than
-            gzip or deflate, or took longer than the policy allows.
+        EgressRefusedError: The request, or a redirect, would connect to an address the policy does not allow, or its
+            URL is not an http or https URL with a host.
+        EgressLimitError: The request redirected too often, too many lookups were in progress, or the response was too
+            large, incomplete, used an encoding other than gzip or deflate, or took longer than the policy allows.
         requests.RequestException: The request failed, as requests reports it.
     """
     call = _Call(policy)
@@ -595,6 +640,8 @@ def send(policy: EgressPolicy, *, timeout: float | None = None, **request_kwargs
         raise
     except requests.TooManyRedirects as e:
         raise EgressLimitError(f"The request was redirected more than {policy.max_redirects} times.") from e
+    except (requests.exceptions.InvalidSchema, requests.exceptions.MissingSchema, requests.exceptions.InvalidURL) as e:
+        raise _invalid_url() from e
     except Exception as e:
         # Every connect and read waits at most until the deadline, so a failure this close to it is the deadline,
         # whichever error the client raised first.
@@ -656,12 +703,13 @@ class _PolicyTransport(httpx.AsyncBaseTransport):
         self._policy = policy
         self._public = _PublicTransport()
         self._exempt = httpx.AsyncHTTPTransport(verify=_ssl_context(), trust_env=False)
+        self._first_hop = True
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         transport = self._public
-        if self._policy.is_exempt(str(request.url)):
-            _check_exempt_headers(str(request.url), request.headers)
+        if _exempt_hop(self._policy, self._first_hop, str(request.url), request.headers):
             transport = self._exempt
+        self._first_hop = False
         return await transport.handle_async_request(request)
 
     async def aclose(self) -> None:
@@ -679,7 +727,7 @@ async def _read_body_async(call: _Call, response: httpx.Response) -> None:
         decoder = _BoundedDecoder(response.headers.get("content-encoding"), call)
         async for raw in response.aiter_raw(READ_CHUNK_BYTES):
             body += decoder.decode(raw)
-        body += decoder.flush()
+        decoder.flush()
     except BaseException:
         await response.aclose()
         raise
@@ -695,9 +743,10 @@ async def send_async(policy: EgressPolicy, *, timeout: float | None = None, **re
         **request_kwargs: The arguments of `httpx.AsyncClient.request()` other than timeout.
 
     Raises:
-        EgressRefusedError: The request, or a redirect, would connect to an address the policy does not allow.
-        EgressLimitError: The request redirected too often, or the response was too large, used an encoding other than
-            gzip or deflate, or took longer than the policy allows.
+        EgressRefusedError: The request, or a redirect, would connect to an address the policy does not allow, or its
+            URL is not an http or https URL with a host.
+        EgressLimitError: The request redirected too often, too many lookups were in progress, or the response was too
+            large, incomplete, used an encoding other than gzip or deflate, or took longer than the policy allows.
         httpx.HTTPError: The request failed, as httpx reports it.
     """
     call = _Call(policy)
@@ -710,12 +759,17 @@ async def send_async(policy: EgressPolicy, *, timeout: float | None = None, **re
         headers={"Accept-Encoding": ACCEPT_ENCODING},
         event_hooks={"response": [partial(_read_body_async, call)]},
     ) as client:
-        deadline = asyncio.timeout(policy.timeout_seconds)
+        # Counted from when the request began, like the sync client's deadline, not from here.
+        deadline = asyncio.timeout(max(call.remaining(), 0))
         try:
             async with deadline:
-                return await client.request(
-                    timeout=min(timeout or policy.timeout_seconds, policy.timeout_seconds), **request_kwargs
+                response = await client.request(
+                    timeout=call.timeout(timeout or policy.timeout_seconds), **request_kwargs
                 )
+            call.check()
+            return response
+        except EgressError:
+            raise
         except TimeoutError as e:
             if deadline.expired():
                 raise _timed_out(policy.timeout_seconds) from e
@@ -726,3 +780,5 @@ async def send_async(policy: EgressPolicy, *, timeout: float | None = None, **re
             raise
         except httpx.TooManyRedirects as e:
             raise EgressLimitError(f"The request was redirected more than {policy.max_redirects} times.") from e
+        except (httpx.UnsupportedProtocol, httpx.InvalidURL) as e:
+            raise _invalid_url() from e

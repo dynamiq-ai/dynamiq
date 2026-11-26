@@ -9,6 +9,7 @@ import time
 import zlib
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from urllib.parse import parse_qs, urlsplit
 
@@ -784,15 +785,17 @@ async def test_http_api_call_sends_a_refused_request_once(monkeypatch, use_async
     assert send.call_args.args[0] is (default_policy if from_checkpoint else run_policy)
 
 
-def test_send_refuses_other_schemes():
-    with pytest.raises(requests.exceptions.InvalidSchema):
-        egress.send(POLICY, method="GET", url="ftp://example.test/resource")
+@pytest.mark.parametrize("url", ["ftp://example.test/resource", "example.test/resource", "http://"])
+def test_send_refuses_other_schemes(url):
+    with pytest.raises(egress.EgressRefusedError, match="Only http and https"):
+        egress.send(POLICY, method="GET", url=url)
 
 
 @pytest.mark.asyncio
-async def test_send_async_refuses_other_schemes():
-    with pytest.raises(httpx.UnsupportedProtocol):
-        await egress.send_async(POLICY, method="GET", url="ftp://example.test/resource")
+@pytest.mark.parametrize("url", ["ftp://example.test/resource", "example.test/resource"])
+async def test_send_async_refuses_other_schemes(url):
+    with pytest.raises(egress.EgressRefusedError, match="Only http and https"):
+        await egress.send_async(POLICY, method="GET", url=url)
 
 
 def test_send_reports_a_body_that_stops_at_the_deadline_as_the_deadline(resolver, loopback_allowed, port):
@@ -871,7 +874,9 @@ def _raw_deflate(data: bytes) -> bytes:
 
 def _decode(content_encoding: str, chunks: list[bytes]) -> bytes:
     decoder = egress._BoundedDecoder(content_encoding, egress._Call(EgressPolicy()))
-    return b"".join(decoder.decode(chunk) for chunk in chunks) + decoder.flush()
+    body = b"".join(decoder.decode(chunk) for chunk in chunks)
+    decoder.flush()
+    return body
 
 
 @pytest.mark.parametrize(
@@ -946,16 +951,113 @@ async def test_send_async_accepts_an_exempt_request_that_names_its_own_host(reso
     assert response.text == "hello"
 
 
-def test_send_refuses_a_routing_header_carried_into_an_exempt_redirect(resolver, loopback_allowed, port):
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/redirect?to=http://internal.test:{port}/exempt/ok",
+        "/exempt/redirect?to=http://internal.test:{port}/exempt/ok",
+    ],
+    ids=["from a public URL", "from an exempt URL"],
+)
+def test_send_checks_a_redirect_to_an_exempt_url_as_any_other(resolver, port, path):
     policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
+    host = "internal.test" if path.startswith("/exempt") else "public.test"
 
     with pytest.raises(egress.EgressRefusedError):
-        _send_sync(
-            policy,
-            f"http://public.test:{port}/redirect?to=http://internal.test:{port}/exempt/ok",
-            headers={"X-Forwarded-Host": "admin.internal"},
-        )
+        _send_sync(policy, f"http://{host}:{port}{path.format(port=port)}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/redirect?to=http://internal.test:{port}/exempt/ok",
+        "/exempt/redirect?to=http://internal.test:{port}/exempt/ok",
+    ],
+    ids=["from a public URL", "from an exempt URL"],
+)
+async def test_send_async_checks_a_redirect_to_an_exempt_url_as_any_other(resolver, port, path):
+    policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
+    host = "internal.test" if path.startswith("/exempt") else "public.test"
+
+    with pytest.raises(egress.EgressRefusedError):
+        await _send_async(policy, f"http://{host}:{port}{path.format(port=port)}")
 
 
 def test_send_lets_a_public_request_name_any_host(resolver, loopback_allowed, port):
     assert _send_sync(POLICY, f"http://public.test:{port}/ok", headers={"Host": "virtual.example"}).text == "hello"
+
+
+@pytest.mark.parametrize(
+    "content_encoding, body",
+    [("gzip", gzip.compress(b"hello world", mtime=0)[:-2]), ("deflate", zlib.compress(b"hello world")[:-2])],
+    ids=["gzip", "zlib"],
+)
+def test_bounded_decoder_refuses_a_body_that_ends_inside_its_compressed_data(content_encoding, body):
+    for chunks in ([body], [bytes([byte]) for byte in body]):
+        with pytest.raises(egress.EgressLimitError, match="ended before"):
+            _decode(content_encoding, chunks)
+
+
+def test_send_deadline_covers_the_lookup_of_an_exempt_host(resolver, port):
+    policy = POLICY.model_copy(
+        update={"timeout_seconds": 0.5, "exempt_url_prefixes": (f"http://slow.test:{port}/exempt/",)}
+    )
+    start = time.monotonic()
+
+    with pytest.raises(egress.EgressLimitError, match="took longer"):
+        _send_sync(policy, f"http://slow.test:{port}/exempt/ok")
+    assert _within(start, 1.5)
+
+
+@pytest.mark.asyncio
+async def test_send_async_checks_the_deadline_after_the_client_returns(monkeypatch):
+    clock = SimpleNamespace(value=0.0)
+    monkeypatch.setattr(egress, "time", SimpleNamespace(monotonic=lambda: clock.value))
+
+    async def request_that_ends_after_the_deadline(self, **kwargs):
+        clock.value += 1
+        return httpx.Response(200, content=b"hello")
+
+    monkeypatch.setattr(httpx.AsyncClient, "request", request_that_ends_after_the_deadline)
+
+    with pytest.raises(egress.EgressLimitError, match="took longer"):
+        await egress.send_async(EgressPolicy(timeout_seconds=0.1), method="GET", url="http://public.test/")
+
+
+@pytest.fixture
+def full_resolver(monkeypatch):
+    """A resolver that admits no more lookups."""
+    slots = threading.BoundedSemaphore(1)
+    slots.acquire()
+    monkeypatch.setattr(egress, "_resolver_slots", slots)
+
+
+def test_send_refuses_a_lookup_beyond_the_resolver_capacity(loopback_allowed, port, full_resolver):
+    with pytest.raises(egress.EgressLimitError, match="Too many host name lookups"):
+        _send_sync(POLICY, f"http://localhost:{port}/ok")
+    assert _send_sync(POLICY, f"http://127.0.0.1:{port}/ok").text == "hello"
+
+
+@pytest.mark.asyncio
+async def test_send_async_refuses_a_lookup_beyond_the_resolver_capacity(loopback_allowed, port, full_resolver):
+    with pytest.raises(egress.EgressLimitError, match="Too many host name lookups"):
+        await _send_async(POLICY, f"http://localhost:{port}/ok")
+
+
+def test_resolver_capacity_is_released_when_a_lookup_ends(resolver):
+    for _ in range(egress.RESOLVER_CAPACITY + 1):
+        with pytest.raises(egress.EgressRefusedError):
+            egress.resolve_public("private.test", 80, timeout=5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("use_async", [False, True])
+async def test_http_api_call_refusal_names_no_address(use_async):
+    node = _node("http://10.1.2.3/")
+    config = RunnableConfig(egress=POLICY)
+
+    result = await node.run_async(input_data={}, config=config) if use_async else node.run_sync({}, config=config)
+
+    assert "Request refused" in result.error.message
+    assert "10.1.2.3" not in result.error.message
