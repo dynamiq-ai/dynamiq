@@ -213,8 +213,12 @@ class SplitterComponentBase(BaseModel):
     def _length(self, text: str) -> int:
         return (self.length_function or len)(text)
 
-    def _merge_splits(self, splits: list[str], separator: str) -> list[str]:
-        """Merge splits respecting chunk_size/chunk_overlap. Ported from LangChain."""
+    def _merge_splits(self, splits: list[str], separator: str, gaps: list[str] | None = None) -> list[str]:
+        """Merge splits respecting chunk_size/chunk_overlap. Ported from LangChain.
+
+        ``gaps[i]``, when given, is the text that stood between ``splits[i]`` and ``splits[i + 1]`` and is used
+        there instead of ``separator``.
+        """
         if not self.merge_short_chunks:
             chunks = []
             for split in splits:
@@ -223,30 +227,40 @@ class SplitterComponentBase(BaseModel):
                     chunks.append(chunk)
             return chunks
 
-        separator_len = self._length(separator)
+        def gap_len(index: int) -> int:
+            # Length of the text joining splits[index - 1] to splits[index].
+            return self._length(gaps[index - 1] if gaps is not None else separator)
+
+        def join(indexes: list[int]) -> str | None:
+            if gaps is None:
+                return self._join_docs([splits[i] for i in indexes], separator)
+            text = splits[indexes[0]] + "".join(gaps[i - 1] + splits[i] for i in indexes[1:])
+            return self._join_docs([text], "")
+
         chunks: list[str] = []
-        current: list[str] = []
+        current: list[int] = []
         total = 0
-        for split in splits:
+        for index, split in enumerate(splits):
             split_len = self._length(split)
-            projected = total + split_len + (separator_len if current else 0)
+            projected = total + split_len + (gap_len(index) if current else 0)
             if projected > self.chunk_size:
                 if total > self.chunk_size:
                     logger.warning(
                         f"Created a chunk of size {total}, which is longer than the chunk_size {self.chunk_size}."
                     )
                 if current:
-                    merged = self._join_docs(current, separator)
+                    merged = join(current)
                     if merged is not None:
                         chunks.append(merged)
                     while total > self.chunk_overlap or (
-                        total + split_len + (separator_len if current else 0) > self.chunk_size and total > 0
+                        total + split_len + (gap_len(index) if current else 0) > self.chunk_size and total > 0
                     ):
-                        total -= self._length(current[0]) + (separator_len if len(current) > 1 else 0)
+                        total -= self._length(splits[current[0]]) + (gap_len(current[1]) if len(current) > 1 else 0)
                         current.pop(0)
-            current.append(split)
-            total += split_len + (separator_len if len(current) > 1 else 0)
-        merged = self._join_docs(current, separator)
-        if merged is not None:
-            chunks.append(merged)
+            current.append(index)
+            total += split_len + (gap_len(index) if len(current) > 1 else 0)
+        if current:
+            merged = join(current)
+            if merged is not None:
+                chunks.append(merged)
         return chunks
