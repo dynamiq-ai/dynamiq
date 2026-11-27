@@ -147,14 +147,18 @@ class Pinecone(MemoryBackend):
             raise PineconeError(f"Error retrieving messages from Pinecone: {e}") from e
 
     def _prepare_filters(self, filters: dict | None = None) -> dict | None:
-        """Convert simple filters to Pinecone filter format."""
+        """Convert simple filters to Pinecone filter format. A list value matches any of its items."""
         if not filters:
             return None
 
-        if all(isinstance(v, (str, int, float, bool)) for v in filters.values()):
+        if "operator" in filters and ("conditions" in filters or "field" in filters):
+            return filters
+
+        if all(isinstance(v, (str, int, float, bool, list)) for v in filters.values()):
             conditions = []
             for key, value in filters.items():
-                conditions.append({"field": key, "operator": "==", "value": value})
+                operator = "in" if isinstance(value, list) else "=="
+                conditions.append({"field": key, "operator": operator, "value": value})
             return {"operator": "AND", "conditions": conditions}
         return filters
 
