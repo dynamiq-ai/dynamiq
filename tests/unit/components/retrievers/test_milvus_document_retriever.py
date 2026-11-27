@@ -79,13 +79,16 @@ class TestMilvusDocumentRetriever:
         mock_vector_store._hybrid_retrieval.return_value = mock_documents
         mock_vector_store.metric_type = "ip"
 
-        retriever = MilvusDocumentRetriever(vector_store=mock_vector_store, top_k=5)
+        mock_filters = {"field": "tenant", "operator": "==", "value": "a"}
+
+        retriever = MilvusDocumentRetriever(vector_store=mock_vector_store, filters=mock_filters, top_k=5)
 
         result = retriever.run(query="Document", query_embedding=[0.1, 0.2, 0.3], exclude_document_embeddings=True)
 
         mock_vector_store._hybrid_retrieval.assert_called_once_with(
             query="Document",
             query_embeddings=[[0.1, 0.2, 0.3]],
+            filters=mock_filters,
             top_k=5,
             content_key=None,
             embedding_key=None,
