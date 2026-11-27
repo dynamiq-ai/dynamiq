@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import gzip
 import ipaddress
+import random
 import socket
 import ssl
 import threading
@@ -81,6 +82,17 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, gzip.compress(b"hello ") + gzip.compress(b"world"), {"Content-Encoding": "gzip"})
         elif path == "/empty-brotli":
             self._send(204, b"", {"Content-Encoding": "br"})
+        elif path == "/gzip-random":
+            body = gzip.compress(random.Random(0).randbytes(int(query["n"])), mtime=0)
+            self._send(200, body, {"Content-Encoding": "gzip"})
+        elif path == "/odd-encoding":
+            self._send(200, b"x", {"Content-Encoding": "br, admin.internal"})
+        elif path == "/truncated":
+            self.send_response(200)
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            self.wfile.write(b"x" * 10)
+            self.close_connection = True
         elif path == "/chunked":
             self.send_response(200)
             self.send_header("Transfer-Encoding", "chunked")
@@ -1317,3 +1329,62 @@ async def test_send_async_asks_only_for_encodings_it_can_bound(resolver, loopbac
     response = await _send_async(POLICY, url, headers={"Accept-Encoding": "gzip, deflate, br"})
 
     assert response.text == egress.ACCEPT_ENCODING
+
+
+@pytest.mark.parametrize("use_async", [False, True], ids=["sync", "async"])
+@pytest.mark.asyncio
+async def test_send_limits_the_compressed_body_to_the_body_budget(resolver, loopback_allowed, port, use_async):
+    # Random bytes grow when compressed: the body fits the budget once decoded, but not on the wire.
+    url = f"http://public.test:{port}/gzip-random?n={SMALL_BODY_POLICY.max_response_bytes - 6}"
+
+    with pytest.raises(egress.EgressLimitError, match="larger than 4096 bytes"):
+        await _send_async(SMALL_BODY_POLICY, url) if use_async else _send_sync(SMALL_BODY_POLICY, url)
+
+
+@pytest.mark.parametrize("use_async", [False, True], ids=["sync", "async"])
+@pytest.mark.asyncio
+async def test_send_refuses_an_unsupported_encoding_without_quoting_it(resolver, loopback_allowed, port, use_async):
+    url = f"http://public.test:{port}/odd-encoding"
+
+    with pytest.raises(egress.EgressLimitError) as error:
+        await _send_async(POLICY, url) if use_async else _send_sync(POLICY, url)
+    assert "admin.internal" not in str(error.value)
+
+
+def test_send_names_no_internal_host_when_an_exempt_body_breaks_off(resolver, port):
+    policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
+
+    with pytest.raises(requests.RequestException) as error:
+        _send_sync(policy, f"http://internal.test:{port}/exempt/truncated")
+    assert str(error.value) == egress.EXEMPT_FAILURE
+
+
+@pytest.mark.asyncio
+async def test_send_async_names_no_internal_host_when_an_exempt_body_breaks_off(resolver, port):
+    policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
+
+    with pytest.raises(httpx.TransportError) as error:
+        await _send_async(policy, f"http://internal.test:{port}/exempt/truncated")
+    assert str(error.value) == egress.EXEMPT_FAILURE
+
+
+def test_send_reports_a_public_body_that_breaks_off_as_the_client_does(resolver, loopback_allowed, port):
+    with pytest.raises(requests.RequestException) as error:
+        _send_sync(POLICY, f"http://public.test:{port}/truncated")
+    assert str(error.value) != egress.EXEMPT_FAILURE
+
+
+@pytest.mark.parametrize(
+    "suffix", ["?admin.internal", "#admin.internal", "?@admin.internal/", "?x=/v1/internal", "?", " admin.internal"]
+)
+@pytest.mark.parametrize("use_async", [False, True], ids=["sync", "async"])
+@pytest.mark.asyncio
+async def test_send_refuses_an_exempt_request_whose_host_header_holds_more_than_host_and_port(
+    resolver, port, suffix, use_async
+):
+    policy = POLICY.model_copy(update={"exempt_url_prefixes": (f"http://internal.test:{port}/exempt/",)})
+    url = f"http://internal.test:{port}/exempt/ok"
+    headers = {"Host": f"internal.test:{port}{suffix}"}
+
+    with pytest.raises(egress.EgressRefusedError):
+        await _send_async(policy, url, headers=headers) if use_async else _send_sync(policy, url, headers=headers)

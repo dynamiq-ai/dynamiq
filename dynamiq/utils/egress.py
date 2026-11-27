@@ -9,6 +9,7 @@ redirect it. TLS still verifies the certificate against the host name.
 import asyncio
 import ipaddress
 import os
+import re
 import socket
 import ssl
 import sys
@@ -68,7 +69,8 @@ SUPPORTED_ENCODINGS = frozenset({"gzip", "x-gzip", "deflate"})
 
 READ_CHUNK_BYTES = 64 * 1024
 
-# What the response headers of a request, its redirects included, may take beyond the body budget.
+# What the response headers of a request, its redirects included, may take. The body has a budget of its own on the
+# wire and once decoded, so headers cannot make room for more body, nor a body for more headers.
 HEADER_ALLOWANCE_BYTES = 64 * 1024
 
 # Each connect and read waits at most until the deadline, so its own timeout and the deadline fire together; a failure
@@ -291,8 +293,11 @@ class _Call:
     def __init__(self, policy: EgressPolicy):
         self.policy = policy
         self.deadline = time.monotonic() + policy.timeout_seconds
-        self.wire_bytes_left = policy.max_response_bytes + HEADER_ALLOWANCE_BYTES
+        self.header_bytes_left = HEADER_ALLOWANCE_BYTES
+        self.wire_bytes_left = policy.max_response_bytes
         self.body_bytes_left = policy.max_response_bytes
+        # Whether the hop being read went to an exempt URL, whose errors must not name the internal host.
+        self.exempt_hop = False
         self.expired = False
         self._sockets: list[socket.socket] = []
         self._lock = threading.Lock()
@@ -301,8 +306,16 @@ class _Call:
     def remaining(self) -> float:
         return self.deadline - time.monotonic()
 
+    def take_header_bytes(self, size: int) -> None:
+        """Counts size bytes of response headers against their allowance. Raises EgressLimitError when it runs out."""
+        if size > self.header_bytes_left:
+            raise EgressLimitError(
+                f"The response headers are larger than {HEADER_ALLOWANCE_BYTES} bytes, the most allowed."
+            )
+        self.header_bytes_left -= size
+
     def take_wire_bytes(self, size: int) -> None:
-        """Counts size bytes received against the budget. Raises EgressLimitError when it runs out."""
+        """Counts size bytes of body received against the budget. Raises EgressLimitError when it runs out."""
         if size > self.wire_bytes_left:
             raise _too_large(self.policy.max_response_bytes)
         self.wire_bytes_left -= size
@@ -488,10 +501,16 @@ EXEMPT_CONNECTION_OPTIONS = frozenset({"keep-alive", "close"})
 # What a failed request to an exempt URL says, instead of the client's text, which names the internal host and path.
 EXEMPT_FAILURE = "The request to an exempt URL failed."
 
+# A Host value: a host name, an IPv4 address or a bracketed IPv6 address, and an optional port, and nothing after them.
+HOST_HEADER = re.compile(r"(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._-]+)(?::[0-9]+)?")
+
 
 def _same_authority(url: SplitResult, host_header: str) -> bool:
+    value = host_header.strip()
+    if not HOST_HEADER.fullmatch(value):
+        return False
     try:
-        header = urlsplit(f"//{host_header.strip()}")
+        header = urlsplit(f"//{value}")
         header_port = header.port
     except ValueError:
         return False
@@ -568,7 +587,9 @@ class _PolicyAdapter(BaseAdapter):
         request.headers["Accept-Encoding"] = ACCEPT_ENCODING
         exempt = _exempt_hop(self._policy, self._first_hop, request.url, request.headers, _body_length(request.body))
         self._first_hop = False
-        timeout = _require_call().timeout(timeout)
+        call = _require_call()
+        call.exempt_hop = exempt
+        timeout = call.timeout(timeout)
         if not exempt:
             return self._public.send(request, timeout=timeout, **kwargs)
         try:
@@ -604,7 +625,6 @@ class _BoundedDecoder:
         ]
         # Refused only when a body arrives: a response without one, such as a HEAD or a 304, cannot exceed a bound.
         self._unsupported = len(codings) > 1 or bool(codings and codings[0] not in SUPPORTED_ENCODINGS)
-        self._content_encoding = content_encoding
         self._call = call
         self._coding = codings[0] if codings and not self._unsupported else None
         self._decompressor = self._new_decompressor()
@@ -655,7 +675,8 @@ class _BoundedDecoder:
         if not data:
             return b""
         if self._unsupported:
-            raise EgressLimitError(f"Responses with the content encoding {self._content_encoding!r} are not supported.")
+            # The server's value is not quoted: it is not checked, and an exempt server is an internal one.
+            raise EgressLimitError("Responses in a content encoding other than gzip or deflate are not supported.")
         self._call.take_wire_bytes(len(data))
         if self._decompressor is None:
             return self._take(data)
@@ -707,11 +728,16 @@ def _read_body(call: _Call, response: requests.Response, **kwargs) -> requests.R
     body = bytearray()
     try:
         # http.client keeps up to 100 header lines of 64 KiB each, and requests keeps every redirect's.
-        call.take_wire_bytes(sum(len(name) + len(value) + 4 for name, value in response.raw.headers.items()))
+        call.take_header_bytes(sum(len(name) + len(value) + 4 for name, value in response.raw.headers.items()))
         decoder = _BoundedDecoder(response.headers.get("content-encoding"), call)
         for raw in _raw_chunks(response):
             body += decoder.decode(raw)
         decoder.flush()
+    except requests.RequestException as e:
+        response.close()
+        if call.exempt_hop:
+            raise type(e)(EXEMPT_FAILURE) from e
+        raise
     except BaseException:
         response.close()
         raise
@@ -825,8 +851,9 @@ class _GuardedTransport(httpx.AsyncHTTPTransport):
 class _PolicyTransport(httpx.AsyncBaseTransport):
     """Sends each request, every redirect included, through the address check unless the policy exempts its URL."""
 
-    def __init__(self, policy: EgressPolicy):
+    def __init__(self, policy: EgressPolicy, call: _Call):
         self._policy = policy
+        self._call = call
         self._public = _GuardedTransport(public_only=True)
         self._exempt = _GuardedTransport(public_only=False)
         self._first_hop = True
@@ -840,6 +867,7 @@ class _PolicyTransport(httpx.AsyncBaseTransport):
             body_length = None
         exempt = _exempt_hop(self._policy, self._first_hop, str(request.url), request.headers, body_length)
         self._first_hop = False
+        self._call.exempt_hop = exempt
         if not exempt:
             return await self._public.handle_async_request(request)
         try:
@@ -861,11 +889,16 @@ async def _read_body_async(call: _Call, response: httpx.Response) -> None:
     """
     body = bytearray()
     try:
-        call.take_wire_bytes(sum(len(name) + len(value) + 4 for name, value in response.headers.raw))
+        call.take_header_bytes(sum(len(name) + len(value) + 4 for name, value in response.headers.raw))
         decoder = _BoundedDecoder(response.headers.get("content-encoding"), call)
         async for raw in response.aiter_raw(READ_CHUNK_BYTES):
             body += decoder.decode(raw)
         decoder.flush()
+    except httpx.TransportError as e:
+        await response.aclose()
+        if call.exempt_hop:
+            raise type(e)(EXEMPT_FAILURE, request=response.request) from e
+        raise
     except BaseException:
         await response.aclose()
         raise
@@ -889,7 +922,7 @@ async def send_async(policy: EgressPolicy, *, timeout: float | None = None, **re
     """
     call = _Call(policy)
     async with httpx.AsyncClient(
-        transport=_PolicyTransport(policy),
+        transport=_PolicyTransport(policy, call),
         follow_redirects=True,
         max_redirects=policy.max_redirects,
         trust_env=False,
