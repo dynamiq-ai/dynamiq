@@ -269,7 +269,7 @@ class Weaviate(MemoryBackend):
         If the input `filters` already seem to be in Weaviate format (contain 'operator'
         or 'field'), they are passed through directly. Otherwise, assumes a simple
         dictionary where keys are fields and values are the values to match with '=='
-        operator, combined with 'AND'.
+        operator ('in' for list values), combined with 'AND'.
 
         Args:
             filters: Raw filters dictionary.
@@ -291,7 +291,8 @@ class Weaviate(MemoryBackend):
         conditions = []
         for key, value in filters.items():
             if self._vector_store and self._vector_store.is_valid_property_name(key):
-                conditions.append({"field": key, "operator": "==", "value": value})
+                operator = "in" if isinstance(value, list) else "=="
+                conditions.append({"field": key, "operator": operator, "value": value})
             else:
                 logger.warning(f"Skipping filter key '{key}' as it's not a valid Weaviate property name.")
 
