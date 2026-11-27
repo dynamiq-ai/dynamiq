@@ -71,7 +71,8 @@ class EgressPolicy(BaseModel):
             and port match a prefix and its path is the prefix's path or below it. Every redirect is checked again.
         timeout_seconds: The most one request may take, redirects and reading the body included. It also caps the
             node's own timeout.
-        max_response_bytes: The most a response body may hold once decoded.
+        max_response_bytes: The most a response body may hold, both as received and once decoded. Response
+            headers get 64 KiB of their own.
         max_redirects: The most redirects one request follows.
         exempt_request_headers: Header names an exempt request may carry besides the ones the clients set themselves,
             those that describe the body, "Authorization" and "Cookie", such as "X-Api-Key". Names that frame a request
