@@ -6,6 +6,7 @@ import pytest
 
 from dynamiq import connections
 from dynamiq.nodes.node import Node
+from dynamiq.nodes.tools.context_search import ContextSearchTool
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
 from dynamiq.nodes.tools.firecrawl_search import FirecrawlSearchTool
@@ -30,7 +31,8 @@ def _mock_response(status_code=200, json_payload=None, text="", content=b"", hea
 
 
 @pytest.mark.parametrize(
-  "tool_cls", [TavilyTool, ExaTool, LinkupTool, ScaleSerpTool, SerplyTool, ZenRowsTool, FXMacroDataTool]
+    "tool_cls",
+    [ContextSearchTool, TavilyTool, ExaTool, LinkupTool, ScaleSerpTool, SerplyTool, ZenRowsTool, FXMacroDataTool],
 )
 def test_tool_has_native_async(tool_cls):
     assert tool_cls.execute_async is not Node.execute_async

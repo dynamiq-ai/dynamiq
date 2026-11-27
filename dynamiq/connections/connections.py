@@ -1799,6 +1799,22 @@ class Exa(Http):
         return self
 
 
+class Context(Http):
+    """Connection to Context.dev, authenticated with CONTEXT_DEV_API_KEY."""
+
+    url: Literal["https://api.context.dev/v1/web/search"] = "https://api.context.dev/v1/web/search"
+    method: Literal[HTTPMethod.POST] = HTTPMethod.POST
+    api_key: str = Field(
+        default_factory=partial(get_env_var, "CONTEXT_DEV_API_KEY"), min_length=1, validate_default=True
+    )
+
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Keep authentication on the Context API origin."""
+        self.headers.update({"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"})
+        return self
+
+
 class Linkup(Http):
     """
     Represents a connection to the Linkup Search API.
