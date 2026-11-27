@@ -78,6 +78,7 @@ class MilvusDocumentRetriever:
             docs = self.vector_store._hybrid_retrieval(
                 query=query,
                 query_embeddings=query_embeddings,
+                filters=filters,
                 top_k=top_k,
                 content_key=content_key,
                 embedding_key=embedding_key,

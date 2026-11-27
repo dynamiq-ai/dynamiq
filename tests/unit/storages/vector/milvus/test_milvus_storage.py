@@ -204,6 +204,23 @@ def test_hybrid_search(milvus_vector_store, mock_milvus_client):
     assert documents[0].score == 0.1
 
 
+@pytest.mark.parametrize(
+    "filters, expected_expr",
+    [
+        ({"field": "tenant", "operator": "==", "value": "a"}, 'tenant == "a"'),
+        (None, None),
+        ({}, None),
+    ],
+)
+def test_hybrid_search_applies_filters(milvus_vector_store, mock_milvus_client, filters, expected_expr):
+    mock_milvus_client.hybrid_search.return_value = [[]]
+
+    milvus_vector_store._hybrid_retrieval(query="example", query_embeddings=[[0.1, 0.2]], top_k=3, filters=filters)
+
+    requests = mock_milvus_client.hybrid_search.call_args.kwargs["reqs"]
+    assert [request.expr for request in requests] == [expected_expr, expected_expr]
+
+
 @pytest.mark.parametrize("dimension", [None, 384, 768, 1024])
 def test_writer_params_dimension(dimension):
     if dimension is None:

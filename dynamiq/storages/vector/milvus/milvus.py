@@ -478,6 +478,7 @@ class MilvusVectorStore(BaseVectorStore, DryRunMixin):
         embedding_key: str | None = None,
         return_embeddings: bool = False,
         drop_ratio_build: float = 0.0,
+        filters: dict[str, Any] | None = None,
     ) -> list[Document]:
         """
         Perform a hybrid search using both dense (vector-based) and sparse (text-based) retrieval techniques.
@@ -494,10 +495,13 @@ class MilvusVectorStore(BaseVectorStore, DryRunMixin):
             embedding_key (Optional[str]): The field used to store vector in the storage.
             return_embeddings (bool): Whether to return the embeddings of the retrieved documents.
             drop_ratio_build (float): The ratio of small vector values to be dropped during indexing during text search.
+            filters (dict[str, Any] | None): A dictionary of filters applied to both the dense and sparse search.
 
         Returns:
             List[Document]: A list of Document objects containing the retrieved documents.
         """
+
+        filter_expression = Filter(filters).build_filter_expression() if filters else None
 
         search_param_1 = {
             "data": query_embeddings,
@@ -506,6 +510,7 @@ class MilvusVectorStore(BaseVectorStore, DryRunMixin):
                 "metric_type": self.metric_type,
             },
             "limit": top_k_dense or top_k,
+            "expr": filter_expression,
         }
         request_1 = AnnSearchRequest(**search_param_1)
 
@@ -514,6 +519,7 @@ class MilvusVectorStore(BaseVectorStore, DryRunMixin):
             "anns_field": "sparse",
             "param": {"metric_type": "BM25", "params": {"drop_ratio_build": drop_ratio_build}},
             "limit": top_k_sparse or top_k,
+            "expr": filter_expression,
         }
         request_2 = AnnSearchRequest(**search_param_2)
 
