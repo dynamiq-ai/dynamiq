@@ -89,7 +89,7 @@ class MarkdownHeaderSplitterComponent(BaseModel):
                 continue
 
             header_match = None
-            if not in_code_block:
+            if not in_code_block and self._indent_width(line) < 4:
                 for prefix, key in self.headers_to_split_on:
                     if stripped.startswith(prefix) and (len(stripped) == len(prefix) or stripped[len(prefix)] == " "):
                         header_match = (prefix, key, stripped[len(prefix) :].strip())
@@ -117,6 +117,12 @@ class MarkdownHeaderSplitterComponent(BaseModel):
         if current_lines:
             flush(active_headers)
         return chunks
+
+    @staticmethod
+    def _indent_width(line: str) -> int:
+        # CommonMark: a header line has at most three columns of indentation; four or more make it indented code.
+        leading = line[: len(line) - len(line.lstrip())]
+        return len(leading.expandtabs(4))
 
     @staticmethod
     def _opening_code_fence(stripped: str) -> str:

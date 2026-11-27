@@ -43,6 +43,35 @@ def test_markdown_header_splitter_does_not_close_fences_with_info_strings():
     assert "# Fake B" in chunks[0].content
 
 
+def test_markdown_header_splitter_ignores_headers_inside_indented_code_block():
+    splitter = MarkdownHeaderSplitter()
+    splitter.init_components()
+    text = (
+        "# Setup\nInstall it:\n\n"
+        "    pip install tool\n    # then check the version\n    tool --version\n"
+        "## Usage\nRun it."
+    )
+
+    chunks = splitter.execute(splitter.input_schema(documents=[Document(content=text)]))["documents"]
+
+    assert len(chunks) == 2
+    assert chunks[0].metadata["h1"] == "Setup"
+    assert "    # then check the version\n    tool --version" in chunks[0].content
+    assert chunks[1].metadata == {"source_id": chunks[1].metadata["source_id"], "h1": "Setup", "h2": "Usage"}
+
+
+def test_markdown_header_splitter_allows_up_to_three_spaces_before_a_header():
+    splitter = MarkdownHeaderSplitter()
+    splitter.init_components()
+    text = "   # Title\nbody"
+
+    chunks = splitter.execute(splitter.input_schema(documents=[Document(content=text)]))["documents"]
+
+    assert len(chunks) == 1
+    assert chunks[0].metadata["h1"] == "Title"
+    assert chunks[0].content == "body"
+
+
 def test_markdown_header_splitter_uses_component_default_headers():
     splitter = MarkdownHeaderSplitter()
 
