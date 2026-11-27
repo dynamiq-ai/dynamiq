@@ -3,11 +3,14 @@
 import builtins
 import os
 import posixpath
-from typing import Any
+from typing import Any, TypeVar
 
 from pydantic import ConfigDict, Field, field_validator
 
 from .base import MemoryEntry, MemoryHit, MemoryNote, MemoryNotFoundError, MemoryStore, MemoryStoreError
+
+
+_Entry = TypeVar("_Entry", bound=MemoryEntry)
 
 
 def normalize_path(path: str) -> str:
@@ -139,16 +142,21 @@ class CompositeMemoryStore(MemoryStore):
             )
         return self.routes[match], normalized[len(match) :], match
 
-    @staticmethod
-    def _mounted(route: str, entries: builtins.list[MemoryEntry]) -> builtins.list[MemoryEntry]:
-        """Put the mount point back on paths coming out of a store."""
-        return [entry.model_copy(update={"path": f"{route}{entry.path}"}) for entry in entries]
+    def _visible_entries(self, route: str, entries: builtins.list[_Entry]) -> builtins.list[_Entry]:
+        """Mount paths and keep entries owned by this route."""
+        visible: list[_Entry] = []
+        for entry in entries:
+            path = f"{route}{entry.path}"
+            _, _, owning_route = self._resolve(path)
+            if owning_route == route:
+                visible.append(entry.model_copy(update={"path": path}))
+        return visible
 
     def list(self, prefix: str = "", user_id: str | None = None) -> builtins.list[MemoryEntry]:
-        """List memories under ``prefix``: the route it falls inside, plus every route at or below it."""
+        """List visible memories under ``prefix``, using the longest matching mount for each path."""
         entries: list[MemoryEntry] = []
         for route, store, inner in self._routes_under(prefix):
-            entries.extend(self._mounted(route, store.list(inner, user_id)))
+            entries.extend(self._visible_entries(route, store.list(inner, user_id)))
         return entries
 
     def _routes_under(self, prefix: str) -> builtins.list[tuple[str, MemoryStore, str]]:
@@ -202,17 +210,22 @@ class CompositeMemoryStore(MemoryStore):
     def search(
         self, query: str, prefix: str = "", limit: int = 10, user_id: str | None = None
     ) -> builtins.list[MemoryHit]:
-        """Search every route the prefix reaches, as ``list`` does, and merge the hits by score.
+        """Search visible memories under the prefix and merge the hits by score.
 
         A score is the share of the query's words a memory holds, so scores for one query compare
         across routes; equal scores keep each route's own order.
         """
         hits: list[MemoryHit] = []
         for route, store, inner in self._routes_under(prefix):
-            hits.extend(
-                hit.model_copy(update={"path": f"{route}{hit.path}"})
-                for hit in store.search(query, inner, limit, user_id)
-            )
+            route_limit = limit
+            while True:
+                found = store.search(query, inner, route_limit, user_id)
+                visible = self._visible_entries(route, found)
+                if len(visible) >= limit or len(found) < route_limit:
+                    hits.extend(visible)
+                    break
+                # Hidden results can crowd visible matches out of a full page.
+                route_limit *= 2
         hits.sort(key=lambda hit: -hit.score)
         return hits[:limit]
 
