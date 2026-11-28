@@ -1,6 +1,5 @@
 import enum
 from typing import Any, ClassVar, Literal
-from urllib.parse import urljoin
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -8,6 +7,7 @@ from dynamiq.connections import ScaleSerp
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.tools.utils import join_base_url
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
@@ -157,7 +157,7 @@ class ScaleSerpTool(ConnectionNode):
 
         request_kwargs = {
             "method": self.connection.method,
-            "url": urljoin(self.connection.url, "/search"),
+            "url": join_base_url(self.connection.url, "search"),
             "params": self.get_params(
                 query=query,
                 url=url,
