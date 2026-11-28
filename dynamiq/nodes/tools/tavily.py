@@ -1,7 +1,6 @@
 import json
 from datetime import date
 from typing import Any, ClassVar, Literal
-from urllib.parse import urljoin
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -9,7 +8,7 @@ from dynamiq.connections import Tavily
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.tools.utils import http_error_detail
+from dynamiq.nodes.tools.utils import http_error_detail, join_base_url
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
@@ -249,7 +248,7 @@ class TavilyTool(ConnectionNode):
 
         search_data = {key: value for key, value in search_data.items() if value is not None}
         request_payload = dict(search_data)
-        connection_url = urljoin(self.connection.url, "/search")
+        connection_url = join_base_url(self.connection.url, "search")
         return request_payload, connection_url
 
     def _wrap_search_exception(self, exc: Exception) -> ToolExecutionException:

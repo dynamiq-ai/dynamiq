@@ -4,9 +4,22 @@ import mimetypes
 import os
 import re
 from pathlib import Path
+from urllib.parse import urljoin
 
 import filetype
 import requests
+
+
+def join_base_url(base_url: str, endpoint: str) -> str:
+    """Append ``endpoint`` to the configured base URL without losing the base's path.
+
+    ``urljoin(base, "search")`` treats the last segment of ``base`` as a file name and
+    replaces it, so a gateway or a self-hosted deployment configured as
+    ``https://gw.example.com/firecrawl/v2`` posted to ``.../firecrawl/search``. Keeping
+    the base as a directory makes the endpoint land under it, with or without the
+    trailing slash an operator happens to write.
+    """
+    return urljoin(base_url.rstrip("/") + "/", endpoint.lstrip("/"))
 
 
 def find_positions(content: str, needle: str) -> list[int]:

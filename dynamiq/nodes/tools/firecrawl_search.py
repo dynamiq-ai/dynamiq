@@ -1,6 +1,5 @@
 from copy import deepcopy
 from typing import Any, ClassVar, Literal
-from urllib.parse import urljoin
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -8,7 +7,7 @@ from dynamiq.connections import Firecrawl
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.tools.utils import http_error_detail
+from dynamiq.nodes.tools.utils import http_error_detail, join_base_url
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
@@ -250,7 +249,7 @@ class FirecrawlSearchTool(ConnectionNode):
             logger.error(f"Tool {self.name} - {self.id}: failed to get input data.")
             raise ValueError("Query is required for search")
         search_payload = self._build_search_payload(query, input_data)
-        connection_url = urljoin(self.connection.url, "search")
+        connection_url = join_base_url(self.connection.url, "search")
         return query, search_payload, connection_url
 
     def _wrap_search_exception(self, exc: Exception) -> ToolExecutionException:

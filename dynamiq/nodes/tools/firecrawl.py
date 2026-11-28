@@ -8,7 +8,7 @@ from dynamiq.connections import Firecrawl
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.tools.utils import http_error_detail
+from dynamiq.nodes.tools.utils import http_error_detail, join_base_url
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
@@ -349,7 +349,7 @@ class FirecrawlTool(ConnectionNode):
             logger.error(f"Tool {self.name} - {self.id}: failed to get input data.")
             raise ValueError("URL is required for scraping")
         scrape_data = self._build_scrape_data(url, input_data)
-        connection_url = self.connection.url + "scrape"
+        connection_url = join_base_url(self.connection.url, "scrape")
         return url, scrape_data, connection_url
 
     def _wrap_scrape_exception(self, exc: Exception) -> ToolExecutionException:
