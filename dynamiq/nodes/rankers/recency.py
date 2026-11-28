@@ -232,13 +232,21 @@ class TimeWeightedDocumentRanker(Node):
                 coefficient = TimeWeightedDocumentRanker.days_to_coefficient(
                     days, max_days=max_days, min_coefficient=min_coefficient
                 )
-                candidate.score = candidate.score * coefficient
+                # An unscored document, as every converter produces, has no similarity to weigh: recency decides
+                # alone, so the base is neutral rather than None.
+                base_score = candidate.score if candidate.score is not None else 1.0
+                candidate.score = base_score * coefficient
 
         documents = [
             {"score": candidate.score, "document": candidate}
             for candidate in candidates
         ]
 
-        sorted_documents = sorted(documents, key=lambda x: x["score"], reverse=True)
+        # A document with neither a score nor a date has nothing to rank on, so it goes last and keeps its input order.
+        sorted_documents = sorted(
+            documents,
+            key=lambda x: x["score"] if x["score"] is not None else float("-inf"),
+            reverse=True,
+        )
 
         return [document["document"] for document in sorted_documents]
