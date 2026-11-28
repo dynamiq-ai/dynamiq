@@ -51,7 +51,12 @@ class CSVToList(Node):
         delimiter = input_data.delimiter
         try:
             if isinstance(value, BytesIO):
-                value = value.getvalue().decode("utf-8")
+                # `utf-8-sig` drops the BOM Excel's "CSV UTF-8" export writes; without it the first
+                # header carries U+FEFF. Data without a BOM decodes exactly as before.
+                value = value.getvalue().decode("utf-8-sig")
+            else:
+                # The same BOM already decoded into a string.
+                value = value.removeprefix("\ufeff")
             csv_file = StringIO(value)
 
             if header:
